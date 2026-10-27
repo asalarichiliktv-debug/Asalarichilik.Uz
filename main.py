@@ -1,13 +1,18 @@
 import asyncio
-from bot import dp as bot1_dp, bot as bot1
-from bee_bot import dp as bee_dp, bot as bee_bot
+import sys
+
+async def run_script(script_name):
+    # Ҳар бир ботни алоҳида жараён сифатида параллел ишга туширамиз
+    process = await asyncio.create_subprocess_exec(sys.executable, script_name)
+    await process.wait()
 
 async def main():
-    # Иккала ботни бир вақтда параллел ишга тушириш
+    # bot.py ва bee_bot.py ни бир вақтда узлуксиз юритамиз
     await asyncio.gather(
-        bot1_dp.start_polling(bot1),
-        bee_dp.start_polling(bee_bot)
+        run_script("bot.py"),
+        run_script("bee_bot.py")
     )
 
 if __name__ == "__main__":
     asyncio.run(main())
+
