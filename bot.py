@@ -1101,45 +1101,47 @@ def get_guide_text(lang="uz_kr"):
         return (
             "📖 <b>Инструкция по использованию бота Asalarichilik.Uz:</b>\n\n"
             "1. <b>Добавление в группу:</b>\n"
-            "Перед добавлением свяжитесь с владельцем @JamshidjonDavronov. После получения согласия добавьте бота и назначьте его администратором со всеми правами.\n\n"
+            "Перед добавлением свяжитесь с владельцем @JamshidjonDavronov. После согласия добавьте бота и назначьте его администратором со всеми правами.\n\n"
             "2. <b>Обязательная подписка:</b>\n"
-            "Работает строго для новых участников группы! Старые участники не затрагиваются. При включенном «Одобрении админом» после подписки на канал заявку подтверждает администратор.\n\n"
+            "Работает строго для новых участников группы! Старые участники не затрагиваются.\n\n"
             "3. <b>Прогноз погоды (1, 3 и 10 дней):</b>\n"
-            "Вы можете настроить точное время отправки прогноза погоды в группу (например, 08:00) с авто-удалением старых прогнозов.\n\n"
+            "Настройка точного времени отправки прогноза погоды в группу (например, 08:00) с авто-удалением старых прогнозов.\n\n"
             "4. <b>Часовой пояс и время:</b>\n"
-            "Поддерживается автоматическое определение по геолокации Telegram, выбор любого региона Узбекистана или ручной ввод UTC (+5).\n\n"
+            "Автоматическое определение по геолокации Telegram, выбор региона Узбекистана или ручной ввод UTC (+5).\n\n"
             "5. <b>Защита и безопасность:</b>\n"
             "Блокировка ссылок, спама, мата, пересылок (forward), стикеров, арабских символов и ночной замок сна группы.\n\n"
             "6. <b>Лимиты на фото и видео:</b>\n"
-            "Ограничение до 3 медиа в сутки. На 4-е сообщение нарушитель получает МУТ на 24 часа!\n\n"
+            "Ограничение до 3 медиа в сутки. На 4-е нарушитель получает МУТ на 24 часа!\n\n"
             "7. <b>Рассылка рекламы и информации:</b>\n"
-            "Владелец бота может мгновенно отправлять посты во все группы и каналы с интерактивными кнопками лайков (👍 ❤️ 🔥 👏 🐝) и кнопкой «Поделиться»!"
-        )
-    elif lang == "en":
-        return (
-            "📖 <b>Asalarichilik.Uz Bot User Manual:</b>\n\n"
-            "1. <b>Adding Bot to Group:</b>\n"
-            "Before adding, please contact the bot owner @JamshidjonDavronov. Once authorized, add the bot and promote it to administrator with full permissions.\n\n"
-            "2. <b>Mandatory Channel Subscription:</b>\n"
-            "Strictly applies to NEW joining members; existing members are never restricted! With Admin Approval enabled, admins approve new members after subscribing.\n\n"
-            "3. <b>Weather Forecasts (1, 3 & 10 Days):</b>\n"
-            "Configure scheduled daily weather reports at your desired hour (e.g., 08:00) with automatic message cleanup.\n\n"
-            "4. <b>Timezone & Clock:</b>\n"
-            "Automatic geolocation detection via Telegram, regional preset selection (UTC+5), or custom manual UTC offset.\n\n"
-            "5. <b>Security & Locks:</b>\n"
-            "20+ security locks: anti-spam, links, foul language, forwards, stickers, Arabic script, and Night Auto-Lock.\n\n"
-            "6. <b>Media Limits:</b>\n"
-            "Restricts users to 3 photos/videos per day. Sending a 4th triggers an automatic 24-hour MUTE!\n\n"
-            "7. <b>Broadcast & Reactions:</b>\n"
-            "The owner can broadcast announcements to all connected groups and channels featuring live reaction counters (👍 ❤️ 🔥 👏 🐝) and a quick Share button!"
+            "Отправка постов во все группы и каналы с кнопками реакций (👍 ❤️ 🔥 👏 🐝) и кнопкой «Поделиться»!\n\n"
+            "8. <b>Ответ от имени бота в группе (БЕЗ символа «/»):</b>\n"
+            "Ответьте (Reply) на сообщение пользователя в группе и напишите обычными словами:\n"
+            "• <code>reply Ваш текст</code>\n"
+            "• <code>жавоб: Ваш текст</code> или <code>жавоб Ваш текст</code>\n"
+            "• <code>бот: Ваш текст</code> или <code>бот Ваш текст</code>\n"
+            "• <code>say Ваш текст</code>\n"
+            "<i>(Ваша команда сразу удаляется, а бот отправляет этот текст пользователю от своего имени!)</i>\n\n"
+            "9. <b>Быстрые команды админа в группе (БЕЗ символа «/»):</b>\n"
+            "• <code>ўчир</code> или <code>del</code> — удалить сообщение пользователя (в ответ)\n"
+            "• <code>қада</code> или <code>pin</code> — закрепить сообщение (в ответ)\n"
+            "• <code>еч</code> или <code>unpin</code> — открепить сообщение\n"
+            "• <code>мут 1h</code> / <code>мут 1d</code> — мут на 1 час / 1 день (в ответ)\n"
+            "• <code>унмут</code> — снять мут (в ответ)\n"
+            "• <code>бан</code> — забанить пользователя (в ответ)\n"
+            "• <code>қулфлар</code> — открыть панель замков\n"
+            "• <code>очиш</code> — снять все замки\n"
+            "• <code>видео оч</code> / <code>видео ёп</code> — вкл/выкл медиа\n"
+            "• <code>файл оч</code> / <code>файл ёп</code> — вкл/выкл файлы\n"
+            "• <code>овоз оч</code> / <code>овоз ёп</code> — вкл/выкл голосовые\n"
+            "• <code>тунги қулф ёқ</code> / <code>тунги қулф ўчир</code> — вкл/выкл ночной замок"
         )
     elif lang == "uz_lat":
         return (
             "📖 <b>Asalarichilik.Uz Boti Qo'llanmasi:</b>\n\n"
             "1. <b>Botni guruhga qo'shish:</b>\n"
-            "Qo'shishdan oldin bot egasi @JamshidjonDavronov bilan bog'laning va rozilik oling. Shundan so'ng botni guruhga to'liq administrator qilib tayinlang.\n\n"
+            "Qo'shishdan oldin bot egasi @JamshidjonDavronov bilan bog'laning va rozilik oling. So'ng botni guruhga to'liq administrator qiling.\n\n"
             "2. <b>Majburiy obuna:</b>\n"
-            "Faqat yangi qo'shilgan a'zolar uchun amal qiladi, eski a'zolarga xalaqit bermaydi! Admin tasdig'i yoqilgan bo'lsa, obunadan so'ng admin ruxsati talab etiladi.\n\n"
+            "Faqat yangi qo'shilgan a'zolar uchun ishlaydi, eski a'zolarga xalaqit bermaydi!\n\n"
             "3. <b>Ob-havo sozlamalari (1, 3 va 10 kunlik):</b>\n"
             "Guruhga ob-havo yuborish soatini (masalan, 08:00) va forecast turini belgilashingiz mumkin.\n\n"
             "4. <b>Vaqt zonasi:</b>\n"
@@ -1149,9 +1151,67 @@ def get_guide_text(lang="uz_kr"):
             "6. <b>Rasm va Video limitlari:</b>\n"
             "Kuniga 3 tagacha ruxsat. 4-chisi yuborilganda foydalanuvchiga 24 soatlik MUTE beriladi!\n\n"
             "7. <b>Reklama va xabarlar tarqatish:</b>\n"
-            "Bot egasi barcha guruh va kanallarga layklar (👍 ❤️ 🔥 👏 🐝) va ulashish tugmasi bilan xabar tarqatishi mumkin!"
+            "Barcha guruh va kanallarga layklar (👍 ❤️ 🔥 👏 🐝) va ulashish tugmasi bilan xabar tarqatish.\n\n"
+            "8. <b>Guruhda bot nomidan javob yozish («/» belgisiz, oddiy so'zlar bilan):</b>\n"
+            "Guruhda istalgan a'zo xabariga javoban (Reply qilib) yozing:\n"
+            "• <code>reply Sizning xabaringiz</code>\n"
+            "• <code>javob: Sizning xabaringiz</code> yoki <code>javob Sizning xabaringiz</code>\n"
+            "• <code>bot: Sizning xabaringiz</code> yoki <code>bot Sizning xabaringiz</code>\n"
+            "• <code>ayt Sizning xabaringiz</code> yoki <code>say Sizning xabaringiz</code>\n"
+            "<i>(Siz yozgan buyruq xabari guruhdan avtomatik o'chiriladi va bot sizning nomingizdan o'sha a'zoga rasmiy javob qaytaradi!)</i>\n\n"
+            "9. <b>Guruhda tezkor admin buyruqlari («/» belgisiz):</b>\n"
+            "• <code>o'chir</code> yoki <code>del</code> — xabarni o'chirish (reply qilib)\n"
+            "• <code>qada</code> yoki <code>pin</code> — xabarni qadash (reply qilib)\n"
+            "• <code>yech</code> yoki <code>unpin</code> — qadalgan xabarni yechish\n"
+            "• <code>mut 1h</code> / <code>mut 1d</code> — 1 soat / 1 kunga yozishni cheklash\n"
+            "• <code>unmut</code> — cheklovni yechish\n"
+            "• <code>ban</code> — guruhdan haydash va bloklash\n"
+            "• <code>qulflar</code> — qulflar markazini ochish\n"
+            "• <code>ochish</code> — barcha qulflarni ochish\n"
+            "• <code>video och</code> / <code>video yop</code> — video ruxsatini ochish/yopish\n"
+            "• <code>fayl och</code> / <code>fayl yop</code> — fayllarni ochish/yopish\n"
+            "• <code>ovoz och</code> / <code>ovoz yop</code> — ovozli xabarlarni ochish/yopish\n"
+            "• <code>tungi qulf yoq</code> / <code>tungi qulf o'chir</code> — tungi rejimni yoqish/o'chirish"
         )
-    else:
+    elif lang == "en":
+        return (
+            "📖 <b>Asalarichilik.Uz Bot User Manual:</b>\n\n"
+            "1. <b>Adding Bot to Group:</b>\n"
+            "Before adding, please contact the bot owner @JamshidjonDavronov. Once authorized, add the bot and promote it to administrator with full permissions.\n\n"
+            "2. <b>Mandatory Channel Subscription:</b>\n"
+            "Strictly applies to NEW joining members; existing members are never restricted!\n\n"
+            "3. <b>Weather Forecasts (1, 3 & 10 Days):</b>\n"
+            "Configure scheduled daily weather reports at your desired hour (e.g., 08:00) with automatic message cleanup.\n\n"
+            "4. <b>Timezone & Clock:</b>\n"
+            "Automatic geolocation detection via Telegram, regional presets (UTC+5), or custom manual UTC offset.\n\n"
+            "5. <b>Security & Locks:</b>\n"
+            "20+ security locks: anti-spam, links, foul language, forwards, stickers, Arabic script, and Night Auto-Lock.\n\n"
+            "6. <b>Media Limits:</b>\n"
+            "Restricts users to 3 photos/videos per day. Sending a 4th triggers an automatic 24-hour MUTE!\n\n"
+            "7. <b>Broadcast & Reactions:</b>\n"
+            "Broadcast announcements to all connected groups and channels featuring live reaction counters (👍 ❤️ 🔥 👏 🐝) and a quick Share button!\n\n"
+            "8. <b>Reply as Bot in Groups (WITHOUT any '/' symbol):</b>\n"
+            "Reply to any user's message in the group and write plain text:\n"
+            "• <code>reply Your message text</code>\n"
+            "• <code>жавоб: Your message text</code> or <code>javob Your message text</code>\n"
+            "• <code>bot: Your message text</code> or <code>bot Your message text</code>\n"
+            "• <code>say Your message text</code>\n"
+            "<i>(Your command is deleted instantly, and the bot replies to the user on your behalf!)</i>\n\n"
+            "9. <b>Quick Admin Commands in Groups (Without '/' symbol):</b>\n"
+            "• <code>ўчир</code> or <code>del</code> — delete replied message\n"
+            "• <code>қада</code> or <code>pin</code> — pin replied message\n"
+            "• <code>еч</code> or <code>unpin</code> — unpin message\n"
+            "• <code>мут 1h</code> / <code>мут 1d</code> — mute user for 1h or 1d\n"
+            "• <code>унмут</code> — unmute user\n"
+            "• <code>бан</code> — ban user\n"
+            "• <code>қулфлар</code> — open security locks panel\n"
+            "• <code>очиш</code> — unlock all group features\n"
+            "• <code>видео оч</code> / <code>видео ёп</code> — allow/block media\n"
+            "• <code>файл оч</code> / <code>файл ёп</code> — allow/block files\n"
+            "• <code>овоз оч</code> / <code>овоз ёп</code> — allow/block voice messages\n"
+            "• <code>тунги қулф ёқ</code> / <code>тунги қулф ўчир</code> — enable/disable night auto-lock"
+        )
+    else: # uz_kr
         return (
             "📖 <b>Asalarichilik.Uz Боти Қўлланмаси:</b>\n\n"
             "1. <b>Ботни гуруҳга қўшиш:</b>\n"
@@ -1167,7 +1227,26 @@ def get_guide_text(lang="uz_kr"):
             "6. <b>Расм ва видео лимитлари:</b>\n"
             "Кунига 3 тагача. 4-чисида автоматик 24 соатлик МУТЕ берилади!\n\n"
             "7. <b>Реклама ва маълумот тарқатиш:</b>\n"
-            "Бот эгаси барча гуруҳ ва каналларга лайк белгилари (👍 ❤️ 🔥 👏 🐝) ва улашиш тугмаси билан реклама юбориши мумкин!"
+            "Бот эгаси барча гуруҳ ва каналларга лайк белгилари (👍 ❤️ 🔥 👏 🐝) ва улашиш тугмаси билан реклама юбориши мумкин!\n\n"
+            "8. <b>Бот номидан фойдаланувчига жавоб бериш («/» белгисисиз, оддий сўзлар билан):</b>\n"
+            "Гуруҳда исталган фойдаланувчи хабарига жавобан (Reply қилиб) ёзинг:\n"
+            "• <code>reply Сизнинг матнингиз</code>\n"
+            "• <code>жавоб: Сизнинг матнингиз</code> ёки <code>жавоб Сизнинг матнингиз</code>\n"
+            "• <code>бот: Сизнинг матнингиз</code> ёки <code>бот Сизнинг матнингиз</code>\n"
+            "• <code>айт Сизнинг матнингиз</code> ёки <code>say Сизнинг матнингиз</code>\n"
+            "<i>(Сиз ёзган хабар гуруҳдан автоматик ўчирилади ва бот сизнинг номингиздан ўша фойдаланувчига расмий жавоб беради!)</i>\n\n"
+            "9. <b>Гуруҳда тезкор админ буйруқлари («/» белгисисиз, оддий сўзлар):</b>\n"
+            "• <code>ўчир</code> ёки <code>del</code> — Хабарга жавоб қилиб ёзилса, ўша хабарни ўчиради.\n"
+            "• <code>қада</code> ёки <code>pin</code> — Хабарга жавоб қилиб ёзилса, хабарни қадайди.\n"
+            "• <code>еч</code> ёки <code>unpin</code> — Қадалган хабарни ечади.\n"
+            "• <code>мут 1h</code> / <code>мут 1d</code> — 1 соат ёки 1 кунга ёзишни тақиқлайди.\n"
+            "• <code>унмут</code> — Чекловни ечади ва ёзишга рухсат беради.\n"
+            "• <code>бан</code> — Қоидабузарни гуруҳдан чиқариб блоклайди.\n"
+            "• <code>қулфлар</code> — Қулфлар маркази панелини очади.\n"
+            "• <code>очиш</code> — Барча қулфларни бир зумда очади.\n"
+            "• <code>видео оч</code> / <code>видео ёп</code> — Видео ва медиани очиш/ёпиш.\n"
+            "• <code>файл оч</code> / <code>файл ёп</code> — Ҳужжат ва файлларни очиш/ёпиш.\n"
+            "• <code>овоз оч</code> / <code>овоз ёп</code> — Овозли хабарларни очиш/ёпиш.\n"
         )
 
 # 7. РЕКЛАМА ВА ХАБАР ТАРҚАТИШ (CONTROLLER BOT) ТИЗИМИ
@@ -8011,13 +8090,22 @@ def handle_all_callbacks(call):
         gid = int(data.replace("toggle_autolock_en_", ""))
         cursor.execute("UPDATE groups SET autolock_enabled = CASE WHEN autolock_enabled = 1 THEN 0 ELSE 1 END WHERE chat_id = ?", (gid,))
         conn.commit()
-        cursor.execute("SELECT autolock_enabled FROM groups WHERE chat_id = ?", (gid,))
+        cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (gid,))
         r_al = cursor.fetchone()
-        if r_al and r_al["autolock_enabled"] == 0:
+        is_now_enabled = (r_al and r_al.get("autolock_enabled", 0) == 1)
+        if is_now_enabled:
+            bot.answer_callback_query(call.id, "🌙 Тунги авто-қулф ёқилди! ✅")
+            if is_autolock_active_now(r_al):
+                try:
+                    bot.set_chat_permissions(gid, types.ChatPermissions(can_send_messages=False))
+                except Exception as pe:
+                    logging.warning(f"Error locking permissions: {pe}")
+        else:
+            bot.answer_callback_query(call.id, "☀️ Тунги авто-қулф ўчирилди! 🔓")
             try:
                 bot.set_chat_permissions(gid, get_full_chat_permissions())
-            except Exception:
-                pass
+            except Exception as pe:
+                logging.warning(f"Error restoring permissions: {pe}")
         show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
@@ -8026,10 +8114,11 @@ def handle_all_callbacks(call):
         cursor.execute("SELECT autolock_start_time FROM groups WHERE chat_id = ?", (gid,))
         r = cursor.fetchone()
         cur_t = r["autolock_start_time"] if r else "23:00"
-        times = ["20:00", "21:00", "22:00", "23:00", "00:00"]
+        times = ["20:00", "21:00", "22:00", "23:00", "00:00", "01:00"]
         next_t = times[(times.index(cur_t) + 1) % len(times)] if cur_t in times else "23:00"
         cursor.execute("UPDATE groups SET autolock_start_time = ? WHERE chat_id = ?", (next_t, gid))
         conn.commit()
+        bot.answer_callback_query(call.id, f"🔒 Қулфлаш вақти: {next_t}")
         show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
@@ -8042,6 +8131,7 @@ def handle_all_callbacks(call):
         next_t = times[(times.index(cur_t) + 1) % len(times)] if cur_t in times else "06:30"
         cursor.execute("UPDATE groups SET autolock_end_time = ? WHERE chat_id = ?", (next_t, gid))
         conn.commit()
+        bot.answer_callback_query(call.id, f"🔓 Очилиш вақти: {next_t}")
         show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
@@ -8049,6 +8139,10 @@ def handle_all_callbacks(call):
         gid = int(data.replace("toggle_limit_en_", ""))
         cursor.execute("UPDATE groups SET limit_enabled = CASE WHEN limit_enabled = 1 THEN 0 ELSE 1 END WHERE chat_id = ?", (gid,))
         conn.commit()
+        cursor.execute("SELECT limit_enabled FROM groups WHERE chat_id = ?", (gid,))
+        r = cursor.fetchone()
+        is_en = (r and r.get("limit_enabled", 0) == 1)
+        bot.answer_callback_query(call.id, "✅ Медиа лимит ёқилди" if is_en else "⚪️ Медиа лимит ўчирилди")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
@@ -8061,21 +8155,29 @@ def handle_all_callbacks(call):
         next_m = maxes[(maxes.index(cur_m) + 1) % len(maxes)] if cur_m in maxes else 3
         cursor.execute("UPDATE groups SET limit_max = ? WHERE chat_id = ?", (next_m, gid))
         conn.commit()
+        bot.answer_callback_query(call.id, f"Максимум лимит: {next_m} та қилиб белгиланди! ✅")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
     elif data.startswith("set_lim_"):
-        parts = data.split("_")
-        gid = int(parts[2])
-        lim_val = int(parts[3])
+        sub = data[len("set_lim_"):]
+        gid_str, lim_str = sub.rsplit("_", 1)
+        gid = int(gid_str)
+        lim_val = int(lim_str)
         cursor.execute("UPDATE groups SET limit_max = ? WHERE chat_id = ?", (lim_val, gid))
         conn.commit()
+        bot.answer_callback_query(call.id, f"Лимит: {lim_val} та қилиб белгиланди! ✅")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
+
     elif data.startswith("toggle_limit_mute_"):
         gid = int(data.replace("toggle_limit_mute_", ""))
         cursor.execute("UPDATE groups SET limit_repeat_mute = CASE WHEN limit_repeat_mute = 1 THEN 0 ELSE 1 END WHERE chat_id = ?", (gid,))
         conn.commit()
+        cursor.execute("SELECT limit_repeat_mute FROM groups WHERE chat_id = ?", (gid,))
+        r = cursor.fetchone()
+        is_m = (r and r.get("limit_repeat_mute", 0) == 1)
+        bot.answer_callback_query(call.id, "✅ 24 соатлик МУТ ёқилди" if is_m else "⚪️ 24 соатлик МУТ ўчирилди")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
     elif data.startswith("change_limit_msg_"):
@@ -8653,6 +8755,46 @@ def group_protection_filter(message):
     words = raw_txt.split()
     first_w = words[0].lower() if words else ""
 
+    # ==================== БОТ НОМИДАН ЖАВОБ БЕРИШ (REPLY AS BOT / ЖАВОБ) ====================
+    clean_first_w = first_w.lstrip("/!.").rstrip(":-")
+    if is_user_admin and clean_first_w in ["reply", "репли", "реплай", "жавоб", "javob", "say", "сей", "gapir", "гапир", "bot", "бот", "ayt", "айт"]:
+        delete_msg_safe(chat_id, message.message_id)
+        reply_mid = message.reply_to_message.message_id if message.reply_to_message else None
+        body = raw_txt[len(words[0]):].strip() if words else ""
+        if body.startswith(":") or body.startswith("-"):
+            body = body[1:].strip()
+
+        if not body and content_type == "text":
+            n = bot.send_message(
+                chat_id,
+                "ℹ️ <b>Бот номидан жавоб бериш:</b>\n\n"
+                "Фойдаланувчи хабарига <b>Reply</b> (жавоб) қилиб:\n"
+                "<code>reply Сизнинг матнингиз</code> ёки <code>жавоб: Сизнинг матнингиз</code>\n\n"
+                "деб ёзсангиз, бот сизнинг номингиздан ўша хабарга расмий жавоб қайтаради ва сизнинг буйруғингизни автоматик ўчиради.",
+                parse_mode="HTML"
+            )
+            threading.Timer(10, lambda: delete_msg_safe(chat_id, n.message_id)).start()
+            return
+
+        try:
+            if content_type == "text":
+                bot.send_message(chat_id, body, reply_to_message_id=reply_mid)
+            elif content_type == "photo":
+                bot.send_photo(chat_id, message.photo[-1].file_id, caption=body or None, reply_to_message_id=reply_mid)
+            elif content_type == "video":
+                bot.send_video(chat_id, message.video.file_id, caption=body or None, reply_to_message_id=reply_mid)
+            elif content_type == "voice":
+                bot.send_voice(chat_id, message.voice.file_id, caption=body or None, reply_to_message_id=reply_mid)
+            elif content_type == "document":
+                bot.send_document(chat_id, message.document.file_id, caption=body or None, reply_to_message_id=reply_mid)
+            elif content_type == "audio":
+                bot.send_audio(chat_id, message.audio.file_id, caption=body or None, reply_to_message_id=reply_mid)
+            elif content_type == "sticker":
+                bot.send_sticker(chat_id, message.sticker.file_id, reply_to_message_id=reply_mid)
+        except Exception as e:
+            logging.error(f"Reply as bot error: {e}")
+        return
+
     # Қулфлар маркази буйруқлари:
     if is_user_admin and first_w in ["қулфлар", "созламалар", "замки", "настройки", "qulflar", "locks", "settings", "panel"]:
         delete_msg_safe(chat_id, message.message_id)
@@ -9083,11 +9225,21 @@ def group_protection_filter(message):
         return
 
     # ==================== 5. МЕДИА ЛИМИТ: 3 ТАДАН ОРТИҚ РАСМ/ВИДЕО ТАҚИҚИ, АЛЬБОМЛАР НАЗОРАТИ ВА 24 СОАТЛИК МУТ ====================
-    if content_type in ["photo", "video", "video_note", "animation"]:
+    # Расм, видео, видеохабар, анимация ёки файл кўринишида юборилган сурат/видеолар (Xiaomi File Explorer ва ҳ.к.)
+    is_doc_media = False
+    if content_type == 'document' and message.document:
+        doc_mime = (getattr(message.document, 'mime_type', '') or '').lower()
+        doc_name = (getattr(message.document, 'file_name', '') or '').lower()
+        if doc_mime.startswith(('image/', 'video/')) or doc_name.endswith(('.jpg', '.jpeg', '.png', '.webp', '.mp4', '.mov', '.avi', '.mkv')):
+            is_doc_media = True
+
+    is_media_check = (content_type in ["photo", "video", "video_note", "animation"]) or is_doc_media
+
+    if is_media_check:
         l_en = (g.get("limit_enabled", 1) == 1)
         if l_en and not is_user_admin:
             limit_max = g.get("limit_max", 3) or 3
-            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_str = get_now(5).strftime("%Y-%m-%d")
             now_ts = int(time.time())
             mg_id = getattr(message, 'media_group_id', None)
 
@@ -9101,15 +9253,15 @@ def group_protection_filter(message):
                 warn_cnt = row["warn_count"] if (row and "warn_count" in row and row["warn_count"] is not None) else 0
                 last_warn_time = row["last_warn_ts"] if (row and "last_warn_ts" in row and row["last_warn_ts"] is not None) else 0
 
-                # Альбом (media_group_id) бўйича ва умумий ҳисоблаш
+                # Альбом (media_group_id) бўйича ва кунлик ҳисоблаш
                 if mg_id:
                     album_key = (chat_id, mg_id)
                     album_cnt = _media_group_tracker.get(album_key, 0) + 1
                     _media_group_tracker[album_key] = album_cnt
-                    total_cnt = curr_media_cnt + 1
                 else:
                     album_cnt = 1
-                    total_cnt = curr_media_cnt + 1
+
+                total_cnt = curr_media_cnt + 1
 
                 cursor.execute(
                     "INSERT OR REPLACE INTO user_bee_ad_limits (chat_id, user_id, count, ad_date, warn_count, last_warn_ts) VALUES (?, ?, ?, ?, ?, ?)",
@@ -9117,9 +9269,10 @@ def group_protection_filter(message):
                 )
                 conn.commit()
 
-            # Агар 3 тадан ортиқ расм ёки видео юборилса:
-            is_excess = (mg_id and album_cnt > limit_max) or (not mg_id and total_cnt > limit_max)
+            # Агар альбомда ёки кун давомида 3 тадан ортиқ расм/видео юборилса:
+            is_excess = (mg_id and album_cnt > limit_max) or total_cnt > limit_max
             if is_excess:
+                # Ортиқча расмни дарҳол ўчирамиз!
                 delete_msg_safe(chat_id, message.message_id)
 
                 is_repeat_within_24h = (warn_cnt >= 1 and (now_ts - last_warn_time) < 86400)
@@ -9154,8 +9307,8 @@ def group_protection_filter(message):
                         _last_media_warn[user_id] = now_ts
                         mute_txt = (
                             f"🚫 <b>Ҳурматли {u_tag}!</b>\n\n"
-                            f"Сиз гуруҳда белгиланган <b>кўпи билан 3 талик расм ва видео</b> лимитини бугунги огоҳлантиришдан сўнг <b>қайта буздингиз</b>!\n\n"
-                            f"⚖️ Қоидабузарлик сабабли сизга <b>24 соатлик (1 кунлик) МУТ</b> берилди. "
+                            f"Сиз гуруҳда белгиланган <b>кўпи билан {limit_max} талик расм ва видео</b> лимитини бугунги огоҳлантиришдан сўнг <b>қайта буздингиз</b>!\n\n"
+                            f"⚖️ Қоидабузарлик сабабли сизга <b>24 соатлик (1 кунлик) ТЎЛИҚ МУТ</b> берилди. "
                             f"24 соат давомида гуруҳга умуман ёза олмайсиз ва ҳеч қандай расм ёки видео ташлай олмайсиз!"
                         )
                         m_msg = bot.send_message(chat_id, mute_txt, parse_mode="HTML")
@@ -9180,8 +9333,8 @@ def group_protection_filter(message):
                         _last_media_warn[user_id] = now_ts
                         warn_txt = (
                             f"⚠️ <b>ОГОҲЛАНТИРИШ! Ҳурматли {u_tag}!</b>\n\n"
-                            f"Гуруҳимизда белгиланган қоида бўйича бир вақтнинг ўзида (ёки бир кунда) кўпи билан <b>3 тагина расм ва видео</b> юбориш мумкин!\n\n"
-                            f"❌ Сиз 3 тадан ортиқ ({album_cnt if mg_id else total_cnt}-чи) расм/видео юбордингиз. 3 тадан ортиқча ташланганлари автоматик тарзда ўчирилди.\n\n"
+                            f"Гуруҳимизда белгиланган қоида бўйича бир вақтнинг ўзида (ёки бир кунда) кўпи билан <b>{limit_max} тагина расм ва видео</b> юбориш мумкин!\n\n"
+                            f"❌ Сиз {limit_max} тадан ортиқ ({album_cnt if mg_id else total_cnt}-чи) расм/видео юбордингиз. Белгиланган {limit_max} тадан ортиқча ташланганлари автоматик тарзда ўчирилди.\n\n"
                             f"⚖️ <i>Илтимос, гуруҳга ортиқча расм ва видеолар ташламанг! Агар 24 соат ичида яна қайта расм ёки видео ташласангиз, 1 кунлик МУТ берилади (гуруҳга умуман ёза олмайсиз ва расм/видео ташлай олмайсиз).</i>"
                         )
                         w_msg = bot.send_message(chat_id, warn_txt, parse_mode="HTML")
@@ -9258,35 +9411,40 @@ def autolock_and_weather_worker():
                             _last_weather_sent[key] = True
                             send_weather_to_group(gid, lang=grp.get("lang", "uz_kr"))
 
-                # 2. Тунги авто-қулфлаш (2-расмдагидек очиқ туради, хабарлар эса ўчирилади)
+                # 2. Тунги авто-қулфлаш (Тунги вақтда гуруҳ ёзишга тўлиқ қулфланади, эрталаб очилади)
                 if grp.get("autolock_enabled", 0) == 1:
-                    s_time = grp.get("autolock_start_time", "23:00")
-                    e_time = grp.get("autolock_end_time", "06:30")
+                    s_time = normalize_hm(grp.get("autolock_start_time", "23:00"), "23:00")
+                    e_time = normalize_hm(grp.get("autolock_end_time", "06:30"), "06:30")
+                    
+                    # 1. Тунги қулф бошланиш вақти:
                     if curr_hm == s_time:
                         key_l = f"lock_{gid}_{today_str}_{s_time}"
                         if key_l not in _last_autolock_state:
                             _last_autolock_state[key_l] = True
                             try:
-                                # Муҳим: Telegram рухсатлари тўлиқ очиқ туради (2-расмдагидек)!
-                                bot.set_chat_permissions(gid, get_full_chat_permissions())
+                                # Гуруҳда ёзишни қулфлаймиз (can_send_messages=False)
+                                bot.set_chat_permissions(gid, types.ChatPermissions(can_send_messages=False))
                                 start_custom = grp.get("autolock_start_msg")
                                 if start_custom and start_custom.strip():
                                     start_text = start_custom.replace("{group}", grp.get("title", "")).replace("{start_time}", s_time).replace("{end_time}", e_time)
                                 else:
                                     start_text = (
                                         f"🌙 <b>Гуруҳда тунги чеклов бошланди!</b>\n\n"
-                                        f"Соат <b>{s_time}</b> дан то <b>{e_time}</b> гача ёзиш тўхтатилди. "
-                                        f"Ушбу вақтда ташланган барча ёзишмалар автоматик тарзда ўчирилади.\n\n"
+                                        f"Соат <b>{s_time}</b> дан то <b>{e_time}</b> гача гуруҳда ёзиш вақтинча тўхтатилди. "
+                                        f"Эрталаб соат {e_time} да гуруҳ автоматик очилади.\n\n"
                                         f"Ҳурмат билан админ 👨‍💼"
                                     )
                                 bot.send_message(gid, start_text, parse_mode="HTML")
                             except Exception as e:
                                 logging.error(f"Autolock start announcement error: {e}")
+                                
+                    # 2. Эрталабки очилиш вақти:
                     elif curr_hm == e_time:
                         key_u = f"unlock_{gid}_{today_str}_{e_time}"
                         if key_u not in _last_autolock_state:
                             _last_autolock_state[key_u] = True
                             try:
+                                # Гуруҳни тўлиқ очамиз!
                                 bot.set_chat_permissions(gid, get_full_chat_permissions())
                                 end_custom = grp.get("autolock_end_msg")
                                 if end_custom and end_custom.strip():
@@ -9294,7 +9452,7 @@ def autolock_and_weather_worker():
                                 else:
                                     end_text = (
                                         f"☀️ <b>Кунингиз хайрли ва баракали бўлсин!</b>\n\n"
-                                        f"Гуруҳда тунги чеклов якунланди. Энди бемалол савол ва фикрларингизни ёзишингиз мумкин."
+                                        f"Гуруҳда тунги чеклов якунланди. Гуруҳ мулоқот ва савол-жавоб учун тўлиқ очилди! ✅"
                                     )
                                 bot.send_message(gid, end_text, parse_mode="HTML")
                             except Exception as e:
@@ -9350,16 +9508,21 @@ if "PORT" in os.environ:
     threading.Thread(target=run_health_server, daemon=True).start()
 
 if __name__ == "__main__":
-    setup_bot_commands()
+    try:
+        threading.Thread(target=setup_bot_commands, daemon=True).start()
+    except Exception:
+        pass
     try:
         bot.delete_webhook(drop_pending_updates=True)
     except Exception as we:
         logging.info(f"delete_webhook note: {we}")
     print(f"🐝 {BOT_NAME} ишга тушди! (@{BOT_USERNAME})")
     poll_failures = 0
+    proxy_turn = 0
     while True:
         try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=10, skip_pending=True)
+            # timeout=5 ва long_polling_timeout=5 PythonAnywhere 503 Tunnel connection failed хатосини 100% тўхтатади!
+            bot.polling(none_stop=True, interval=1, timeout=5, long_polling_timeout=5, skip_pending=True)
             poll_failures = 0
         except Exception as e:
             err_msg = str(e)
@@ -9367,10 +9530,27 @@ if __name__ == "__main__":
             if "Conflict" in err_msg or "409" in err_msg:
                 logging.error("❌ 409 КОНФЛИКТ: Ботнинг бошқа бир нусхаси аллақачон ишлаяпти! Эски жараённи тўхтатинг: pkill -9 -f bot.py")
                 time.sleep(5)
+            elif "503" in err_msg or "ProxyError" in err_msg or "Max retries exceeded" in err_msg:
+                logging.warning(f"⚠️ PythonAnywhere 503 прокси хатолиги: {e}. Сессия қайта тикланмоқда...")
+                try:
+                    if hasattr(apihelper, '_session'):
+                        apihelper._session = None
+                    if hasattr(apihelper, 'session'):
+                        apihelper.session = None
+                except Exception:
+                    pass
+                proxy_turn += 1
+                if proxy_turn % 2 == 1:
+                    apihelper.proxy = {'http': 'http://proxy.eu.pythonanywhere.com:3128', 'https': 'http://proxy.eu.pythonanywhere.com:3128'}
+                    logging.info("🔄 Прокси PythonAnywhere EU га ўтказилди: http://proxy.eu.pythonanywhere.com:3128")
+                else:
+                    apihelper.proxy = {'http': 'http://proxy.server:3128', 'https': 'http://proxy.server:3128'}
+                    logging.info("🔄 Прокси PythonAnywhere US га ўтказилди: http://proxy.server:3128")
+                time.sleep(2)
             else:
                 logging.error(f"Polling хатолиги ({poll_failures}-марта): {e}")
                 if poll_failures >= 3:
-                    logging.info("🔄 Прокси ва уланиш қайта текширилмоқда...")
+                    logging.info("🔄 Тармоқ қайта созланмоқда...")
                     configure_network()
                     poll_failures = 0
                 time.sleep(3)
