@@ -70,8 +70,8 @@ GEMINI_API_KEY = "AQ.Ab8RN6ICf_vax9VBZtjjkIVfYOx11HjO3ZMFiBizCjKrmuflNw"
 
 OWNER_ID = 2047501151
 OWNER_USERNAME = "@JamshidjonDavronov"
-OFFICIAL_CHANNEL = "@asalarichilik"
-OFFICIAL_GROUP = "@Uz_Asalarichilik"
+OFFICIAL_CHANNEL = "@uz_asalarichilik"
+OFFICIAL_GROUP = "@asalarichilik_uzbekistan"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ALLOWED_CHATS_FILE = os.path.join(BASE_DIR, "allowed_chats.json")
@@ -180,17 +180,18 @@ def get_settings() -> dict:
         "auto_comment": True,
         "selected_preset_index": 0,
         "reactions": ["👍", "❤️", "🔥", "👏", "🐝"],
-        "official_channel": "@asalarichilik",
-        "official_group": "@Uz_Asalarichilik",
+        "official_channel": "@uz_asalarichilik",
+        "official_group": "@asalarichilik_uzbekistan",
         "official_youtube": "https://youtube.com/@asalarichilikuztv?feature=shared",
+        "official_bot": "@Asalarichiliktv_bot",
         "official_channel_title": "Asalarichilik.Uz",
         "script_mode": "cyrillic",          # "cyrillic" yoki "latin"
-        "post_target_mode": "ask",           # "ask", "channel", "group", "both"
+        "post_target_mode": "channel",       # "channel", "group", "both", "ask"
         "poll_type": "quiz",                 # "quiz" (Викторина) yoki "regular" (Опрос)
         "poll_is_anonymous": True,           # True (Аноним) yoki False (Очиқ)
         "quiz_schedule_enabled": True,       # Avtomatik viktorina jadvali
-        "quiz_schedule_time": "09:00",       # Har kuni 09:00 da
-        "quiz_level": "mixed",               # "beginner", "spec", "mixed"
+        "quiz_schedule_time": "10:00",       # Har kuni 10:00 da
+        "quiz_level": "beginner",            # "beginner", "spec", "mixed"
         "news_schedule_enabled": True,       # Avtomatik yangiliklar jadvali
         "news_schedule_time": "14:00",       # Har kuni 14:00 da
         "silent_send": False
@@ -199,6 +200,11 @@ def get_settings() -> dict:
     for k, v in defaults.items():
         if k not in data:
             data[k] = v
+    # Eski xato qiymatlar bo'lsa, avtomatik yangilash
+    if data.get("official_channel") in ["@asalarichilik", "asalarichilik"]:
+        data["official_channel"] = "@uz_asalarichilik"
+    if data.get("official_group") in ["@Uz_Asalarichilik", "Uz_Asalarichilik", "@UzAsalarichilik", "UzAsalarichilik"]:
+        data["official_group"] = "@asalarichilik_uzbekistan"
     return data
 
 def update_setting(key: str, value: Any):
@@ -207,14 +213,18 @@ def update_setting(key: str, value: Any):
     save_json_file(SETTINGS_FILE, settings)
 
 def get_official_channel() -> str:
-    val = str(get_settings().get("official_channel", "@asalarichilik")).strip()
+    val = str(get_settings().get("official_channel", "@uz_asalarichilik")).strip()
+    if val in ["@asalarichilik", "asalarichilik", ""]:
+        val = "@uz_asalarichilik"
     return val if val.startswith("@") else ("@" + val)
 
 def get_official_channel_clean() -> str:
     return get_official_channel().lstrip("@")
 
 def get_official_group() -> str:
-    val = str(get_settings().get("official_group", "@Uz_Asalarichilik")).strip()
+    val = str(get_settings().get("official_group", "@asalarichilik_uzbekistan")).strip()
+    if val in ["@Uz_Asalarichilik", "Uz_Asalarichilik", "@UzAsalarichilik", "UzAsalarichilik", ""]:
+        val = "@asalarichilik_uzbekistan"
     return val if val.startswith("@") else ("@" + val)
 
 def get_official_group_clean() -> str:
@@ -222,6 +232,32 @@ def get_official_group_clean() -> str:
 
 def get_official_youtube() -> str:
     return str(get_settings().get("official_youtube", "https://youtube.com/@asalarichilikuztv?feature=shared")).strip()
+
+def get_official_bot() -> str:
+    return str(get_settings().get("official_bot", "@Asalarichiliktv_bot")).strip()
+
+def get_official_footer(script: str = "cyrillic") -> str:
+    chan = get_official_channel()
+    grp = get_official_group()
+    yt = get_official_youtube()
+    bot_label = get_official_bot()
+    if not bot_label.startswith("@"):
+        bot_label = "@" + bot_label
+    if script == "latin":
+        return (
+            "__________________________________\n"
+            f"🐝 Rasmiy kanal: {chan}\n"
+            f"👥 Asalarichilik guruhi: {grp}\n"
+            f"📺 YouTube: {yt}\n"
+            f"🤖 Bot: {bot_label}"
+        )
+    return (
+        "__________________________________\n"
+        f"🐝 Расмий канал: {chan}\n"
+        f"👥 Асаларичилик гуруҳи: {grp}\n"
+        f"📺 YouTube: {yt}\n"
+        f"🤖 Бот: {bot_label}"
+    )
 
 def get_channel_title() -> str:
     return str(get_settings().get("official_channel_title", "Asalarichilik.Uz")).strip()
@@ -245,9 +281,7 @@ def get_share_url(title: str = "", text: str = "", source: str = "", tags: str =
     if tags:
         lines.append(f"🏷 {tags.strip()}")
         
-    lines.append("")
-    lines.append(f"🐝 Расмий канал: {get_official_channel()}")
-    lines.append(f"👥 Расмий гуруҳ: {get_official_group()}")
+    lines.append(get_official_footer(script="cyrillic"))
     
     full_text = "\n".join(lines)
     encoded_text = urllib.parse.quote(full_text)
@@ -1951,63 +1985,112 @@ async def send_quiz_poll_to_chat(chat_id: Any, quiz: dict, poll_mode: Optional[s
     return poll_msg
 
 # ==============================================================================
-# 16. VIKTORINA VA OPROS (СЎРОВНОМА) MENYUSI
+# 16. VIKTORINA VA OPROS (СЎРОВНОМА) MENYUSI (1-RASMDAGIDEK ANIQ PREVIEW)
 # ==============================================================================
-def build_quiz_menu_inline() -> InlineKeyboardMarkup:
+def format_quiz_preview_text(quiz: dict, idx: int, total: int, script: str = "cyrillic") -> str:
     settings = get_settings()
-    script = settings.get("script_mode", "cyrillic")
-    script_label = "Крилча 🇺🇿" if script == "cyrillic" else "Lotincha 🇺🇿"
-    sched_label = f"⏰ {settings.get('quiz_schedule_time', '09:00')}" if settings.get("quiz_schedule_enabled", True) else "❌ Ўчирилган"
-    off_channel = get_official_channel()
-    off_group = get_official_group()
-    
-    quizzes = get_quizzes_db()
-    total_q = len(quizzes)
-    polls = get_polls_db()
-    total_p = len(polls)
+    level_raw = quiz.get("level", "beginner")
+    if level_raw == "spec":
+        toifa = "Спец (Мураккаб)" if script == "cyrillic" else "Spets (Murakkab)"
+    else:
+        toifa = "Ёш асаларичилар" if script == "cyrillic" else "Yosh asalarichilar"
 
-    poll_type = settings.get("poll_type", "quiz")
-    poll_mode_label = "🐝 Викторина (Quiz)" if poll_type == "quiz" else "📋 Опрос (Сўровнома)"
+    sched_time = str(settings.get("quiz_schedule_time", "10:00"))
+    dest_mode = str(settings.get("post_target_mode", "channel"))
+    if dest_mode == "channel":
+        dest_lbl = "Фақат Каналлар" if script == "cyrillic" else "Faqat Kanallar"
+    elif dest_mode == "group":
+        dest_lbl = "Фақат Гуруҳлар" if script == "cyrillic" else "Faqat Guruhlar"
+    elif dest_mode == "both":
+        dest_lbl = "Канал ва Гуруҳлар" if script == "cyrillic" else "Kanal va Guruhlar"
+    else:
+        dest_lbl = "Фақат Каналлар" if script == "cyrillic" else "Faqat Kanallar"
 
+    script_lbl = "Кириллча (Ўзб)" if script == "cyrillic" else "Lotincha (O'zb)"
+
+    q_text = apply_script(quiz.get("question", "Савол матни"), script)
+    options = [apply_script(opt, script) for opt in quiz.get("options", [])]
+    correct_id = int(quiz.get("correct_option_id", 0))
+    explanation = apply_script(quiz.get("explanation", ""), script)
+    if not explanation:
+        explanation = "Асаларичилик бўйича тўғри амалий тажриба ва илмий кўрсатма."
+
+    lines = [
+        "🐝 АСАЛАРИЧИЛИК ВИКТОРИНА ВА СЎРОВНОМАЛАР МАРКАЗИ 📊",
+        "",
+        f"• 🎯 Савол тоифаси: 🟢 {toifa}",
+        f"• ⏰ Кунлик юбориш вақти: {sched_time}",
+        "• ⏱ Авто-ўчириш муддати: ∞ Ўчирилмайди  (доимий)",
+        "• 📌 Гуруҳ ва Каналларга қадаш (Pin): 🟢 Ҳа  (Қадалади 📌)",
+        f"• 📢 Юбориладиган жойлар: 📢 {dest_lbl}",
+        f"• 🔤 Ёзув тури: 🟢 {script_lbl}",
+        "• 🔔 Ҳолати: 🟢 Ёқилган",
+        "———————— ВИКТОРИНА НАМУНАСИ ————————",
+        f"❓ Савол: {q_text} 🐝",
+        "",
+        "🔘 Вариантлар (Телеграм сўровнома кўринишида):"
+    ]
+    for opt_idx, opt in enumerate(options):
+        if opt_idx == correct_id:
+            lines.append(f"✅ {opt}")
+        else:
+            lines.append(f"⚪️ {opt}")
+    lines.append("")
+    lines.append(f"💡 Изоҳ: {explanation}")
+    lines.append("————————————————————————")
+    lines.append("💡 Тезкор ҳаракатлар: Сиз ушбу викторинани текшириб, «Каналга», «Гуруҳга» ёки «Иккаласига» тугмалари орқали тўғридан-тўғри юборишингиз мумкин!")
+
+    return "\n".join(lines)
+
+def build_quiz_preview_keyboard(idx: int, total: int, script: str = "cyrillic") -> InlineKeyboardMarkup:
+    script_lbl = "🟢 Кириллча" if script == "cyrillic" else "🟢 Lotincha"
     rows = [
-        [InlineKeyboardButton(text=f"📢 Каналга юбориш ({off_channel})", callback_data="quiz_send_chan"),
-         InlineKeyboardButton(text=f"👥 Гуруҳга юбориш ({off_group})", callback_data="quiz_send_grp")],
-        [InlineKeyboardButton(text="🚀 Барча канал ва гуруҳларга юбориш", callback_data="quiz_act:broadcast")],
-        [InlineKeyboardButton(text="🐝 Викторина (Quiz тест юбориш)", callback_data="quiz_act:send_quiz_now"),
-         InlineKeyboardButton(text="📋 Опрос (Сўровнома юбориш)", callback_data="quiz_act:send_poll_now")],
-        [InlineKeyboardButton(text="🎲 Ботда синаб кўриш (Тест / Опрос)", callback_data="quiz_act:preview")],
-        [InlineKeyboardButton(text="🎓 Спец (Мураккаб) савол", callback_data="quiz_act:spec"),
-         InlineKeyboardButton(text="👶 Бошланғич савол", callback_data="quiz_act:beginner")],
-        [InlineKeyboardButton(text="🔄 Янги 10 та савол яратиш (AI)", callback_data="quiz_act:generate_ai")],
-        [InlineKeyboardButton(text=f"📊 Сўровнома режими: {poll_mode_label}", callback_data="quiz_act:toggle_poll_type")],
-        [InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_label}", callback_data="quiz_act:toggle_script")],
-        [InlineKeyboardButton(text=f"⏰ Авто-вақт: {sched_label}", callback_data="quiz_act:sched_menu")],
-        [InlineKeyboardButton(text="⚙️ Викторина ва Опрос Созламалари", callback_data="quiz_settings")],
-        [InlineKeyboardButton(text=f"📊 База: {total_q} викторина, {total_p} опрос", callback_data="quiz_act:stats")],
-        [InlineKeyboardButton(text="🔙 Орқага", callback_data="quiz_act:close")]
+        [
+            InlineKeyboardButton(text="📢 Каналга юбориш", callback_data=f"quiz_send_chan:{idx}"),
+            InlineKeyboardButton(text="👥 Гуруҳга юбориш", callback_data=f"quiz_send_grp:{idx}")
+        ],
+        [
+            InlineKeyboardButton(text="🌐 Канал ва Гуруҳга (Иккаласига) 📌", callback_data=f"quiz_send_both:{idx}")
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"quiz_page:{idx - 1}"),
+            InlineKeyboardButton(text=f"📄 {idx + 1} / {total}", callback_data=f"quiz_page_info:{idx}"),
+            InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"quiz_page:{idx + 1}")
+        ],
+        [
+            InlineKeyboardButton(text="🎲 Тасодифий савол", callback_data="quiz_random"),
+            InlineKeyboardButton(text="🔄 Янги 10 та савол яратиш (AI)", callback_data="quiz_act:generate_ai")
+        ],
+        [
+            InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_lbl}", callback_data=f"quiz_toggle_script:{idx}"),
+            InlineKeyboardButton(text="⚙️ Созламалар", callback_data="quiz_settings")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+def build_quiz_menu_inline() -> InlineKeyboardMarkup:
+    return build_quiz_preview_keyboard(0, len(get_quizzes_db()))
+
 @dp.message(F.text == "🐝 Викторина & Сўровнома")
 async def quiz_cmd(message: types.Message):
-    if message.chat.type == "private" and message.from_user.id != OWNER_ID:
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
 
     quizzes = get_quizzes_db()
-    polls = get_polls_db()
-    settings = get_settings()
-    ptype = "🐝 Викторина (Quiz - тўғри жавобли)" if settings.get("poll_type", "quiz") == "quiz" else "📋 Опрос (Сўровнома - очиқ овоз бериш)"
+    if not quizzes:
+        quizzes = copy.deepcopy(INITIAL_QUIZZES)
+        save_quizzes_db(quizzes)
 
-    text = (
-        "🐝 **АСАЛАРИЧИЛИК ВИКТОРИНА ВА СЎРОВНОМАЛАР (ОПРОС) МАРКАЗИ**\n\n"
-        "Telegram расмий аноним викториналари ва очиқ сўровномаларини гуруҳ ва каналларга тақдим этиш тизими:\n\n"
-        f"• 📚 Базадаги викториналар: **{len(quizzes)} та** (AI кенгайиш)\n"
-        f"• 📊 Базадаги очиқ опрос (сўровномалар): **{len(polls)} та**\n"
-        f"• 🎯 Ҳозирги фаол режим: **{ptype}**\n"
-        "• 👍 Лайк-реакциялар, канал ҳаволаси ва улашиш тугмалари билан таъминланган\n"
-        "• ⏰ Ҳар куни автоматик белгиланган вақтда уланган каналларга юборилади."
-    )
-    await message.answer(text, reply_markup=build_quiz_menu_inline(), parse_mode="Markdown")
+    idx = 0
+    quiz = quizzes[idx]
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_quiz_preview_text(quiz, idx, len(quizzes), script)
+    markup = build_quiz_preview_keyboard(idx, len(quizzes), script)
+    await message.answer(text, reply_markup=markup, parse_mode=None)
 
 @dp.callback_query(F.data.startswith("quiz_act:"))
 async def on_quiz_action(call: types.CallbackQuery, state: FSMContext):
@@ -2267,18 +2350,63 @@ async def on_quiz_settings(call: types.CallbackQuery):
     await call.message.edit_text(text, reply_markup=build_settings_inline(source_menu="quiz"), parse_mode="Markdown")
     await call.answer()
 
-@dp.callback_query(F.data == "quiz_send_chan")
+# ==============================================================================
+# 16.1. VIKTORINA PREVIEW CALLBACK HANDLERS (1-RASMDAGI BARCHA TUGMALAR)
+# ==============================================================================
+@dp.callback_query(F.data.startswith("quiz_page:"))
+async def on_quiz_page(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    quizzes = get_quizzes_db()
+    total = len(quizzes)
+    if total == 0:
+        await call.answer("Саволлар базаси бўш!", show_alert=True)
+        return
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    idx = max(0, min(idx, total - 1))
+    quiz = quizzes[idx]
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_quiz_preview_text(quiz, idx, total, script)
+    markup = build_quiz_preview_keyboard(idx, total, script)
+    try:
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except Exception:
+        pass
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("quiz_page_info:"))
+async def on_quiz_page_info(call: types.CallbackQuery):
+    quizzes = get_quizzes_db()
+    total = len(quizzes)
+    try:
+        idx = int(call.data.split(":")[1]) + 1
+    except Exception:
+        idx = 1
+    await call.answer(f"📄 Жами {total} та саволдан {idx}-савол кўрилмоқда", show_alert=False)
+
+@dp.callback_query(F.data.startswith("quiz_send_chan"))
 async def on_quiz_send_chan(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         await call.answer("Рухсат йўқ!", show_alert=True)
         return
+    quizzes = get_quizzes_db()
+    if not quizzes:
+        await call.answer("Саволлар топилмади!", show_alert=True)
+        return
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    idx = max(0, min(idx, len(quizzes) - 1))
     target = get_official_channel()
-    settings = get_settings()
-    ptype = settings.get("poll_type", "quiz")
-    item = get_next_quiz() if ptype == "quiz" else get_next_poll()
-    res = await send_quiz_poll_to_chat(target, item, poll_mode=ptype)
+    res = await send_quiz_poll_to_chat(target, quizzes[idx], poll_mode="quiz")
     if res:
-        await call.answer(f"✅ Расмий канал ({target}) га муваффақиятли юборилди!", show_alert=True)
+        await call.answer(f"✅ Расмий канал ({target}) га викторина муваффақиятли юборилди!", show_alert=True)
     else:
         await call.message.answer(
             f"⚠️ **{target} га юбориб бўлмади!**\n\n"
@@ -2287,18 +2415,24 @@ async def on_quiz_send_chan(call: types.CallbackQuery):
         )
         await call.answer(f"⚠️ {target} га юбориб бўлмади (админликни текширинг)!", show_alert=True)
 
-@dp.callback_query(F.data == "quiz_send_grp")
+@dp.callback_query(F.data.startswith("quiz_send_grp"))
 async def on_quiz_send_grp(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         await call.answer("Рухсат йўқ!", show_alert=True)
         return
+    quizzes = get_quizzes_db()
+    if not quizzes:
+        await call.answer("Саволлар топилмади!", show_alert=True)
+        return
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    idx = max(0, min(idx, len(quizzes) - 1))
     target = get_official_group()
-    settings = get_settings()
-    ptype = settings.get("poll_type", "quiz")
-    item = get_next_quiz() if ptype == "quiz" else get_next_poll()
-    res = await send_quiz_poll_to_chat(target, item, poll_mode=ptype)
+    res = await send_quiz_poll_to_chat(target, quizzes[idx], poll_mode="quiz")
     if res:
-        await call.answer(f"✅ Расмий гуруҳ ({target}) га муваффақиятли юборилди!", show_alert=True)
+        await call.answer(f"✅ Расмий гуруҳ ({target}) га викторина муваффақиятли юборилди!", show_alert=True)
     else:
         await call.message.answer(
             f"⚠️ **{target} га юбориб бўлмади!**\n\n"
@@ -2307,151 +2441,180 @@ async def on_quiz_send_grp(call: types.CallbackQuery):
         )
         await call.answer(f"⚠️ {target} га юбориб бўлмади (админликни текширинг)!", show_alert=True)
 
+@dp.callback_query(F.data.startswith("quiz_send_both"))
+async def on_quiz_send_both(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    quizzes = get_quizzes_db()
+    if not quizzes:
+        await call.answer("Саволлар топилмади!", show_alert=True)
+        return
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    idx = max(0, min(idx, len(quizzes) - 1))
+    quiz = quizzes[idx]
+    
+    ch = get_official_channel()
+    grp = get_official_group()
+    res_ch = await send_quiz_poll_to_chat(ch, quiz, poll_mode="quiz")
+    if res_ch:
+        try:
+            await bot.pin_chat_message(chat_id=res_ch.chat.id, message_id=res_ch.message_id, both_silent=False)
+        except Exception:
+            pass
+    res_grp = await send_quiz_poll_to_chat(grp, quiz, poll_mode="quiz")
+    if res_grp:
+        try:
+            await bot.pin_chat_message(chat_id=res_grp.chat.id, message_id=res_grp.message_id, both_silent=False)
+        except Exception:
+            pass
+    await call.answer("✅ Канал ва гуруҳга викторина юборилди ва қадалди!", show_alert=True)
+
+@dp.callback_query(F.data == "quiz_random")
+async def on_quiz_random(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    quizzes = get_quizzes_db()
+    total = len(quizzes)
+    if total == 0:
+        await call.answer("Саволлар йўқ!", show_alert=True)
+        return
+    idx = random.randint(0, total - 1)
+    quiz = quizzes[idx]
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_quiz_preview_text(quiz, idx, total, script)
+    markup = build_quiz_preview_keyboard(idx, total, script)
+    try:
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except Exception:
+        pass
+    await call.answer(f"🎲 #{idx + 1} савол кўрсатилмоқда")
+
+@dp.callback_query(F.data.startswith("quiz_toggle_script:"))
+async def on_quiz_toggle_script(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    settings = get_settings()
+    cur = settings.get("script_mode", "cyrillic")
+    new_mode = "latin" if cur == "cyrillic" else "cyrillic"
+    update_setting("script_mode", new_mode)
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    quizzes = get_quizzes_db()
+    total = len(quizzes)
+    idx = max(0, min(idx, total - 1))
+    text = format_quiz_preview_text(quizzes[idx], idx, total, new_mode)
+    markup = build_quiz_preview_keyboard(idx, total, new_mode)
+    try:
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except Exception:
+        pass
+    await call.answer(f"Ёзув: {'Лотинча' if new_mode == 'latin' else 'Кириллча'}")
+
 # ==============================================================================
-# 17. YANGILIKLAR TIZIMI (📰 Асаларичилик Янгиликлари - Skrinshotdagi 1-ga-1)
+# 17. YANGILIKLAR TIZIMI (📰 Асаларичилик Янгиликлари - 3-расмдагидек 1-га-1)
 # ==============================================================================
 def format_news_post_text(news: dict, script: str = "cyrillic", is_admin: bool = False) -> str:
-    title = apply_script(news.get("title", ""), script)
-    body = apply_script(news.get("body", "") or news.get("summary", ""), script)
+    title = apply_script(news.get("title", ""), script).strip()
+    body = apply_script(news.get("body", "") or news.get("summary", ""), script).strip()
     
     results = news.get("results")
     if results and isinstance(results, list):
         res_lines = [f"{i}. {apply_script(r, script)}" for i, r in enumerate(results, 1)]
         results_text = "\n".join(res_lines)
     else:
-        results_text = apply_script(news.get("recommendations", ""), script)
+        results_text = apply_script(news.get("recommendations", ""), script).strip()
 
-    source = news.get("source", "Nature Scientific Reports / Халқаро тадқиқот (2026 йил Октябрь)")
+    source = news.get("source", "Nature Scientific Reports / Халқаро тадқиқот (2026 йил)")
     tags = news.get("tags", "") or news.get("hashtags", "#Асаларичилик #Янгилик #Инновация #AsalarichilikUz")
-    off_channel = get_official_channel()
-    off_group = get_official_group()
-    bot_label = "@Asalarichilikuz_bot"
+    footer = get_official_footer(script=script)
 
-    if script == "latin":
-        header_title = "🌐 INTERNET ASALARICHILIK YANGILIKLARI MARKAZI"
-        header_desc = (
-            "Bu bo‘lim internet tarmoqlaridan asalarichilikka oid ilmiy "
-            "yangiliklar va zamonaviy texnologiyalarni topib, o‘zbek tiliga tarjima qiladi.\n\n"
-            "Siz ushbu yangilikni tekshirib, quyidagi tugmalar orqali rasmiy kanal yoki guruhga "
-            "to‘g‘ridan-to‘g‘ri yuborishingiz mumkin!"
-        )
-        sub_title = "📰 ASALARICHILIK DUNYOSI YANGILIGI"
-        res_header = "📌 Tadqiqot natijalari:"
-        src_label = "🌐 Manba:"
-        tag_label = "🏷 Teglar:"
-        chan_label = f"🐝 {bot_label} rasmiy kanali: {off_channel}\n👥 Rasmiy guruhi: {off_group}"
-    else:
-        header_title = "🌐 ИНТЕРНЕТ АСАЛАРИЧИЛИК ЯНГИЛИКЛАРИ МАРКАЗИ"
-        header_desc = (
-            "Бу бўлим интернет тармоқларидан асаларичиликка оид илмий "
-            "янгиликлар ва замонавий технологияларни топиб, ўзбек тилига таржима қилади.\n\n"
-            "Сиз ушбу янгиликни текшириб, қуйидаги тугмалар орқали расмий канал ёки гуруҳга "
-            "тўғридан-тўғри юборишингиз мумкин!"
-        )
-        sub_title = "📰 АСАЛАРИЧИЛИК ДУНЁСИ ЯНГИЛИГИ"
-        res_header = "📌 Тадқиқот натижалари:"
-        src_label = "🌐 Манба:"
-        tag_label = "🏷 Теглар:"
-        chan_label = f"🐝 {bot_label} расмий канали: {off_channel}\n👥 Расмий гуруҳи: {off_group}"
-
-    if is_admin:
-        text = (
-            f"{header_title}\n\n"
-            f"{header_desc}\n\n"
-            f"{sub_title}\n"
-            f"───────────────────────────\n"
-            f"📌 🔬 {title}\n\n"
-            f"{body}\n\n"
-            f"{res_header}\n"
-            f"{results_text}\n\n"
-            f"{src_label} {source}\n"
-            f"{tag_label} {tags}\n\n"
-            f"{chan_label}"
-        )
-    else:
-        text = (
-            f"{sub_title}\n"
-            f"───────────────────────────\n"
-            f"📌 🔬 {title}\n\n"
-            f"{body}\n\n"
-            f"{res_header}\n"
-            f"{results_text}\n\n"
-            f"{src_label} {source}\n"
-            f"{tag_label} {tags}\n\n"
-            f"{chan_label}"
-        )
-    return text
+    lines = []
+    if title:
+        lines.append(f"📌 🔬 {title}")
+        lines.append("")
+    if body:
+        lines.append(body)
+        lines.append("")
+    if results_text:
+        res_head = "📌 Тадқиқот натижалари:" if script == "cyrillic" else "📌 Tadqiqot natijalari:"
+        lines.append(res_head)
+        lines.append(results_text)
+        lines.append("")
+    if source:
+        src_head = "🌐 Манба:" if script == "cyrillic" else "🌐 Manba:"
+        lines.append(f"{src_head} {source}")
+    if tags:
+        tag_head = "🏷 Теглар:" if script == "cyrillic" else "🏷 Teglar:"
+        lines.append(f"{tag_head} {tags}")
+    
+    lines.append(footer)
+    return "\n".join(lines)
 
 def build_news_viewer_keyboard(idx: int, total: int, script: str = "cyrillic") -> InlineKeyboardMarkup:
-    off_chan = get_official_channel()
-    off_grp = get_official_group()
-    if script == "latin":
-        btn_chan = f"📢 Kanalga yuborish ({off_chan})"
-        btn_grp = f"👥 Guruhga yuborish ({off_grp})"
-        btn_pin = "🚀 Hammasiga yuborish va qadash"
-        btn_prev = "⬅️ Oldingisi"
-        btn_next = "Keyingisi ➡️"
-        btn_search = "🌐 Internetdan yangi yangilik izlash"
-        btn_back = "« Reklama va postlar menyusiga qaytish"
-    else:
-        btn_chan = f"📢 Каналга юбориш ({off_chan})"
-        btn_grp = f"👥 Гуруҳга юбориш ({off_grp})"
-        btn_pin = "🚀 Ҳаммасига юбориш ва қадаш"
-        btn_prev = "⬅️ Олдингиси"
-        btn_next = "Кейингиси ➡️"
-        btn_search = "🌐 Интернетдан янги янгилик излаш"
-        btn_back = "« Реклама ва постлар менюсига қайтиш"
-
-    rows = []
-    # 1. To'g'ridan-to'g'ri kanal va guruhga yuborish
-    rows.append([InlineKeyboardButton(text=btn_chan, callback_data=f"news_send_chan:{idx}"),
-                 InlineKeyboardButton(text=btn_grp, callback_data=f"news_send_grp:{idx}")])
-    rows.append([InlineKeyboardButton(text=btn_pin, callback_data=f"news_publish_pin:{idx}")])
-
-    # 2. Paginatsiya: [⬅️ Олдингиси] [📄 1 / 10] [Кейингиси ➡️]
-    nav_row = []
-    if idx > 0:
-        nav_row.append(InlineKeyboardButton(text=btn_prev, callback_data=f"news_page:{idx - 1}"))
-    nav_row.append(InlineKeyboardButton(text=f"📄 {idx + 1} / {total}", callback_data=f"news_page_info:{idx}"))
-    if idx < total - 1:
-        nav_row.append(InlineKeyboardButton(text=btn_next, callback_data=f"news_page:{idx + 1}"))
-    rows.append(nav_row)
-
-    # 3. Internetdan yangi yangilik izlash
-    rows.append([InlineKeyboardButton(text=btn_search, callback_data="news_search_fresh")])
-
-    # 4. Sozlamalar va Reklama/postlar menyusiga qaytish
-    rows.append([
-        InlineKeyboardButton(text="⚙️ Янгиликлар созламалари", callback_data="news_settings"),
-        InlineKeyboardButton(text=btn_back, callback_data="news_back_menu")
-    ])
-
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-def build_news_menu_inline() -> InlineKeyboardMarkup:
-    news_list = get_news_db()
-    total = len(news_list)
     settings = get_settings()
-    sched_label = f"⏰ {settings.get('news_schedule_time', '14:00')}" if settings.get("news_schedule_enabled", True) else "❌ Ўчирилган"
-    off_chan = get_official_channel()
-    off_grp = get_official_group()
+    script_lbl = "🟢 Кириллча" if script == "cyrillic" else "🟢 Lotincha"
+    dest_mode = settings.get("post_target_mode", "channel")
+    if dest_mode == "channel":
+        dest_lbl = "Фақат Каналларга"
+    elif dest_mode == "group":
+        dest_lbl = "Фақат Гуруҳларга"
+    elif dest_mode == "both":
+        dest_lbl = "Канал ва Гуруҳга"
+    else:
+        dest_lbl = "Фақат Каналларга"
 
     rows = [
-        [InlineKeyboardButton(text="👁 Янгиликларни кўриш (Скриншотдагидек)", callback_data="news_page:0")],
-        [InlineKeyboardButton(text=f"📢 Сўнгги янгиликни Каналга юбориш ({off_chan})", callback_data="news_send_chan:0")],
-        [InlineKeyboardButton(text=f"👥 Сўнгги янгиликни Гуруҳга юбориш ({off_grp})", callback_data="news_send_grp:0")],
-        [InlineKeyboardButton(text="🚀 Ҳаммасига юбориш ва қадаш (Тарқатиш)", callback_data="news_publish_pin:0")],
-        [InlineKeyboardButton(text="🌐 Интернетдан янги янгилик излаш", callback_data="news_search_fresh")],
-        [InlineKeyboardButton(text=f"⏰ Авто-вақт: {sched_label}", callback_data="news_act:sched_menu")],
-        [InlineKeyboardButton(text="⚙️ Янгиликлар созламалари", callback_data="news_settings")],
-        [InlineKeyboardButton(text=f"📊 База: {total} та янгилик", callback_data="news_page_info:0")],
-        [InlineKeyboardButton(text="🔙 Орқага", callback_data="news_back_menu")]
+        # 1-qator: Kanalga yoki Guruhga yuborish
+        [
+            InlineKeyboardButton(text="📢 Каналга юбориш", callback_data=f"news_send_chan:{idx}"),
+            InlineKeyboardButton(text="👥 Гуруҳга юбориш", callback_data=f"news_send_grp:{idx}")
+        ],
+        # 2-qator: Ikkalasiga bir vaqtda юбориш ва қадаш
+        [
+            InlineKeyboardButton(text="🌐 Канал ва Гуруҳга (Иккаласига) 📌", callback_data=f"news_publish_pin:{idx}")
+        ],
+        # 3-qator: Reklama menyusiga to'g'ridan-to'g'ri o'tkazish
+        [
+            InlineKeyboardButton(text="📣 Реклама менюсига тўғридан-тўғри ўтказиш 🚀", callback_data=f"news_to_post:{idx}")
+        ],
+        # 4-qator: Paginatsiya [⬅️ Олдингиси] [📄 1 / total] [Кейингиси ➡️]
+        [
+            InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"news_page:{idx - 1}"),
+            InlineKeyboardButton(text=f"📄 {idx + 1} / {total}", callback_data=f"news_page_info:{idx}"),
+            InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"news_page:{idx + 1}")
+        ],
+        # 5-qator: Yozuv turi va Tasodifiy yangilik
+        [
+            InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_lbl}", callback_data=f"news_toggle_script:{idx}"),
+            InlineKeyboardButton(text="🎲 Тасодифий янгилик", callback_data="news_random")
+        ],
+        # 6-qator: Manzil sozlamasi
+        [
+            InlineKeyboardButton(text=f"⚙️ Манзил созламаси: {dest_lbl}", callback_data=f"news_toggle_dest:{idx}")
+        ],
+        # 7-qator: Orqaga va Asosiy menyu
+        [
+            InlineKeyboardButton(text="« Реклама ва постлар менюсига қайтиш", callback_data="news_back_menu"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+def build_news_menu_inline() -> InlineKeyboardMarkup:
+    return build_news_viewer_keyboard(0, len(get_news_db()))
+
 @dp.message(F.text == "📰 Асаларичилик Янгиликлари")
 async def news_cmd(message: types.Message):
-    if message.chat.type == "private" and message.from_user.id != OWNER_ID:
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
 
     news_list = get_news_db()
@@ -2463,9 +2626,9 @@ async def news_cmd(message: types.Message):
     news = news_list[idx]
     settings = get_settings()
     script = settings.get("script_mode", "cyrillic")
-    text = format_news_post_text(news, script, is_admin=True)
+    text = format_news_post_text(news, script, is_admin=False)
     markup = build_news_viewer_keyboard(idx, len(news_list), script)
-    await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+    await message.answer(text, reply_markup=markup, parse_mode=None)
 
 @dp.callback_query(F.data.startswith("news_page:"))
 async def on_news_page(call: types.CallbackQuery):
@@ -2487,10 +2650,10 @@ async def on_news_page(call: types.CallbackQuery):
     news = news_list[idx]
     settings = get_settings()
     script = settings.get("script_mode", "cyrillic")
-    text = format_news_post_text(news, script, is_admin=True)
+    text = format_news_post_text(news, script, is_admin=False)
     markup = build_news_viewer_keyboard(idx, len(news_list), script)
     try:
-        await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
     except Exception:
         pass
     await call.answer()
@@ -2511,7 +2674,7 @@ async def publish_news_to_target(target: Union[int, str], news: dict, pin: bool 
     script = settings.get("script_mode", "cyrillic")
     channel_text = format_news_post_text(news, script, is_admin=False)
     
-    is_chan = str(target) == get_official_channel() or (str(target).startswith("@") and "guruh" not in str(target).lower())
+    is_chan = str(target) == get_official_channel() or (str(target).startswith("@") and "guruh" not in str(target).lower() and "uzbekistan" not in str(target).lower())
     
     init_markup = build_post_markup(
         chat_id=int(target) if str(target).replace("-", "").isdigit() else 0,
@@ -2531,7 +2694,7 @@ async def publish_news_to_target(target: Union[int, str], news: dict, pin: bool 
             chat_id=target,
             text=channel_text,
             reply_markup=init_markup,
-            parse_mode="Markdown"
+            parse_mode=None
         )
         final_markup = build_post_markup(
             chat_id=sent.chat.id,
@@ -2545,11 +2708,14 @@ async def publish_news_to_target(target: Union[int, str], news: dict, pin: bool 
             share_tags=news.get("tags", "") or news.get("hashtags", ""),
             share_source=news.get("source", "")
         )
-        await bot.edit_message_reply_markup(
-            chat_id=sent.chat.id,
-            message_id=sent.message_id,
-            reply_markup=final_markup
-        )
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=sent.chat.id,
+                message_id=sent.message_id,
+                reply_markup=final_markup
+            )
+        except Exception:
+            pass
         if pin:
             try:
                 await bot.pin_chat_message(chat_id=sent.chat.id, message_id=sent.message_id, both_silent=False)
@@ -2621,21 +2787,136 @@ async def on_news_publish_pin(call: types.CallbackQuery):
     idx = max(0, min(idx, len(news_list) - 1))
     news = news_list[idx]
 
-    chats = load_allowed_chats()
-    target_chats = list(chats.keys()) or [get_official_channel(), get_official_group()]
-    count = 0
-    pinned_count = 0
-
-    for cid in target_chats:
-        res = await publish_news_to_target(cid, news, pin=True)
-        if res:
-            count += 1
-            pinned_count += 1
+    ch = get_official_channel()
+    grp = get_official_group()
+    res_ch = await publish_news_to_target(ch, news, pin=True)
+    res_grp = await publish_news_to_target(grp, news, pin=True)
+    count = (1 if res_ch else 0) + (1 if res_grp else 0)
 
     await call.answer(
-        f"✅ {count} та канал ва гуруҳга янгилик юборилди ва {pinned_count} тасида муваффақиятли қадалди (закреп қилинди)!",
+        f"✅ {count} та манзилга (Канал ва Гуруҳ) янгилик юборилди ва қадалди!",
         show_alert=True
     )
+
+@dp.callback_query(F.data == "news_random")
+async def on_news_random(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    news_list = get_news_db()
+    total = len(news_list)
+    if total == 0:
+        await call.answer("Янгиликлар йўқ!", show_alert=True)
+        return
+    idx = random.randint(0, total - 1)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_news_post_text(news_list[idx], script, is_admin=False)
+    markup = build_news_viewer_keyboard(idx, total, script)
+    try:
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except Exception:
+        pass
+    await call.answer(f"🎲 #{idx + 1} янгилик кўрсатилмоқда")
+
+@dp.callback_query(F.data.startswith("news_toggle_script:"))
+async def on_news_toggle_script(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    settings = get_settings()
+    cur = settings.get("script_mode", "cyrillic")
+    new_mode = "latin" if cur == "cyrillic" else "cyrillic"
+    update_setting("script_mode", new_mode)
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    news_list = get_news_db()
+    total = len(news_list)
+    idx = max(0, min(idx, total - 1))
+    text = format_news_post_text(news_list[idx], new_mode, is_admin=False)
+    markup = build_news_viewer_keyboard(idx, total, new_mode)
+    try:
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except Exception:
+        pass
+    await call.answer(f"Ёзув: {'Лотинча' if new_mode == 'latin' else 'Кириллча'}")
+
+@dp.callback_query(F.data.startswith("news_toggle_dest:"))
+async def on_news_toggle_dest(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    settings = get_settings()
+    cur = settings.get("post_target_mode", "channel")
+    modes = ["channel", "group", "both"]
+    next_idx = (modes.index(cur) + 1) % len(modes) if cur in modes else 0
+    new_mode = modes[next_idx]
+    update_setting("post_target_mode", new_mode)
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    news_list = get_news_db()
+    total = len(news_list)
+    idx = max(0, min(idx, total - 1))
+    script = settings.get("script_mode", "cyrillic")
+    text = format_news_post_text(news_list[idx], script, is_admin=False)
+    markup = build_news_viewer_keyboard(idx, total, script)
+    try:
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except Exception:
+        pass
+    lbl = "Фақат Каналларга" if new_mode == "channel" else ("Фақат Гуруҳларга" if new_mode == "group" else "Канал ва Гуруҳга")
+    await call.answer(f"Манзил: {lbl}")
+
+@dp.callback_query(F.data.startswith("news_to_post:"))
+async def on_news_to_post(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    news_list = get_news_db()
+    if not news_list:
+        await call.answer("Янгилик топилмади!", show_alert=True)
+        return
+    idx = max(0, min(idx, len(news_list) - 1))
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    formatted_text = format_news_post_text(news_list[idx], script, is_admin=False)
+    
+    await state.set_state(PostStates.editing_post)
+    await state.update_data(
+        post_type="text",
+        text=formatted_text,
+        media_id=None,
+        urls=[],
+        disable_preview=False,
+        silent=False
+    )
+    await call.message.answer(
+        "📝 **Янгилик реклама ва пост конструкторига ўтказилди!**\n\n"
+        "Сиз энди унга расм қўшишингиз, таҳрирлашингиз ёки кўриб чиқиб тарқатишингиз мумкин.",
+        reply_markup=get_constructor_reply_keyboard(),
+        parse_mode="Markdown"
+    )
+    await call.answer()
+
+@dp.callback_query(F.data == "main_menu")
+async def on_main_menu_callback(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await call.message.answer("🏠 Асосий Менюга қайтдингиз:", reply_markup=get_main_reply_keyboard())
+    await call.answer()
 
 @dp.callback_query(F.data == "news_search_fresh")
 async def on_news_search_fresh(call: types.CallbackQuery):
