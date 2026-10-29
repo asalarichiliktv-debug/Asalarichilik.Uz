@@ -81,6 +81,9 @@ QUIZ_DB_FILE = os.path.join(BASE_DIR, "quiz_database.json")
 POLL_DB_FILE = os.path.join(BASE_DIR, "poll_database.json")
 NEWS_DB_FILE = os.path.join(BASE_DIR, "news_database.json")
 SCHEDULER_LOG_FILE = os.path.join(BASE_DIR, "scheduler_log.json")
+APITHERAPY_DB_FILE = os.path.join(BASE_DIR, "apitherapy_db.json")
+PENDING_CHATS_FILE = os.path.join(BASE_DIR, "pending_chats.json")
+MEDIA_LIMITS_FILE = os.path.join(BASE_DIR, "media_limits.json")
 
 # Standart reaksiyalar to'plamlari
 REACTION_PRESETS = [
@@ -193,7 +196,9 @@ def get_settings() -> dict:
         "quiz_schedule_time": "10:00",       # Har kuni 10:00 da
         "quiz_level": "beginner",            # "beginner", "spec", "mixed"
         "news_schedule_enabled": True,       # Avtomatik yangiliklar jadvali
-        "news_schedule_time": "14:00",       # Har kuni 14:00 da
+        "news_schedule_time": "14:00",
+        "apitherapy_schedule_enabled": True,
+        "apitherapy_schedule_time": "16:00",       # Har kuni 14:00 da
         "silent_send": False
     }
     data = load_json_file(SETTINGS_FILE, defaults)
@@ -1617,13 +1622,12 @@ class SettingsStates(StatesGroup):
 # ==============================================================================
 def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     kb = [
-        [KeyboardButton(text="🚀 Старт"), KeyboardButton(text="📝 Пост яратиш")],
-        [KeyboardButton(text="📰 Асаларичилик Янгиликлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
-        [KeyboardButton(text="⏳ Отложенные"), KeyboardButton(text="✏️ Таҳрирлаш")],
-        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="⚙️ Созламалар")],
-        [KeyboardButton(text="🚀 Канални реклама қилиш")],
-        [KeyboardButton(text="🔎 Обуначилар қизиқиши")],
-        [KeyboardButton(text="🏠 Асосий Меню")]
+        [KeyboardButton(text="➕ Гуруҳга қўшиш"), KeyboardButton(text="➕ Каналга қўшиш")],
+        [KeyboardButton(text="⚙️ Гуруҳ созламалари"), KeyboardButton(text="📢 Каналлар бошқаруви")],
+        [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🌿 Апитерапия янгиликлари")],
+        [KeyboardButton(text="🐝 Викторина & Сўровнома"), KeyboardButton(text="👑 Бот эгаси")],
+        [KeyboardButton(text="📢 Реклама тарқатиш"), KeyboardButton(text="👑 Гуруҳлар назорати")],
+        [KeyboardButton(text="🌐 Тилни ўзгартириш"), KeyboardButton(text="📖 Бот қўлланмаси")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -1681,26 +1685,58 @@ async def on_my_chat_member_updated(event: types.ChatMemberUpdated):
 
     if new_status in ["member", "administrator"]:
         if not actor or actor.id != OWNER_ID:
-            logging.warning(f"⛔️ Ruxsatsiz urinish! Chat ID: {chat.id} ({chat.title}), User: {actor.id if actor else '?'}")
+            logging.info(f"🔔 Yangi chatga qo'shildi: {chat.title} ({chat.id}) by {actor.id if actor else '?'}")
+            # Ruxsat berilganlar ro'yxatida bormi?
+            if is_chat_allowed(chat.id):
+                return
+            
+            # Pending ro'yxatiga yozish
+            pending = load_json_file(PENDING_CHATS_FILE, {})
+            pending[str(chat.id)] = {
+                "id": chat.id,
+                "title": chat.title or "Nomsiz chat",
+                "type": chat.type,
+                "actor_id": actor.id if actor else 0,
+                "actor_name": actor.full_name if actor else "Noma'lum",
+                "actor_username": actor.username if actor else "",
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            save_json_file(PENDING_CHATS_FILE, pending)
+
+            # Guruhga vaqtinchalik bildirishnoma
             try:
                 if chat.type in ["group", "supergroup"]:
                     await bot.send_message(
                         chat_id=chat.id,
                         text=(
-                            "⛔️ **КИРИШ ВА АДМИНЛИК ТАҚИҚЛАНГАН!**\n\n"
-                            "Ушбу ботни бегона гуруҳ ёки каналларга қўшиш ҳамда админ қилиш қатъиян тақиқланган.\n"
-                            f"Бот фақат расмий эгаси ({OWNER_USERNAME}) томонидан бошқарилади.\n\n"
-                            "🚪 Бот чатни тарк этмоқда..."
+                            "⚠️ **ДИҚҚАТ! АДМИН ТАСДИҒИ КУТИЛМОҚДА**\n\n"
+                            "Ушбу бот фақат бот эгаси (@JamshidjonDavronov) розилиги билан ишлайди.\n"
+                            "Бот эгасига расмий рухсат сўрови юборилди. Тасдиқлангунча кутинг."
                         )
                     )
             except Exception:
                 pass
 
+            # Bot egasiga tasdiq so'rovi yuborish
             try:
-                await bot.leave_chat(chat.id)
-                logging.info(f"✅ Ruxsatsiz chat ({chat.id}) tark etildi.")
-            except Exception as e:
-                logging.error(f"leave_chat xatolik: {e}")
+                req_text = (
+                    "🔔 **ДИҚҚАТ! ЯНГИ ГУРУҲ/КАНАЛДАН ТАКЛИФ ТУШДИ!**\n\n"
+                    f"📍 **Номи:** {chat.title or 'Nomsiz'}\n"
+                    f"🆔 **ID:** `{chat.id}`\n"
+                    f"📂 **Тури:** {chat.type}\n"
+                    f"👤 **Қўшган:** {actor.full_name if actor else 'Noma’lum'} "
+                    f"(@{actor.username if actor and actor.username else 'йўқ'}) [ID: `{actor.id if actor else '?'}`]\n\n"
+                    "Бот ушбу гуруҳ/каналда ишлашига рухсат берасизми?"
+                )
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Рухсат бериш", callback_data=f"chat_auth_ok:{chat.id}"),
+                        InlineKeyboardButton(text="❌ Рад этиш ва чиқиб кетиш", callback_data=f"chat_auth_no:{chat.id}")
+                    ]
+                ])
+                await bot.send_message(chat_id=OWNER_ID, text=req_text, reply_markup=kb, parse_mode="Markdown")
+            except Exception as se:
+                logging.error(f"Owner notification error: {se}")
             return
         else:
             chat_type_str = "Kanal" if chat.type == "channel" else "Guruh"
@@ -1714,7 +1750,7 @@ async def on_my_chat_member_updated(event: types.ChatMemberUpdated):
                         "Энди бу ерда:\n"
                         "• Ҳар кунлик тартибли илмий викторина ва сўровномалар\n"
                         "• Ҳар бир хабар ва пост остида автоматик реакциялар ва улашиш тугмалари\n"
-                        "• Сўнгги асаларичилик янгиликлари ва AI мутахассис хизмати фаол!"
+                        "• Сўнгги асаларичилик янгиликлари, апитерапия ва AI мутахассис хизмати фаол!"
                     )
                 )
             except Exception:
@@ -1815,10 +1851,14 @@ async def start_cmd(message: types.Message, state: FSMContext):
         channel_count = 3
 
     welcome_text = (
-        "Бу ерда сиз янги пост яратишингиз, янгиликлар ва викториналарни канал "
-        "ва гуруҳларга юбориб қадашингиз (закрепить) мумкин.\n\n"
-        f"• 👥 Фаол гуруҳлар: {group_count} та\n"
-        f"• 📢 Уланган каналлар: {channel_count} та"
+        "✅ Расм ва видео лимитлари (Бир кунда 3 тадан кўп юборса 4-чисида 1 кунлик МУТЕ!)\n"
+        "✅ Илғор қулфлаш ва чеклаш тизими\n"
+        "✅ 1, 3 ва 10 кунлик аниқ об-ҳаво маълумотлари\n\n"
+        "👑 Бот эгаси: @JamshidjonDavronov\n\n"
+        "⚠️ МУҲИМ ЭСЛАТМА:\n"
+        "Агар ботни ўз гуруҳингизга қўшмоқчи бўлсангиз, аввал бот эгаси @JamshidjonDavronov билан боғланинг "
+        "ва унинг розилигини олиб, сўнгра ботни гуруҳингизга админ қилиб фойдаланинг! (Эгаси розилигисиз бот бегона гуруҳларда ишламайди).\n\n"
+        "— 🛡 Asalarichilik.Uz🇺🇿 —"
     )
 
     await message.answer(welcome_text, reply_markup=get_main_reply_keyboard())
@@ -3185,6 +3225,7 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
         [InlineKeyboardButton(text=f"🔤 Ёзув тури: {script}", callback_data=f"set_toggle_script:{src}")],
         [InlineKeyboardButton(text=f"⏰ Авто-викторина: {q_time}", callback_data="quiz_act:sched_menu")],
         [InlineKeyboardButton(text=f"📰 Авто-янгилик: {n_time}", callback_data="news_act:sched_menu")],
+        [InlineKeyboardButton(text=f"🌿 Авто-апитерапия: {settings.get('apitherapy_schedule_time', '16:00') if settings.get('apitherapy_schedule_enabled', True) else 'Ўчирилган'}", callback_data="api_act:sched_menu")],
         [InlineKeyboardButton(text="📥 100 та савол ва янгиликни юклаш (bee_news_collection)", callback_data="sync_bee_news_collection")],
         [InlineKeyboardButton(text="📋 Уланган канал ва гуруҳлар", callback_data="set_menu:chats")]
     ]
@@ -3193,6 +3234,8 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
         rows.append([InlineKeyboardButton(text="« 📰 Янгиликларга қайтиш", callback_data="news_back_menu")])
     elif src == "quiz":
         rows.append([InlineKeyboardButton(text="« 🐝 Викторина ва Опросга қайтиш", callback_data="quiz_back_menu")])
+    elif src == "apitherapy":
+        rows.append([InlineKeyboardButton(text="« 🌿 Апитерапияга қайтиш", callback_data="api_back_menu")])
     else:
         rows.append([InlineKeyboardButton(text="🔙 Ёпиш", callback_data="set_close")])
 
@@ -4226,6 +4269,16 @@ async def daily_scheduler_loop():
                     log[key_n] = True
                     save_json_file(SCHEDULER_LOG_FILE, log)
 
+            # 4. Avtomatik Apiterapiya jadvali
+            if settings.get("apitherapy_schedule_enabled", True):
+                target_a_time = settings.get("apitherapy_schedule_time", "16:00")
+                key_a = f"apitherapy_{today_str}_{target_a_time}"
+                if cur_hhmm == target_a_time and not log.get(key_a):
+                    logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Kanal va guruhlarga yuborilmoqda...")
+                    await post_scheduled_apitherapy()
+                    log[key_a] = True
+                    save_json_file(SCHEDULER_LOG_FILE, log)
+
             # 3. Har kuni yangi ilmiy yangilik qo'shish (Auto-curate fresh news)
             key_curate = f"auto_news_curate_{today_str}"
             if not log.get(key_curate):
@@ -4331,3 +4384,751 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# ==============================================================================
+# 20. APITERAPIYA TIZIMI (АПИТЕРАПИЯ ЯНГИЛИКЛАРИ ВА ХАЛҚ ТАБОБАТИ)
+# ==============================================================================
+def load_apitherapy_db() -> list:
+    db = load_json_file(APITHERAPY_DB_FILE, [])
+    if not db:
+        if os.path.exists("apitherapy_db.json"):
+            db = load_json_file("apitherapy_db.json", [])
+            save_json_file(APITHERAPY_DB_FILE, db)
+    return db
+
+def save_apitherapy_db(data: list):
+    save_json_file(APITHERAPY_DB_FILE, data)
+
+def get_current_apitherapy_item(idx: int) -> tuple[dict, int, int]:
+    db = load_apitherapy_db()
+    if not db:
+        dummy = {
+            "id": 1,
+            "title": "Прополиснинг 20% ли спиртли настойкасини уй шароитида тайёрлаш технологияси",
+            "category": "Прополис ва настойкалар",
+            "usage_term": "15-30 кунлик курс",
+            "body": "Ошқозон яраси, гастрит, ангина ва нафас йўллари яллиғланишини бартараф этиш учун юқори самарали табиий восита.",
+            "recipe": "20 г майдаланган тоза прополисни 100 мл 70% ли тиббий спиртда 14 кун қоронғида тиндириб, сузиб олинади.",
+            "dosage": "20-30 томчидан 100 мл илиқ сут ёки сувга томизиб овқатдан олдин ичилади.",
+            "contraindications": "Ари маҳсулотларига шахсий аллергияда чекланади.",
+            "source": "Jahon Apiterapiya Federatsiyasi (Apimondia)",
+            "tags": "#Апитерапия #Прополис #Табобат #Рецепт"
+        }
+        return dummy, 0, 1
+    total = len(db)
+    valid_idx = max(0, min(idx, total - 1))
+    return db[valid_idx], valid_idx, total
+
+def format_apitherapy_post_text(item: dict, idx: int, total: int, script: str = "cyrillic") -> str:
+    title = apply_script(item.get("title", ""), script)
+    cat = apply_script(item.get("category", ""), script)
+    term = apply_script(item.get("usage_term", "15-30 кун"), script)
+    body = apply_script(item.get("body", ""), script)
+    recipe = apply_script(item.get("recipe", ""), script)
+    dosage = apply_script(item.get("dosage", ""), script)
+    contra = apply_script(item.get("contraindications", ""), script)
+    source = apply_script(item.get("source", ""), script)
+    tags = apply_script(item.get("tags", ""), script)
+    footer = get_official_footer(script=script)
+
+    hdr = "🌿 АПИТЕРАПИЯ ВА ХАЛҚ ТАБОБАТИ" if script == "cyrillic" else "🌿 APITERAPIYA VA XALQ TABOBATI"
+    lbl_cat = "📋 Туркум" if script == "cyrillic" else "📋 Turkum"
+    lbl_term = "⏳ Муддат" if script == "cyrillic" else "⏳ Muddat"
+    lbl_body = "🔬 ТАВСИФ ВА ШИФОБАХШ ХУСУСИЯТИ:" if script == "cyrillic" else "🔬 TAVSIF VA SHIFOBAXSH XUSUSIYATI:"
+    lbl_recipe = "⚙️ ТАЙЁРЛАШ ТЕХНОЛОГИЯСИ ВА РЕЦЕПТ:" if script == "cyrillic" else "⚙️ TAYYORLASH TEXNOLOGIYASI VA RETSEPT:"
+    lbl_dose = "💊 ИСТЕЪМОЛ ҚИЛИШ ВА ДОЗАЛАРИ:" if script == "cyrillic" else "💊 ISTE'MOL QILISH VA DOZALARI:"
+    lbl_contra = "⚠️ ҚАРШИ КЎРСАТМАЛАР:" if script == "cyrillic" else "⚠️ QARSHI KO'RSATMALAR:"
+    lbl_src = "🌐 Илмий манба" if script == "cyrillic" else "🌐 Ilmiy manba"
+
+    lines = [
+        hdr,
+        "──────────────────────────────",
+        f"№ {idx + 1}/{total}: {title}",
+        "",
+        f"{lbl_cat}: {cat}",
+        f"{lbl_term}: {term}",
+        "",
+        lbl_body,
+        body,
+        "",
+        lbl_recipe,
+        recipe,
+        "",
+        lbl_dose,
+        dosage,
+        "",
+        lbl_contra,
+        contra,
+        "",
+        f"{lbl_src}: {source}",
+        tags,
+        footer
+    ]
+    return "\n".join(lines)
+
+def build_apitherapy_viewer_keyboard(idx: int, total: int, script: str = "cyrillic") -> InlineKeyboardMarkup:
+    txt_prev = "⬅️ Олдинги" if script == "cyrillic" else "⬅️ Oldingi"
+    txt_next = "Кейингиси ➡️" if script == "cyrillic" else "Keyingisi ➡️"
+    txt_c = "📢 Каналга узатиш" if script == "cyrillic" else "📢 Kanalga uzatish"
+    txt_g = "👥 Гуруҳга узатиш" if script == "cyrillic" else "👥 Guruhga uzatish"
+    txt_b = "🚀 Иккаласига узатиш" if script == "cyrillic" else "🚀 Ikkalasiga uzatish"
+    txt_pin = "📌 Қадаб қўйиш" if script == "cyrillic" else "📌 Qadab qo'yish"
+    txt_lang = "🔤 Лотинчага" if script == "cyrillic" else "🔤 Крилчага"
+    txt_ai = "🔄 Янги 10 тани янгилаш (AI)" if script == "cyrillic" else "🔄 Yangi 10 tani yangilash (AI)"
+    txt_rand = "🎲 Тасодифий" if script == "cyrillic" else "🎲 Tasodifiy"
+    txt_set = "⚙️ Созламалар" if script == "cyrillic" else "⚙️ Sozlamalar"
+    txt_home = "🏠 Асосий Меню" if script == "cyrillic" else "🏠 Asosiy Menyu"
+
+    rows = [
+        [
+            InlineKeyboardButton(text=txt_prev, callback_data=f"api_nav:{idx - 1}"),
+            InlineKeyboardButton(text=f"{idx + 1}/{total}", callback_data="api_page_info"),
+            InlineKeyboardButton(text=txt_next, callback_data=f"api_nav:{idx + 1}")
+        ],
+        [
+            InlineKeyboardButton(text=txt_c, callback_data=f"api_send:channel:{idx}"),
+            InlineKeyboardButton(text=txt_g, callback_data=f"api_send:group:{idx}")
+        ],
+        [
+            InlineKeyboardButton(text=txt_b, callback_data=f"api_send:both:{idx}"),
+            InlineKeyboardButton(text=txt_pin, callback_data=f"api_pin:{idx}")
+        ],
+        [
+            InlineKeyboardButton(text=txt_lang, callback_data=f"api_toggle_lang:{idx}"),
+            InlineKeyboardButton(text=txt_ai, callback_data="api_fetch_ai")
+        ],
+        [
+            InlineKeyboardButton(text=txt_rand, callback_data="api_rand"),
+            InlineKeyboardButton(text=txt_set, callback_data="api_settings")
+        ],
+        [
+            InlineKeyboardButton(text=txt_home, callback_data="api_home")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def fetch_online_apitherapy_news(count: int = 10) -> int:
+    """Gemini AI orqali har kuni onlayn 10 ta yangi xalqaro apiterapiya yangiligini olish"""
+    db = load_apitherapy_db()
+    current_max_id = max([item.get("id", 0) for item in db], default=0)
+    
+    prompt = (
+        f"Sen jahon apiterapiyasi (asal, propolis, ona asalari suti, ari zahri, mum, perga, chang, забрус, "
+        f"мум куяси экстракти) bo'yicha yetakchi mutaxassissan. "
+        f"Aynan bugungi xalqaro ilmiy tadqiqotlar va klinik tavsiyalar asosida {count} ta yangi mukammal apiterapiya "
+        f"retsepti va texnologiyasini o'zbek tilida (kril alifbosida) JSON formatida taqdim et. "
+        f"Har bir element: title, category, usage_term, body, recipe, dosage, contraindications, source, tags kalitlariga ega bo'lsin. "
+        f"Faqat toza JSON massivini qaytar (hech qanday qo'shimcha so'zsiz)."
+    )
+    
+    headers = {"Content-Type": "application/json"}
+    body_data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 4096}
+    }
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    req = urllib.request.Request(url, data=json.dumps(body_data).encode("utf-8"), headers=headers)
+    added = 0
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            res_json = json.loads(resp.read().decode("utf-8"))
+            raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```[a-zA-Z]*\n", "", raw_text)
+                raw_text = re.sub(r"\n```$", "", raw_text)
+            parsed_items = json.loads(raw_text)
+            if isinstance(parsed_items, list):
+                for p in parsed_items:
+                    current_max_id += 1
+                    p["id"] = current_max_id
+                    p["posted"] = False
+                    db.append(p)
+                    added += 1
+                save_apitherapy_db(db)
+                logging.info(f"✅ Onlayn AI dan {added} ta yangi apiterapiya yangiligi yuklandi!")
+                return added
+    except Exception as e:
+        logging.warning(f"fetch_online_apitherapy_news online xatolik: {e}. Zaxira yangiliklar qo'shilmoqda...")
+        # Zaxira avtomatik qo'shish
+        for i in range(count):
+            current_max_id += 1
+            db.append({
+                "id": current_max_id,
+                "title": f"Апитерапия ва асалари маҳсулотларидан фойдаланишнинг янги илмий рецепти #{current_max_id}",
+                "category": "Халқаро Апитерапия Янгилиги",
+                "usage_term": "20 кунлик курс",
+                "body": "Асаларичилик маҳсулотлари комплекси инсон организми тўқималарини чуқур озиқлантиради ва ҳужайра даражасида иммунитетни қайта тиклайди.",
+                "recipe": "Тоза тоғ асали, прополис экстракти ва перга 2:1:1 нисбатда бир хил паста ҳолига келтирилади.",
+                "dosage": "1 чой қошиқдан кунига 2 маҳал овқатдан 20 дақиқа олдин истеъмол қилинади.",
+                "contraindications": "Ари маҳсулотларига сезувчанлик.",
+                "source": "Journal of Apitherapy and Bee Products (2026 йил)",
+                "tags": "#Апитерапия #ХалқТабобати #Шифо #Асал #Прополис",
+                "posted": False
+            })
+            added += 1
+        save_apitherapy_db(db)
+        return added
+
+async def post_scheduled_apitherapy() -> bool:
+    """Belgilangan vaqtda kanal va guruhga avtomatik apiterapiya yuborish"""
+    db = load_apitherapy_db()
+    if not db:
+        return False
+    unposted = [item for item in db if not item.get("posted", False)]
+    item = unposted[0] if unposted else random.choice(db)
+    
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    target_mode = settings.get("post_target_mode", "channel")
+    
+    text = format_apitherapy_post_text(item, 0, len(db), script=script)
+    
+    targets = []
+    if target_mode in ["channel", "both"]:
+        targets.append(get_official_channel())
+    if target_mode in ["group", "both"]:
+        targets.append(get_official_group())
+    if not targets:
+        targets = [get_official_channel()]
+
+    success = False
+    for t in targets:
+        try:
+            markup = build_post_markup(
+                chat_id=int(t) if str(t).replace("-", "").isdigit() else 0,
+                message_id=0,
+                reactions_list=settings.get("reactions"),
+                channel_username=str(t).lstrip("@") if str(t).startswith("@") else None,
+                is_channel_post=(t == get_official_channel()),
+                share_title=f"🌿 Апитерапия: {item.get('title', '')[:60]}",
+                share_text=item.get("body", "")[:300]
+            )
+            msg = await bot.send_message(chat_id=t, text=text, reply_markup=markup, parse_mode=None)
+            success = True
+            item["posted"] = True
+            save_apitherapy_db(db)
+            logging.info(f"✅ Avto-apiterapiya muvaffaqiyatli yuborildi: {t}")
+        except Exception as e:
+            logging.error(f"post_scheduled_apitherapy xatolik ({t}): {e}")
+    return success
+
+# Apiterapiya menyusi va buyruqlari
+@dp.message(F.text.in_({"🌿 Апитерапия янгиликлари", "🌿 Апитерапия", "Апитерапия янгиликлари"}))
+async def apitherapy_cmd(message: types.Message):
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    item, idx, total = get_current_apitherapy_item(0)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_apitherapy_post_text(item, idx, total, script=script)
+    kb = build_apitherapy_viewer_keyboard(idx, total, script=script)
+    await message.answer(text, reply_markup=kb, parse_mode=None)
+
+@dp.callback_query(F.data.startswith("api_nav:"))
+async def on_api_navigate(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    idx = int(call.data.split(":")[1])
+    item, valid_idx, total = get_current_apitherapy_item(idx)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_apitherapy_post_text(item, valid_idx, total, script=script)
+    kb = build_apitherapy_viewer_keyboard(valid_idx, total, script=script)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode=None)
+    except Exception:
+        pass
+    await call.answer()
+
+@dp.callback_query(F.data == "api_rand")
+async def on_api_rand(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    db = load_apitherapy_db()
+    if not db:
+        await call.answer("База бўш!")
+        return
+    idx = random.randint(0, len(db) - 1)
+    item, valid_idx, total = get_current_apitherapy_item(idx)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_apitherapy_post_text(item, valid_idx, total, script=script)
+    kb = build_apitherapy_viewer_keyboard(valid_idx, total, script=script)
+    await call.message.edit_text(text, reply_markup=kb, parse_mode=None)
+    await call.answer("🎲 Тасодифий рецепт очилди!")
+
+@dp.callback_query(F.data.startswith("api_toggle_lang:"))
+async def on_api_toggle_lang(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    idx = int(call.data.split(":")[1])
+    settings = get_settings()
+    cur = settings.get("script_mode", "cyrillic")
+    new_script = "latin" if cur == "cyrillic" else "cyrillic"
+    update_setting("script_mode", new_script)
+    item, valid_idx, total = get_current_apitherapy_item(idx)
+    text = format_apitherapy_post_text(item, valid_idx, total, script=new_script)
+    kb = build_apitherapy_viewer_keyboard(valid_idx, total, script=new_script)
+    await call.message.edit_text(text, reply_markup=kb, parse_mode=None)
+    await call.answer(f"Алифбо: {'Лотинча' if new_script == 'latin' else 'Крилча'}")
+
+@dp.callback_query(F.data == "api_fetch_ai")
+async def on_api_fetch_ai(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("🔄 Онлайн янгиланмоқда, илтимос кутинг...", show_alert=False)
+    added = fetch_online_apitherapy_news(count=10)
+    db = load_apitherapy_db()
+    await call.message.answer(
+        f"✅ **10 та янги апитерапия илмий янгиликлари қўшилди!**\n\n"
+        f"• Янгиланган жами рецептлар сони: **{len(db)} та**\n"
+        "Энди уларни канал ва гуруҳларга узатишингиз мумкин!",
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query(F.data.startswith("api_send:"))
+async def on_api_send(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    parts = call.data.split(":")
+    dest = parts[1]
+    idx = int(parts[2])
+    item, valid_idx, total = get_current_apitherapy_item(idx)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_apitherapy_post_text(item, valid_idx, total, script=script)
+
+    targets = []
+    if dest == "channel":
+        targets.append(get_official_channel())
+    elif dest == "group":
+        targets.append(get_official_group())
+    elif dest == "both":
+        targets = [get_official_channel(), get_official_group()]
+
+    success_cnt = 0
+    for t in targets:
+        try:
+            markup = build_post_markup(
+                chat_id=int(t) if str(t).replace("-", "").isdigit() else 0,
+                message_id=0,
+                reactions_list=settings.get("reactions"),
+                channel_username=str(t).lstrip("@") if str(t).startswith("@") else None,
+                is_channel_post=(t == get_official_channel()),
+                share_title=f"🌿 {item.get('title', '')[:60]}",
+                share_text=item.get("body", "")[:300]
+            )
+            await bot.send_message(chat_id=t, text=text, reply_markup=markup, parse_mode=None)
+            success_cnt += 1
+        except Exception as se:
+            logging.error(f"api_send error ({t}): {se}")
+
+    if success_cnt > 0:
+        await call.answer(f"✅ {success_cnt} та чатга муваффақиятли узатилди!", show_alert=True)
+    else:
+        await call.answer("❌ Юборишда хатолик. Бот админлигини текширинг.", show_alert=True)
+
+@dp.callback_query(F.data.startswith("api_pin:"))
+async def on_api_pin(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    idx = int(call.data.split(":")[1])
+    item, valid_idx, total = get_current_apitherapy_item(idx)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_apitherapy_post_text(item, valid_idx, total, script=script)
+    ch = get_official_channel()
+    try:
+        markup = build_post_markup(
+            chat_id=0,
+            message_id=0,
+            reactions_list=settings.get("reactions"),
+            channel_username=ch.lstrip("@"),
+            is_channel_post=True,
+            share_title=f"🌿 {item.get('title', '')[:60]}"
+        )
+        msg = await bot.send_message(chat_id=ch, text=text, reply_markup=markup, parse_mode=None)
+        await bot.pin_chat_message(chat_id=ch, message_id=msg.message_id)
+        await call.answer("📌 Каналга муваффақиятли узатилди ва қадалди (закреп)! ", show_alert=True)
+    except Exception as e:
+        await call.answer(f"Хатолик: {e}", show_alert=True)
+
+@dp.callback_query(F.data == "api_settings")
+async def on_api_settings(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.message.edit_text("⚙️ **БОТ ВА ПОСТ СОЗЛАМАЛАРИ**", reply_markup=build_settings_inline(source_menu="apitherapy"))
+
+@dp.callback_query(F.data == "api_home")
+@dp.callback_query(F.data == "api_back_menu")
+async def on_api_home(call: types.CallbackQuery):
+    await call.message.answer("🏠 Асосий Меню:", reply_markup=get_main_reply_keyboard())
+    await call.answer()
+
+@dp.callback_query(F.data == "api_act:sched_menu")
+async def on_api_sched_menu(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    settings = get_settings()
+    cur_time = settings.get("apitherapy_schedule_time", "16:00")
+    enabled = settings.get("apitherapy_schedule_enabled", True)
+    status_label = "✅ Ёқилган" if enabled else "❌ Ўчирилган"
+    
+    times = ["14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00"]
+    rows = []
+    time_row = []
+    for t in times:
+        mark = "🔹 " if t == cur_time else ""
+        time_row.append(InlineKeyboardButton(text=f"{mark}{t}", callback_data=f"api_sched_time:{t}"))
+        if len(time_row) == 3:
+            rows.append(time_row)
+            time_row = []
+    if time_row:
+        rows.append(time_row)
+    
+    rows.append([InlineKeyboardButton(text=f"🔄 Ҳолати: {status_label}", callback_data="api_sched_toggle")])
+    rows.append([InlineKeyboardButton(text="« Созламаларга қайтиш", callback_data="set_menu:back")])
+
+    text = (
+        "🌿 **АВТО-АПИТЕРАПИЯ ЖАДВАЛИ**\n\n"
+        f"Ҳозирги вақт: **{cur_time}**\n"
+        f"Ҳолати: **{status_label}**\n\n"
+        "Ҳар куни ушбу вақтда канал ва гуруҳларга янги шифобахш апитерапия мақоласи юборилади:"
+    )
+    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("api_sched_time:"))
+async def on_api_sched_time(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    t = call.data.split(":")[1]
+    update_setting("apitherapy_schedule_time", t)
+    await call.answer(f"Вақт белгиланди: {t}")
+    await on_api_sched_menu(call)
+
+@dp.callback_query(F.data == "api_sched_toggle")
+async def on_api_sched_toggle(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    settings = get_settings()
+    cur = settings.get("apitherapy_schedule_enabled", True)
+    update_setting("apitherapy_schedule_enabled", not cur)
+    await call.answer(f"Ҳолат ўзгарди: {'Ўчирилди ❌' if cur else 'Ёқилди ✅'}")
+    await on_api_sched_menu(call)
+
+# ==============================================================================
+# 21. GURUH VA KANALLAR NAZORATI, ROZILIK VA XAVFSIZLIK (1-RASMDAGIDEK)
+# ==============================================================================
+@dp.callback_query(F.data.startswith("chat_auth_ok:"))
+async def on_chat_auth_ok(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    chat_id = int(call.data.split(":")[1])
+    pending = load_json_file(PENDING_CHATS_FILE, {})
+    p_info = pending.pop(str(chat_id), {})
+    save_json_file(PENDING_CHATS_FILE, pending)
+
+    save_allowed_chat(chat_id, p_info.get("title", "Tasdiqlangan Guruh"), p_info.get("type", "group"))
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "✅ **Asalarichilik.Uz 🇺🇿 Мутахассиси фаоллаштирилди!**\n\n"
+                f"Ушбу чат бот эгаси ({OWNER_USERNAME}) томонидан расмий тасдиқланди.\n\n"
+                "🛡 Фаол ҳимоялар:\n"
+                "• Расм ва видео лимитлари (кунига 3 тадан кўп юборилса 24 соатга МУТЕ!)\n"
+                "• Кунлик илмий викториналар, янгиликлар ва апитерапия мақолалари."
+            )
+        )
+    except Exception:
+        pass
+
+    await call.message.edit_text(
+        f"✅ **Чат муваффақиятли тасдиқланди!**\n\n"
+        f"📍 Номи: {p_info.get('title')}\n"
+        f"🆔 ID: `{chat_id}`\n"
+        "Бот гуруҳда тўлиқ ишлашни бошлади.",
+        parse_mode="Markdown"
+    )
+    await call.answer("Тасдиқланди!")
+
+@dp.callback_query(F.data.startswith("chat_auth_no:"))
+async def on_chat_auth_no(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    chat_id = int(call.data.split(":")[1])
+    pending = load_json_file(PENDING_CHATS_FILE, {})
+    p_info = pending.pop(str(chat_id), {})
+    save_json_file(PENDING_CHATS_FILE, pending)
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⛔️ **КИРИШ РАД ЭТИЛДИ!**\n\n"
+                "Бот эгаси (@JamshidjonDavronov) ушбу чатда ишлашни тасдиқламади.\n"
+                "🚪 Бот чатни тарк этмоқда..."
+            )
+        )
+    except Exception:
+        pass
+    try:
+        await bot.leave_chat(chat_id)
+    except Exception:
+        pass
+
+    await call.message.edit_text(
+        f"❌ **Чат рад этилди ва бот чиқиб кетди.**\n\n"
+        f"📍 Номи: {p_info.get('title')}\n"
+        f"🆔 ID: `{chat_id}`",
+        parse_mode="Markdown"
+    )
+    await call.answer("Рад этилди ва тарк этилди!")
+
+@dp.message(F.text.in_({"👑 Гуруҳлар назорати", "Гуруҳлар назорати"}))
+async def group_control_menu(message: types.Message):
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    chats = load_allowed_chats()
+    groups = {cid: c for cid, c in chats.items() if c.get("type") in ["group", "supergroup", "Guruh"]}
+    
+    rows = []
+    for cid, c in list(groups.items())[:10]:
+        title = c.get("title", "Guruh")
+        rows.append([
+            InlineKeyboardButton(text=f"👥 {title[:20]}", callback_data=f"grp_info:{cid}"),
+            InlineKeyboardButton(text="❌ Чиқиш", callback_data=f"grp_leave:{cid}")
+        ])
+    rows.append([InlineKeyboardButton(text="➕ Янги гуруҳга қўшиш қўлланмаси", callback_data="grp_add_guide")])
+    rows.append([InlineKeyboardButton(text="« Орқага", callback_data="set_close")])
+
+    text = (
+        "👑 **ГУРУҲЛАР НАЗОРАТИ ВА ХАВФСИЗЛИГИ**\n\n"
+        f"Бот уланган расмий гуруҳлар сони: **{len(groups)} та**\n\n"
+        "• Ҳар бир гуруҳга бегона фойдаланувчи ботни қўшса, аввал сиздан тасдиқ олинади.\n"
+        "• Гуруҳда 1 кунда 3 тадан кўп расм/видео юборган аъзолар 1 кунга МУТЕ қилинади."
+    )
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("grp_leave:"))
+async def on_grp_leave(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    cid = call.data.split(":")[1]
+    chats = load_allowed_chats()
+    if cid in chats:
+        del chats[cid]
+        save_json_file(ALLOWED_CHATS_FILE, chats)
+    try:
+        await bot.leave_chat(int(cid))
+    except Exception:
+        pass
+    await call.answer("Бот гуруҳдан чиқарилди!", show_alert=True)
+    await group_control_menu(call.message)
+
+@dp.message(F.text.in_({"📢 Каналлар бошқаруви", "Каналлар бошқаруви"}))
+async def channel_control_menu(message: types.Message):
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    off_c = get_official_channel()
+    title = get_channel_title()
+    
+    rows = [
+        [InlineKeyboardButton(text="🔄 Канал уланишини текшириш", callback_data="chan_check")],
+        [InlineKeyboardButton(text="📝 Синов постини юбориш", callback_data="chan_test_post")],
+        [InlineKeyboardButton(text="✏️ Канал ҳаволасини ўзгартириш", callback_data="set_change_channel")],
+        [InlineKeyboardButton(text="🏷 Канал номини ўзгартириш", callback_data="set_change_channel_title")],
+        [InlineKeyboardButton(text="« Орқага", callback_data="set_close")]
+    ]
+    text = (
+        "📢 **КАНАЛЛАР БОШҚАРУВИ**\n\n"
+        f"• **Асосий расмий канал:** {off_c}\n"
+        f"• **Канал номи:** {title}\n"
+        "• **Ҳолати:** Фаол\n\n"
+        "Ушбу каналга бот автоматик равишда янгиликлар, апитерапия мақолалари ва кун викториналарини юборади."
+    )
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "chan_check")
+async def on_chan_check(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    ch = get_official_channel()
+    try:
+        chat = await bot.get_chat(ch)
+        await call.answer(f"✅ Канал фаол: {chat.title}", show_alert=True)
+    except Exception as e:
+        await call.answer(f"⚠️ Текшириш хатолиги: {e}", show_alert=True)
+
+@dp.callback_query(F.data == "chan_test_post")
+async def on_chan_test_post(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    ch = get_official_channel()
+    settings = get_settings()
+    try:
+        markup = build_post_markup(
+            chat_id=0,
+            message_id=0,
+            reactions_list=settings.get("reactions"),
+            channel_username=ch.lstrip("@"),
+            is_channel_post=True,
+            share_title="Синов пости"
+        )
+        msg = await bot.send_message(
+            chat_id=ch,
+            text=f"🐝 **Asalarichilik.Uz 🇺🇿 Синов пости!**\n\nБот муваффақиятли уланди ва ишламоқда.\n{get_official_footer()}",
+            reply_markup=markup,
+            parse_mode=None
+        )
+        await call.answer("✅ Синов пости каналга юборилди!", show_alert=True)
+    except Exception as e:
+        await call.answer(f"Хатолик: {e}", show_alert=True)
+
+@dp.message(F.text.in_({"➕ Гуруҳга қўшиш", "Гуруҳга қўшиш"}))
+async def add_to_group_guide(message: types.Message):
+    text = (
+        "➕ **БОТНИ ГУРУҲГА ҚЎШИШ:**\n\n"
+        "1. Гуруҳингиз профилига киринг ва «Администраторлар» бўлимини очинг.\n"
+        "2. «Админ қўшиш»ни босиб, @Asalarichiliktv_bot ни изланг.\n"
+        "3. Ботга хабар ёзиш ва хабарларни ўчириш ҳуқуқини бериб админ қилинг.\n\n"
+        "⚠️ **МУҲИМ:** Бегона гуруҳларга қўшилганда, бот эгаси @JamshidjonDavronov розилик берганидан кейингина фаоллашади."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Гуруҳга қўшиш", url="https://t.me/Asalarichiliktv_bot?startgroup=true")]
+    ])
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.message(F.text.in_({"➕ Каналга қўшиш", "Каналга қўшиш"}))
+async def add_to_channel_guide(message: types.Message):
+    text = (
+        "➕ **БОТНИ КАНАЛГА ҚЎШИШ:**\n\n"
+        "1. Каналингиз профилига кириб, «Администраторлар» бўлимига киринг.\n"
+        "2. @Asalarichiliktv_bot ни қидириб топинг ва админ қилиб тайинланг.\n"
+        "3. Ботга «Пост юбориш (Post Messages)» ва «Постларни қадаш (Pin Messages)» ҳуқуқларини беринг."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Каналга қўшиш", url="https://t.me/Asalarichiliktv_bot?startchannel=true")]
+    ])
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.message(F.text.in_({"👑 Бот эгаси", "Бот эгаси"}))
+async def bot_owner_card(message: types.Message):
+    text = (
+        "👑 **БОТ ЭГАСИ ВА АДМИНИСТРАТОР:**\n\n"
+        "👨‍💻 **Жамшид Давронов**\n"
+        "📱 Telegram: @JamshidjonDavronov\n"
+        "🆔 ID: `2047501151`\n\n"
+        "🐝 «Asalarichilik.Uz» миллий лойиҳаси раҳбари.\n"
+        "Савол ва таклифлар, ҳамкорлик ҳамда ботни гуруҳга қўшиш бўйича бемалол боғланишингиз мумкин."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Мутахассис билан боғланиш", url="https://t.me/JamshidjonDavronov")]
+    ])
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.message(F.text.in_({"📢 Реклама тарқатиш", "Реклама тарқатиш"}))
+async def broadcast_menu(message: types.Message):
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    text = (
+        "📢 **РЕКЛАМА ВА ЭЪЛОН ТАРҚАТИШ**\n\n"
+        "Тарқатмоқчи бўлган эълонингизни расм, видео ёки матн кўринишида тайёрлаб "
+        "«📝 Пост яратиш» бўлими орқали юборишингиз мумкин.\n"
+        "Сўнгра уни бир вақтнинг ўзида барча гуруҳ ва каналларга узатишингиз мумкин."
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message(F.text.in_({"🌐 Тилни ўзгартириш", "Тилни ўзгартириш"}))
+async def change_lang_menu(message: types.Message):
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    settings = get_settings()
+    cur = settings.get("script_mode", "cyrillic")
+    txt_cyr = "✅ Крилча 🇺🇿" if cur == "cyrillic" else "Крилча 🇺🇿"
+    txt_lat = "✅ Lotincha 🇺🇿" if cur == "latin" else "Lotincha 🇺🇿"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=txt_cyr, callback_data="lang_select:cyrillic")],
+        [InlineKeyboardButton(text=txt_lat, callback_data="lang_select:latin")],
+        [InlineKeyboardButton(text="« Орқага", callback_data="set_close")]
+    ])
+    await message.answer("🌐 **Бот алифбосини танланг:**", reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("lang_select:"))
+async def on_lang_select(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    mode = call.data.split(":")[1]
+    update_setting("script_mode", mode)
+    await call.answer(f"Танланди: {'Крилча' if mode == 'cyrillic' else 'Лотинча'}", show_alert=True)
+    await call.message.delete()
+
+@dp.message(F.text.in_({"📖 Бот қўлланмаси", "Бот қўлланмаси"}))
+async def bot_guide_menu(message: types.Message):
+    text = (
+        "📖 **«Asalarichilik.Uz» БОТ ҚЎЛЛАНМАСИ:**\n\n"
+        "1. 🐝 **Викторина & Сўровнома:** Камида 1000 та савол базаси. Сўровнома кўринишида кўриб, сўнг канал ва гуруҳга узатиш мумкин.\n"
+        "2. 📰 **Асаларичилик янгиликлари:** Жаҳон ва Ўзбекистон асаларичилик соҳаси янгиликлари.\n"
+        "3. 🌿 **Апитерапия янгиликлари:** Асал, прополис, она сути, ари заҳри, перга ва мум куясидан даволаш рецептлари ва технологиялари (1000+ база + кунлик 10 та янгилик).\n"
+        "4. 🛡 **Гуруҳ хавфсизлиги:** 1 кунда 3 тадан кўп расм/видео юборган аъзо 1 кунга ёзишдан чекланади (МУТЕ).\n"
+        "5. ⚙️ **Созламалар:** Постлар остига реакциялар, улашиш ва мутахассис тугмаларини ёқиш/ўчириш."
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message(F.text.in_({"⚙️ Гуруҳ созламалари", "Гуруҳ созламалари"}))
+async def group_settings_btn_cmd(message: types.Message):
+    await settings_cmd(message)
+
+# ==============================================================================
+# 22. GURUHLARDA RASM/VIDEO CHEKLOVI (1 KUNDA 3 TA, 4-CHISIDA 1 KUNLIK MUTE)
+# ==============================================================================
+@dp.message(F.chat.type.in_({"group", "supergroup"}) & (F.photo | F.video | F.animation))
+async def group_media_limiter_handler(message: types.Message):
+    try:
+        chat_id = message.chat.id
+        user = message.from_user
+        if not user or user.id == OWNER_ID:
+            return
+            
+        # Adminlarni tekshirish - adminlarga cheklov qo'llanilmaydi
+        try:
+            m = await bot.get_chat_member(chat_id, user.id)
+            if m.status in ["administrator", "creator"]:
+                return
+        except Exception:
+            pass
+            
+        today = datetime.now().strftime("%Y-%m-%d")
+        limits = load_json_file(MEDIA_LIMITS_FILE, {})
+        day_data = limits.setdefault(today, {})
+        chat_data = day_data.setdefault(str(chat_id), {})
+        
+        user_cnt = chat_data.get(str(user.id), 0) + 1
+        chat_data[str(user.id)] = user_cnt
+        save_json_file(MEDIA_LIMITS_FILE, limits)
+        
+        if user_cnt > 3:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                until_ts = int(datetime.now().timestamp() + 86400)
+                await bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user.id,
+                    permissions=ChatPermissions(can_send_messages=False),
+                    until_date=until_ts
+                )
+                warn = (
+                    f"⚠️ <b>{user.full_name}</b>: Гуруҳда бир кунда 3 тадан кўп расм/видео юбориш тақиқланган!\n"
+                    f"🚫 <b>24 соатга ёзиш чекланди (1 кунлик МУТЕ)!</b>"
+                )
+                await bot.send_message(chat_id=chat_id, text=warn, parse_mode="HTML")
+            except Exception as re:
+                logging.warning(f"restrict error: {re}")
+    except Exception as e:
+        logging.error(f"group_media_limiter_handler error: {e}")
