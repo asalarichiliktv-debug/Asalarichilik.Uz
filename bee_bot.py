@@ -66,7 +66,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 # 1. BOT ASOSIY SOZLAMALARI VA KALITLAR
 # ==============================================================================
 BOT_TOKEN = "8699352520:AAHjJRBFFACzUTQfKQAgtVEOKLhbj-tpsw0"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_2") = "AQ.Ab8RN6ICf_vax9VBZtjjkIVfYOx11HjO3ZMFiBizCjKrmuflNw"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_2")
 OWNER_ID = 2047501151
 OWNER_USERNAME = "@JamshidjonDavronov"
 OFFICIAL_CHANNEL = "@uz_asalarichilik"
