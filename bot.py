@@ -717,10 +717,10 @@ def restore_settings_from_backup():
                 vals = [g[k] for k in cols]
                 placeholders = ", ".join(["?"] * len(cols))
                 col_names = ", ".join(cols)
-                cur.execute(f"INSERT OR IGNORE INTO groups ({col_names}) VALUES ({placeholders})", vals)
+                cur.execute(f"INSERT OR REPLACE INTO groups ({col_names}) VALUES ({placeholders})", vals)
             for c in channels_data:
                 cur.execute(
-                    "INSERT OR IGNORE INTO channels (chat_id, title, username) VALUES (?, ?, ?)",
+                    "INSERT OR REPLACE INTO channels (chat_id, title, username) VALUES (?, ?, ?)",
                     (c.get("chat_id"), c.get("title"), c.get("username"))
                 )
             _raw_conn.commit()
@@ -759,7 +759,7 @@ def ensure_main_group_seeded():
                         ?, ?, ?, 1, 'uz_kr',
                         1, 1, 1, 1, 1,
                         0, 1, 0, 0, 0,
-                        1, 1, 0, 0,
+                        0, 1, 0, 0,
                         1, 3, 1, 1, 24, 2,
                         '23:00', '06:30', 1, 60,
                         5, 'Тошкент (UTC+5)', 1, 'Тошкент', '08:00', '10_days'
@@ -849,8 +849,12 @@ def get_group(group_id):
 
 def is_admin(chat_id, user_id):
     # Telegram хизмат ҳисоблари ва бот эгаси
-    if user_id == OWNER_ID or user_id in [777000, 1087968824, 136817688]:
+    if user_id == OWNER_ID:
         return True
+    if user_id in [777000, 1087968824]:
+        return True
+    if user_id <= 0:
+        return False
     try:
         m = bot.get_chat_member(chat_id, user_id)
         return m.status in ['creator', 'administrator']
@@ -3617,10 +3621,19 @@ def analyze_bee_disease_or_question(query_text, photo_bytes=None, mime_type="ima
 
 # 8. ЎЗБЕКИСТОН ВИЛОЯТЛАРИ ВА ОБ-ҲАВО
 REGIONS_UZ_KR = [
+    "Барча вилоятлар (Республика)",
     "Тошкент шаҳри ва вилояти", "Андижон вилояти", "Бухоро вилояти", "Жиззах вилояти",
     "Қашқадарё вилояти", "Навоий вилояти", "Наманган вилояти", "Самарқанд вилояти",
     "Сурхондарё вилояти", "Сирдарё вилояти", "Тошкент вилояти", "Фарғона вилояти",
     "Хоразм вилояти", "Қорақалпоғистон Республикаси"
+]
+
+REGIONS_UZ_LIST = [
+    "Барча вилоятлар (Республика)",
+    "Тошкент", "Андижон", "Бухоро", "Жиззах",
+    "Қашқадарё", "Навоий", "Наманган", "Самарқанд",
+    "Сурхондарё", "Сирдарё", "Тошкент вилояти", "Фарғона",
+    "Хоразм", "Қорақалпоғистон"
 ]
 
 DAYS_NAME_KR = {1: "Душанба", 2: "Сешанба", 3: "Чоршанба", 4: "Пайшанба", 5: "Жума", 6: "Шанба", 7: "Якшанба"}
@@ -3822,6 +3835,46 @@ BEEKEEPING_TIPS = [
         "text_lat": "Asosiy asal yig'imi boshlanganda kuchli oilalarga vaqtida magazin yoki ikkinchi korpusni qo'ying. Joy yetmasa, arilar royaga tushib asal yig'ishni to'xtatadi!",
         "text_ru": "В период медосбора вовремя ставьте вторые корпуса и магазинные надставки. Теснота провоцирует роение и срывает сбор товарного мёда!",
         "icon": "🏛"
+    },
+    {
+        "cat": "autumn",
+        "title_kr": "Арилар тутами (клуб) ва қишдаги ҳарорат мўъжизаси",
+        "title_lat": "Arilar tutami (klub) va qishdagi harorat mo'jizasi",
+        "title_ru": "Зимний клуб пчёл и температурный феномен",
+        "text_kr": "🔬 <b>Қизиқарли факт:</b> Қишда ташқарида совуқ -20°C бўлса ҳам, уя ичидаги ари тутами (клуб) марказида ҳарорат доим +30...+34°C да сақланади! Арилар учиш мушакларини тебратиш орқали иссиқлик ишлаб чиқарадилар. Бу иссиқликни сақлаш учун кузда уяда ҳеч қачон ортиқча бўш рамкалар қолдирманг ва уяни ихчамланг!",
+        "text_lat": "🔬 <b>Qiziqarli fakt:</b> Qishda tashqarida -20°C bo'lsa ham, uya ichidagi ari tutami markazida harorat doim +30...+34°C saqlanadi! Arilar mushaklarini tebratib issiqlik ishlab chiqaradi. Bu issiqlikni saqlash uchun uyada ortiqcha bo'sh ramka qoldirmang!",
+        "text_ru": "🔬 <b>Интересный факт:</b> Даже при морозе -20°C, внутри зимнего клуба пчёл температура поддерживается на уровне +30...+34°C за счёт микроколебаний грудных мышц. Чтобы пчёлы не тратили лишнюю энергию, гнездо обязательно должно быть плотно сжато!",
+        "icon": "❄️"
+    },
+    {
+        "cat": "general",
+        "title_kr": "Асалариларнинг мулоқот рақси (Фон Фриш кашфиёти)",
+        "title_lat": "Arilarning muloqot raqsi (Fon Frish kashfiyoti)",
+        "title_ru": "Танец пчёл — уникальный язык общения",
+        "text_kr": "💃 <b>Қизиқарли факт:</b> Қидирувчи арилар янги гулзор ёки озуқа манбаини топганда, уяга қайтиб махсус «доирасимон» ва «тебранувчи» рақс тушадилар. Рақс йўналиши ва тебраниш тезлиги орқали озуқанинг қуёшга нисбатан бурчаги ва 5 км гача бўлган аниқ масофасини бошқа ариларга хабар берадилар!",
+        "text_lat": "💃 <b>Qiziqarli fakt:</b> Qidiruvchi arilar yangi ozuqa manbaini topganda, uyaga qaytib maxsus raqs tushadilar. Raqs orqali ozuqaning quyoshga nisbatan burchagi va 5 km gacha bo'lgan aniq masofasini boshqa arilarga yetkazadilar!",
+        "text_ru": "💃 <b>Интересный факт:</b> Пчёлы-разведчицы сообщают о найденном медоносе при помощи кругового и виляющего танца, передавая точный угол относительно солнца и расстояние до источника корма до 5 км!",
+        "icon": "💃"
+    },
+    {
+        "cat": "autumn",
+        "title_kr": "Прополис (ари елими) — уянинг табиий антибиотиги",
+        "title_lat": "Propolis (ari yelimi) — uyaning tabiiy antibiotigi",
+        "title_ru": "Прополис — природный антибиотик пасеки",
+        "text_kr": "🛡 <b>Қизиқарли факт:</b> Кузда арилар уядаги барча тирқишларни прополис билан суваб чиқади. Прополис фақат иссиқликни сақлаб қолмай, кучли бактерия, вирус ва моғор ўлдирувчи хусусиятга эга бўлиб, қиш бўйи уя ҳавосини тоза ва мутлақо стерил сақлайди.",
+        "text_lat": "🛡 <b>Qiziqarli fakt:</b> Kuzda arilar uyadagi barcha tirqishlarni propolis bilan suvab chiqadi. Propolis faqat issiqlikni saqlamay, kuchli bakteriya va virus o'ldiruvchi xususiyatga ega bo'lib, qish bo'yi uya havosini steril saqlaydi.",
+        "text_ru": "🛡 <b>Интересный факт:</b> Осенью пчёлы заделывают все щели прополисом. Прополис — мощнейший природный бактерицид, уничтожающий вирусы и споры плесени, обеспечивая абсолютную стерильность гнезда зимой.",
+        "icon": "🛡"
+    },
+    {
+        "cat": "general",
+        "title_kr": "Она ари (матка)нинг ёши ва оила унумдорлиги",
+        "title_lat": "Ona ari (matka)ning yoshi va oila unumdorligi",
+        "title_ru": "Возраст матки и продуктивность семьи",
+        "text_kr": "👑 <b>Ёш асаларичига тавсия:</b> 1-2 ёшли ёш она ари кунига 1500-2000 тагача тухум қўяди ва оилани роя кайфиятига туширмайди. 3 ёшдан ошган она ариларнинг насл бериш қобилияти пасаяди ва оила кучсизланиб қолади. Она арини ҳар 2 йилда ёшартириб боринг!",
+        "text_lat": "👑 <b>Yosh asalarichiga tavsiya:</b> 1-2 yoshli ona ari kuniga 1500-2000 tagacha tuxum qo'yadi va oilani royaga tushirmaydi. 3 yoshdan oshgach nasl berish pasayadi. Ona arini har 2 yilda yoshartirib boring!",
+        "text_ru": "👑 <b>Совет начинающим:</b> Молодые 1-2 летние матки откладывают до 2000 яиц в сутки и предотвращают роение. С трёх лет яйценоскость резко падает. Регулярная смена маток каждые 2 года — главный залог медосбора!",
+        "icon": "👑"
     }
 ]
 
@@ -3830,23 +3883,7 @@ def generate_weather_report(region_name="Тошкент", forecast_type="10_days
     clean_reg = region_name.replace(" вилояти", "").replace(" шаҳри ва вилояти", "").replace(" шаҳри", "")
     days_cnt = 1 if forecast_type == "1_day" else (3 if forecast_type == "3_days" else 10)
     
-    # 1. Сарлавҳа (Header)
-    if lang == "ru":
-        title_hdr = f"⛅️ <b>ПРОГНОЗ ПОГОДЫ — {clean_reg.upper()}</b>"
-        sub_hdr = f"🗓 Подробный прогноз на {days_cnt} {'день' if days_cnt == 1 else ('дня' if days_cnt == 3 else 'дней')}"
-    elif lang == "en":
-        title_hdr = f"⛅️ <b>WEATHER FORECAST — {clean_reg.upper()}</b>"
-        sub_hdr = f"🗓 Detailed forecast for {days_cnt} {'day' if days_cnt == 1 else 'days'}"
-    elif lang == "uz_lat":
-        title_hdr = f"⛅️ <b>OB-HAVO MA'LUMOTI — {clean_reg.upper()}</b>"
-        sub_hdr = f"🗓 {days_cnt} kunlik batafsil ob-havo bashorati"
-    else:
-        title_hdr = f"⛅️ <b>ОБ-ҲАВО МАЪЛУМОТИ — {clean_reg.upper()}</b>"
-        sub_hdr = f"🗓 {days_cnt} кунлик батафсил об-ҳаво башорати"
-        
-    lines = [title_hdr, sub_hdr, "───────────────────"]
-    
-    # 2. Ўзбекистон фаслларига мос ҳарорат ва об-ҳаво маълумотлари
+    # Ўзбекистон фаслларига мос ҳарорат базаси
     MONTH_CLIMATE = {
         1: (4, 9, -5, 1),
         2: (7, 13, -2, 4),
@@ -3861,7 +3898,129 @@ def generate_weather_report(region_name="Тошкент", forecast_type="10_days
         11: (10, 17, 1, 7),
         12: (4, 10, -4, 2)
     }
-    
+
+    # ЁШ АСАЛАРИЧИЛАР УЧУН КУНЛИК ТАВСИЯНИ ТАНЛАШ
+    cur_m = now.month
+    if cur_m in [9, 10, 11]:
+        cur_season = "autumn"
+    elif cur_m in [12, 1, 2]:
+        cur_season = "cold_rain"
+    elif cur_m in [3, 4, 5]:
+        cur_season = "spring"
+    else:
+        cur_season = "summer"
+
+    matching_tips = [t for t in BEEKEEPING_TIPS if t.get("cat") in [cur_season, "general"]]
+    if not matching_tips:
+        matching_tips = BEEKEEPING_TIPS
+    tip_seed = (now.year * 1000 + now.timetuple().tm_yday * 24 + now.hour) % len(matching_tips)
+    chosen_tip = matching_tips[tip_seed]
+
+    t_icon = chosen_tip.get("icon", "💡")
+    if lang == "ru":
+        tip_hdr = "💡 <b>СОВЕТ И ФАКТ ДНЯ ДЛЯ НАЧИНАЮЩИХ ПЧЕЛОВОДОВ:</b>"
+        t_title = chosen_tip.get("title_ru", "")
+        t_text = chosen_tip.get("text_ru", "")
+    elif lang == "uz_lat":
+        tip_hdr = "💡 <b>YOSH VA YANGI ASALARICHILAR UCHUN KUN TAVSIYASI VA QIZIQARLI MA'LUMOT:</b>"
+        t_title = chosen_tip.get("title_lat", "")
+        t_text = chosen_tip.get("text_lat", "")
+    else:
+        tip_hdr = "💡 <b>ЯНГИ ВА ЁШ АСАЛАРИЧИЛАР УЧУН КУНЛИК ҚИЗИҚАРЛИ МАЪЛУМОТ ВА ТАВСИЯ:</b>"
+        t_title = chosen_tip.get("title_kr", "")
+        t_text = chosen_tip.get("text_kr", "")
+
+    # ТЕКШИРУВ: БАРЧА ВИЛОЯТЛАР (УМУМРЕСПУБЛИКА КУНЛИК БАШОРАТИ)
+    is_all_regions = any(kw in region_name.lower() for kw in ["барча", "бутун", "республика", "все регион", "all region"])
+    if is_all_regions:
+        day_num = now.isoweekday()
+        if lang == "ru":
+            title_hdr = "⛅️ <b>ПРОГНОЗ ПОГОДЫ — ВСЕ РЕГИОНЫ УЗБЕКИСТАНА</b>"
+            m_str = RU_MONTHS[cur_m - 1]
+            sub_hdr = f"🗓 {now.day}-{m_str}, {DAYS_NAME_RU.get(day_num, '')} | Ежедневный обзор по всей Республике"
+        elif lang == "uz_lat":
+            title_hdr = "⛅️ <b>OB-HAVO MA'LUMOTI — BARCHA VILOYATLAR (O'ZBEKISTON)</b>"
+            m_str = UZ_MONTHS_LAT[cur_m - 1]
+            sub_hdr = f"🗓 {now.day}-{m_str}, {DAYS_NAME_LAT.get(day_num, '')} | Kunlik umumrespublika ob-havo bayoni"
+        elif lang == "en":
+            title_hdr = "⛅️ <b>WEATHER FORECAST — ALL REGIONS OF UZBEKISTAN</b>"
+            m_str = EN_MONTHS[cur_m - 1]
+            sub_hdr = f"🗓 {m_str} {now.day}, {DAYS_NAME_EN.get(day_num, '')} | Daily Nationwide Summary"
+        else:
+            title_hdr = "⛅️ <b>ОБ-ҲАВО МАЪЛУМОТИ — БАРЧА ВИЛОЯТЛАР (ЎЗБЕКИСТОН)</b>"
+            m_str = UZ_MONTHS[cur_m - 1]
+            sub_hdr = f"🗓 {now.day}-{m_str}, {DAYS_NAME_KR.get(day_num, '')} | Кунлик умумреспублика об-ҳаво баёни"
+
+        lines = [title_hdr, sub_hdr, "───────────────────"]
+
+        REG_ZONES = [
+            ("Тошкент шаҳри ва вилояти", 0, "4-8 м/с"),
+            ("Фарғона водийси (Андижон, Наманган, Фарғона)", 1, "3-6 м/с"),
+            ("Самарқанд ва Жиззах вилоятлари", 0, "4-7 м/с"),
+            ("Бухоро ва Навоий вилоятлари", 1, "5-9 м/с"),
+            ("Қашқадарё ва Сурхондарё вилоятлари", 3, "3-7 м/с"),
+            ("Сирдарё вилояти", 0, "4-8 м/с"),
+            ("Хоразм вилояти ва Қорақалпоғистон", -2, "5-10 м/с")
+        ]
+
+        base_d_min, base_d_max, base_n_min, base_n_max = MONTH_CLIMATE.get(cur_m, (17, 24, 6, 12))
+        base_mid = (base_d_min + base_d_max) // 2
+
+        for r_name, r_offset, r_wind in REG_ZONES:
+            t_d = max(base_d_min, min(base_d_max + 2, base_mid + r_offset))
+            t_n = max(base_n_min, t_d - 11)
+
+            if t_d >= 18 and t_d <= 30:
+                bee_st = "🟢 Жуда қулай (Арилар фаол)"
+            elif t_d >= 12 and t_d < 18:
+                bee_st = "🟡 Ўртача қулай (Салқин)"
+            elif t_d > 30:
+                bee_st = "🟠 Иссиқ (Сувдон назорати)"
+            else:
+                bee_st = "🔴 Совуқ (Уяни очманг)"
+
+            if cur_m in [12, 1, 2]:
+                cond_txt = "☀️ Очиқ, қуёшли ва совуқ" if r_offset >= 0 else "⛅️ Булутли, қор эҳтимоли"
+            elif cur_m in [6, 7, 8]:
+                cond_txt = "☀️ Иссиқ ва қуёшли"
+            else:
+                cond_txt = "☀️ Очиқ, илиқ кузги қуёш" if r_offset >= 0 else "🌤 Ўзгарувчан булутли"
+
+            lines.append(f"📍 <b>{r_name}:</b>")
+            lines.append(f"☀️ Кундузи: +{t_d}°C | 🌙 Кечаси: +{t_n}°C")
+            lines.append(f"🌤 Ҳолат: {cond_txt} | 💨 Шамол: {r_wind}")
+            lines.append(f"🐝 Асаларичилик: {bee_st}")
+            lines.append("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
+
+        lines.append("───────────────────")
+        lines.append(tip_hdr)
+        lines.append(f"{t_icon} <b>{t_title}:</b>")
+        lines.append(f"{t_text}")
+        lines.append("───────────────────")
+
+        if del_hours == 0 and del_mins == 0:
+            lines.append("📌 <i>Ушбу об-ҳаво маълумоти гуруҳда доимий сақланади (ўчирилмайди).</i>")
+        else:
+            lines.append(f"⏱ <i>Хабар {del_hours} соат {del_mins} дақиқадан сўнг автоматик ўчирилади.</i>")
+        lines.append(f"🐝 <b>@{BOT_USERNAME}</b> — @JamshidjonDavronov")
+        return "\n".join(lines)
+
+    # 1. Сарлавҳа (Бир ҳудуд учун)
+    if lang == "ru":
+        title_hdr = f"⛅️ <b>ПРОГНОЗ ПОГОДЫ — {clean_reg.upper()}</b>"
+        sub_hdr = f"🗓 Подробный прогноз на {days_cnt} {'день' if days_cnt == 1 else ('дня' if days_cnt == 3 else 'дней')}"
+    elif lang == "en":
+        title_hdr = f"⛅️ <b>WEATHER FORECAST — {clean_reg.upper()}</b>"
+        sub_hdr = f"🗓 Detailed forecast for {days_cnt} {'day' if days_cnt == 1 else 'days'}"
+    elif lang == "uz_lat":
+        title_hdr = f"⛅️ <b>OB-HAVO MA'LUMOTI — {clean_reg.upper()}</b>"
+        sub_hdr = f"🗓 {days_cnt} kunlik batafsil ob-havo bashorati"
+    else:
+        title_hdr = f"⛅️ <b>ОБ-ҲАВО МАЪЛУМОТИ — {clean_reg.upper()}</b>"
+        sub_hdr = f"🗓 {days_cnt} кунлик батафсил об-ҳаво башорати"
+        
+    lines = [title_hdr, sub_hdr, "───────────────────"]
+
     # Вилоятлар бўйича микро-иқлим тузатишлари:
     reg_offset = 0
     if any(s in clean_reg for s in ["Сурхондарё", "Қашқадарё", "Surxondaryo", "Qashqadaryo"]):
@@ -3958,40 +4117,6 @@ def generate_weather_report(region_name="Тошкент", forecast_type="10_days
             lines.append("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
             
     lines.append("───────────────────")
-    
-    # 3. ЁШ АСАЛАРИЧИЛАР УЧУН ДИНАМИК КУН ТАВСИЯСИ (Ҳар сафар янги маслаҳат!)
-    cur_m = now.month
-    if cur_m in [9, 10, 11]:
-        cur_season = "autumn"
-    elif cur_m in [12, 1, 2]:
-        cur_season = "cold_rain"
-    elif cur_m in [3, 4, 5]:
-        cur_season = "spring"
-    else:
-        cur_season = "summer"
-        
-    matching_tips = [t for t in BEEKEEPING_TIPS if t.get("cat") in [cur_season, "general", "warm_sunny" if first_day_temp >= 18 else "cold_rain"]]
-    if not matching_tips:
-        matching_tips = BEEKEEPING_TIPS
-        
-    # Ҳар сафар янгиланиб туриши учун кун ва соат асосида ротация:
-    tip_seed = (now.year * 1000 + now.timetuple().tm_yday * 24 + now.hour) % len(matching_tips)
-    chosen_tip = matching_tips[tip_seed]
-    
-    t_icon = chosen_tip.get("icon", "💡")
-    if lang == "ru":
-        tip_hdr = "💡 <b>СОВЕТ ДНЯ ДЛЯ НАЧИНАЮЩИХ ПЧЕЛОВОДОВ:</b>"
-        t_title = chosen_tip.get("title_ru", "")
-        t_text = chosen_tip.get("text_ru", "")
-    elif lang == "uz_lat":
-        tip_hdr = "💡 <b>YOSH ASALARICHILAR UCHUN KUN TAVSIYASI:</b>"
-        t_title = chosen_tip.get("title_lat", "")
-        t_text = chosen_tip.get("text_lat", "")
-    else:
-        tip_hdr = "💡 <b>ЁШ АСАЛАРИЧИЛАР УЧУН КУН ТАВСИЯСИ:</b>"
-        t_title = chosen_tip.get("title_kr", "")
-        t_text = chosen_tip.get("text_kr", "")
-        
     lines.append(tip_hdr)
     lines.append(f"{t_icon} <b>{t_title}:</b>")
     lines.append(f"{t_text}")
@@ -4147,17 +4272,11 @@ def open_group_selection(chat_id, message_id=None, lang="uz_kr"):
         gid = g["chat_id"]
         g_title = g.get("title") or f"Гуруҳ ({gid})"
         is_adm = check_bot_admin_status(gid)
-        if is_adm:
-            markup.row(
-                InlineKeyboardButton(f"⚙️ {g_title}", callback_data=f"panel_settings_{gid}"),
-                InlineKeyboardButton("🛡 Қулфлар (Замки)", callback_data=f"panel_locks_{gid}")
-            )
-        else:
-            btn_txt = f"⚠️ {g_title} ({'Не админ ❌' if lang == 'ru' else ('Not admin ❌' if lang == 'en' else 'Админ эмас ❌')})"
-            markup.row(
-                InlineKeyboardButton(btn_txt, callback_data=f"warn_not_admin_{gid}"),
-                InlineKeyboardButton("🛡 Қулфлар", callback_data=f"panel_locks_{gid}")
-            )
+        st_icon = "⚙️" if is_adm else "⚙️"
+        markup.row(
+            InlineKeyboardButton(f"{st_icon} {g_title}", callback_data=f"panel_settings_{gid}"),
+            InlineKeyboardButton("🛡 Қулфлар (Замки)", callback_data=f"panel_locks_{gid}")
+        )
 
     if lang == "ru":
         markup.row(InlineKeyboardButton("➕ Добавить в новую группу", callback_data="menu_add_group"))
@@ -5897,6 +6016,26 @@ def handle_all_private_messages(message):
                 return
             else:
                 bot.send_message(message.chat.id, "❌ Неверный формат времени! Введите ЧЧ:ММ (напр. 18:30) или ДД.ММ ЧЧ:ММ (напр. 15.10 18:30):")
+                return
+
+        # 2.0. Об-ҳаво ҳудудини қўлда ёзиш
+        if action == "wait_weather_city":
+            gid = state.get("group_id")
+            city_name = txt.strip()
+            if city_name:
+                cursor.execute("UPDATE groups SET weather_city = ? WHERE chat_id = ?", (city_name, gid))
+                conn.commit()
+                backup_settings_to_file()
+                USER_STATES.pop(user_id, None)
+                bot.send_message(
+                    message.chat.id,
+                    f"✅ <b>Об-ҳаво ҳудуди «{city_name}» қилиб белгиланди!</b>",
+                    parse_mode="HTML"
+                )
+                show_weather_panel(message.chat.id, gid, lang=u_lang)
+                return
+            else:
+                bot.send_message(message.chat.id, "❌ Ҳудуд номи бўш бўлиши мумкин эмас. Илтимос, шаҳар ёки вилоят номини ёзинг:")
                 return
 
         # 2. Об-ҳаво соатини қўлда ёзиш
@@ -8120,24 +8259,58 @@ def handle_all_callbacks(call):
     elif data.startswith("weather_cities_"):
         gid = int(data.replace("weather_cities_", ""))
         markup = InlineKeyboardMarkup()
-        for i in range(0, len(REGIONS_UZ_KR) - 1, 2):
-            r1 = REGIONS_UZ_KR[i].replace(" вилояти", "").replace(" шаҳри ва вилояти", " шаҳри")
-            r2 = REGIONS_UZ_KR[i+1].replace(" вилояти", "").replace(" шаҳри ва вилояти", " шаҳри")
-            markup.row(
-                InlineKeyboardButton(r1, callback_data=f"w_city_sel_{gid}_{r1}"),
-                InlineKeyboardButton(r2, callback_data=f"w_city_sel_{gid}_{r2}")
-            )
+        # Барча вилоятлар учун энг тепада алоҳида тугма:
+        markup.row(InlineKeyboardButton("🇺🇿 Барча вилоятлар (Республика бўйича)", callback_data=f"w_c_{gid}_0"))
+        for i in range(1, len(REGIONS_UZ_LIST), 2):
+            r1 = REGIONS_UZ_LIST[i]
+            btn1 = InlineKeyboardButton(r1, callback_data=f"w_c_{gid}_{i}")
+            if i + 1 < len(REGIONS_UZ_LIST):
+                r2 = REGIONS_UZ_LIST[i+1]
+                btn2 = InlineKeyboardButton(r2, callback_data=f"w_c_{gid}_{i+1}")
+                markup.row(btn1, btn2)
+            else:
+                markup.row(btn1)
+        markup.row(InlineKeyboardButton("✏️ Шаҳар номини қўлда ёзиш", callback_data=f"w_city_custom_{gid}"))
         markup.row(InlineKeyboardButton("◀️ Орқага", callback_data=f"panel_weather_{gid}"), InlineKeyboardButton("🏠 Асосий Меню", callback_data="back_main"))
-        bot.edit_message_text("📍 Гуруҳингиз қайси вилоят/ҳудудга тегишли?", chat_id, call.message.message_id, reply_markup=markup)
+        safe_edit_or_send(
+            chat_id,
+            call.message.message_id,
+            "📍 <b>Гуруҳингиз қайси вилоят/ҳудудга тегишли?</b>\n\n"
+            "Кунлик об-ҳавони <b>Бутун Ўзбекистон (Барча вилоятлар)</b> учун битта хабарда чиқаришингиз ёки алоҳида вилоятни танлашингиз мумкин:",
+            markup
+        )
         return
 
-    elif data.startswith("w_city_sel_"):
-        parts = data.split("_")
-        gid = int(parts[3])
-        city_name = "_".join(parts[4:])
+    elif data.startswith("w_city_custom_"):
+        gid = int(data.replace("w_city_custom_", ""))
+        USER_STATES[user_id] = {"action": "wait_weather_city", "group_id": gid}
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("◀️ Бекор қилиш", callback_data=f"panel_weather_{gid}"))
+        safe_edit_or_send(
+            chat_id,
+            call.message.message_id,
+            "📍 <b>Об-ҳаво учун ҳудуд ёки шаҳар номини ёзиб юборинг:</b>\n\n"
+            "<i>Масалан:</i> <code>Тошкент</code>, <code>Қўқон</code>, <code>Марғилон</code>, <code>Нукус</code>, <code>Шаҳрисабз</code> ва ҳ.к.",
+            markup
+        )
+        return
+
+    elif data.startswith("w_c_") or data.startswith("w_city_sel_"):
+        if data.startswith("w_c_"):
+            sub = data.replace("w_c_", "")
+            parts = sub.split("_")
+            gid = int(parts[0])
+            idx = int(parts[1])
+            city_name = REGIONS_UZ_LIST[idx] if (0 <= idx < len(REGIONS_UZ_LIST)) else "Тошкент"
+        else:
+            parts = data.split("_")
+            gid = int(parts[3])
+            city_name = "_".join(parts[4:])
+
         cursor.execute("UPDATE groups SET weather_city = ? WHERE chat_id = ?", (city_name, gid))
         conn.commit()
-        bot.answer_callback_query(call.id, f"✅ Ҳудуд: {city_name}")
+        backup_settings_to_file()
+        bot.answer_callback_query(call.id, f"✅ Ҳудуд белгиланди: {city_name}")
         show_weather_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
@@ -8155,6 +8328,19 @@ def handle_all_callbacks(call):
         )
         return
 
+    elif data.startswith("tz_r_"):
+        parts = data.replace("tz_r_", "").split("_")
+        gid = int(parts[0])
+        idx = int(parts[1])
+        s_name = REGIONS_UZ_LIST[idx] if (0 <= idx < len(REGIONS_UZ_LIST)) else "Тошкент"
+        city_label = f"{s_name} (UTC+5)"
+        cursor.execute("UPDATE groups SET timezone_offset = 5, timezone_city = ? WHERE chat_id = ?", (city_label, gid))
+        conn.commit()
+        backup_settings_to_file()
+        bot.answer_callback_query(call.id, f"✅ Минтақа сақланди: {city_label}")
+        show_timezone_panel(chat_id, gid, call.message.message_id, lang=u_lang)
+        return
+
     elif data.startswith("tz_set_quick_"):
         parts = data.split("_")
         gid = int(parts[3])
@@ -8162,6 +8348,7 @@ def handle_all_callbacks(call):
         city_label = "_".join(parts[5:])
         cursor.execute("UPDATE groups SET timezone_offset = ?, timezone_city = ? WHERE chat_id = ?", (offset, city_label, gid))
         conn.commit()
+        backup_settings_to_file()
         bot.answer_callback_query(call.id, f"✅ Минтақа сақланди: {city_label}")
         show_timezone_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
@@ -8169,15 +8356,17 @@ def handle_all_callbacks(call):
     elif data.startswith("tz_all_regions_"):
         gid = int(data.replace("tz_all_regions_", ""))
         markup = InlineKeyboardMarkup()
-        for i in range(0, len(REGIONS_UZ_KR) - 1, 2):
-            s1 = REGIONS_UZ_KR[i].replace(" вилояти", "").replace(" шаҳри ва вилояти", " шаҳри")
-            s2 = REGIONS_UZ_KR[i+1].replace(" вилояти", "").replace(" шаҳри ва вилояти", " шаҳри")
-            markup.row(
-                InlineKeyboardButton(s1, callback_data=f"tz_set_quick_{gid}_5_{s1} (UTC+5)"),
-                InlineKeyboardButton(s2, callback_data=f"tz_set_quick_{gid}_5_{s2} (UTC+5)")
-            )
+        for i in range(1, len(REGIONS_UZ_LIST), 2):
+            s1 = REGIONS_UZ_LIST[i]
+            btn1 = InlineKeyboardButton(s1, callback_data=f"tz_r_{gid}_{i}")
+            if i + 1 < len(REGIONS_UZ_LIST):
+                s2 = REGIONS_UZ_LIST[i+1]
+                btn2 = InlineKeyboardButton(s2, callback_data=f"tz_r_{gid}_{i+1}")
+                markup.row(btn1, btn2)
+            else:
+                markup.row(btn1)
         markup.row(InlineKeyboardButton("◀️ Орқага", callback_data=f"panel_timezone_{gid}"), InlineKeyboardButton("🏠 Асосий Меню", callback_data="back_main"))
-        bot.edit_message_text("🗺 Ўзингизга тегишли вилоятни танланг:", chat_id, call.message.message_id, reply_markup=markup)
+        safe_edit_or_send(chat_id, call.message.message_id, "🗺 <b>Ўзингизга тегишли вилоятни танланг:</b>", markup)
         return
 
     elif data.startswith("tz_custom_input_"):
@@ -8854,23 +9043,23 @@ def group_protection_filter(message):
     u_tag = f"@{u_obj.username}" if (u_obj and u_obj.username) else f"<a href='tg://user?id={user_id}'>{u_name}</a>"
 
     # ==================== 0. TELEGRAM ХИЗМАТ ҲИСОБЛАРИ ВА КАНАЛ ПОСТЛАРИНИ БЕХАТО ЎТКАЗИШ ====================
-    # 1. Telegram томонидан уланган каналдан автоматик келган барча хабарлар (муҳокама гуруҳига)
-    if getattr(message, 'is_automatic_forward', False):
-        return
-
-    # 2. Telegram тизим ҳисоби (777000 - Telegram Service), аноним админ (1087968824) ва канал боти (136817688)
-    if user_id in [777000, 1087968824, 136817688]:
-        return
-
-    # 3. Хабар канал ёки гуруҳ номидан (sender_chat) юборилган бўлса
+    # 1. Хабар канал ёки гуруҳ номидан (sender_chat) юборилган бўлса
     if getattr(message, 'sender_chat', None):
         # Фақат гуруҳнинг ўз аноним админи (sender_chat.id == chat_id) бўлса ўтказиш
         if message.sender_chat.id == chat_id:
             return
-        # Агар ташқаридан канал номи билан пост қўйилса, унга ҳам қулфлар ва медиа лимит қўлланади:
+        # Агар ташқаридан канал номи билан пост қўйилса, унга ҳам қулфлар ва медиа лимит тўлиқ қўлланади:
         user_id = message.sender_chat.id
         u_name = html.escape(message.sender_chat.title or "Канал")
         u_tag = f"<b>{u_name}</b>"
+
+    # 2. Telegram томонидан уланган каналдан автоматик келган барча хабарлар (муҳокама гуруҳига)
+    elif getattr(message, 'is_automatic_forward', False):
+        return
+
+    # 3. Telegram расмий тизим ҳисоблари (777000) ва аноним админ (1087968824)
+    elif user_id in [777000, 1087968824]:
+        return
 
     # 4. Ботнинг ўз хабарлари
     try:
@@ -9428,47 +9617,54 @@ def group_protection_filter(message):
                 )
                 conn.commit()
 
-            # Агар альбомда ёки кун давомида 3 тадан ортиқ расм/видео юборилса:
+            # Агар альбомда ёки кун давомида белгиланган лимитдан ортиқ расм/видео юборилса:
             is_excess = (mg_id and album_cnt > limit_max) or total_cnt > limit_max
             if is_excess:
-                # Ортиқча расмни дарҳол ўчирамиз!
+                # Ортиқча расмни дарҳол гуруҳдан ўчирамиз!
                 delete_msg_safe(chat_id, message.message_id)
 
                 is_repeat_within_24h = (warn_cnt >= 1 and (now_ts - last_warn_time) < 86400)
-                # Агар фойдаланувчи 24 соат ичида қайта ташласа ёки бирданига 5+ та расм/видео ташласа: ДАРҲОЛ 24 СОАТЛИК МУТ!
-                should_mute = is_repeat_within_24h or (mg_id and album_cnt >= 5) or (total_cnt >= 5)
+                # Агар фойдаланувчи 24 соат ичида қайта ташласа ёки бир вақтда лимитдан ортиқ (4 ва ундан кўп) ташласа: ДАРҲОЛ 24 СОАТЛИК МУТ!
+                should_mute = is_repeat_within_24h or (mg_id and album_cnt >= (limit_max + 1)) or (total_cnt >= (limit_max + 1))
 
                 if should_mute:
                     try:
                         until_ts = int(time.time() + 86400)
-                        restrict_perms = types.ChatPermissions(
-                            can_send_messages=False,
-                            can_send_media_messages=False,
-                            can_send_audios=False,
-                            can_send_documents=False,
-                            can_send_photos=False,
-                            can_send_videos=False,
-                            can_send_video_notes=False,
-                            can_send_voice_notes=False,
-                            can_send_polls=False,
-                            can_send_other_messages=False,
-                            can_add_web_page_previews=False
-                        )
-                        try:
-                            bot.restrict_chat_member(chat_id, user_id, until_date=until_ts, permissions=restrict_perms, use_independent_chat_permissions=True)
-                        except Exception:
-                            bot.restrict_chat_member(chat_id, user_id, until_date=until_ts, permissions=restrict_perms)
+                        if user_id < 0:
+                            # Агар бегона канал номи билан юборилган бўлса — канални гуруҳдан блоклаймиз
+                            try:
+                                bot.ban_chat_sender_chat(chat_id, user_id)
+                            except Exception as ce:
+                                logging.error(f"Ban sender chat {user_id} error: {ce}")
+                        else:
+                            restrict_perms = types.ChatPermissions(
+                                can_send_messages=False,
+                                can_send_media_messages=False,
+                                can_send_audios=False,
+                                can_send_documents=False,
+                                can_send_photos=False,
+                                can_send_videos=False,
+                                can_send_video_notes=False,
+                                can_send_voice_notes=False,
+                                can_send_polls=False,
+                                can_send_other_messages=False,
+                                can_add_web_page_previews=False
+                            )
+                            try:
+                                bot.restrict_chat_member(chat_id, user_id, until_date=until_ts, permissions=restrict_perms, use_independent_chat_permissions=True)
+                            except Exception:
+                                bot.restrict_chat_member(chat_id, user_id, until_date=until_ts, permissions=restrict_perms)
                     except Exception as me:
                         logging.error(f"Failed to 24h mute user {user_id}: {me}")
 
-                    last_w = _last_media_warn.get(user_id, 0)
-                    if now_ts - last_w > 5:
-                        _last_media_warn[user_id] = now_ts
+                    last_m = _last_media_warn.get(f"m_{user_id}", 0)
+                    if now_ts - last_m > 10:
+                        _last_media_warn[f"m_{user_id}"] = now_ts
                         mute_txt = (
                             f"🚫 <b>Ҳурматли {u_tag}!</b>\n\n"
-                            f"Сиз гуруҳда белгиланган <b>кўпи билан {limit_max} талик расм ва видео</b> лимитини бугунги огоҳлантиришдан сўнг <b>қайта буздингиз</b>!\n\n"
-                            f"⚖️ Қоидабузарлик сабабли сизга <b>24 соатлик (1 кунлик) ТЎЛИҚ МУТ</b> берилди. "
-                            f"24 соат давомида гуруҳга умуман ёза олмайсиз ва ҳеч қандай расм ёки видео ташлай олмайсиз!"
+                            f"Гуруҳимизда белгиланган <b>кўпи билан {limit_max} талик расм ва видео</b> лимити бузилди (бирданига ортиқча медиалар ташланди)!\n\n"
+                            f"⚖️ Қоидабузарлик сабабли сизга <b>24 соатлик (1 кунлик) ТЎЛИҚ МУТ</b> берилди (гуруҳга умуман ёза олмайсиз ва медиа юбора олмайсиз)!\n\n"
+                            f"❌ Белгиланган {limit_max} тадан ортиқча ташланган барча расм ва видеолар автоматик тарзда ўчирилди."
                         )
                         m_msg = bot.send_message(chat_id, mute_txt, parse_mode="HTML")
                         del_sec = max(g.get("limit_notice_del", 60), 60)
@@ -9476,7 +9672,7 @@ def group_protection_filter(message):
                     return
 
                 else:
-                    # Биринчи қоидабузарлик: ортиқчасини ўчириш ва расмий 1-огоҳлантириш бериш
+                    # Биринчи қоидабузарлик: ортиқчасини ўчириш ва расмий огоҳлантириш бериш
                     with _media_lock:
                         cursor.execute(
                             "UPDATE user_bee_ad_limits SET warn_count = 1, last_warn_ts = ? WHERE chat_id = ? AND user_id = ?",
@@ -9494,7 +9690,7 @@ def group_protection_filter(message):
                             f"⚠️ <b>ОГОҲЛАНТИРИШ! Ҳурматли {u_tag}!</b>\n\n"
                             f"Гуруҳимизда белгиланган қоида бўйича бир вақтнинг ўзида (ёки бир кунда) кўпи билан <b>{limit_max} тагина расм ва видео</b> юбориш мумкин!\n\n"
                             f"❌ Сиз {limit_max} тадан ортиқ ({album_cnt if mg_id else total_cnt}-чи) расм/видео юбордингиз. Белгиланган {limit_max} тадан ортиқча ташланганлари автоматик тарзда ўчирилди.\n\n"
-                            f"⚖️ <i>Илтимос, гуруҳга ортиқча расм ва видеолар ташламанг! Агар 24 соат ичида яна қайта расм ёки видео ташласангиз, 1 кунлик МУТ берилади (гуруҳга умуман ёза олмайсиз ва расм/видео ташлай олмайсиз).</i>"
+                            f"⚖️ <i>Илтимос, гуруҳга ортиқча расм ва видеолар ташламанг! Агар яна ортиқча расм ёки видео ташласангиз, дарҳол 1 кунлик (24 соатлик) МУТ берилади.</i>"
                         )
                         w_msg = bot.send_message(chat_id, warn_txt, parse_mode="HTML")
                         del_sec = max(g.get("limit_notice_del", 60), 60)
