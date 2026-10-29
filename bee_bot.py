@@ -2652,7 +2652,7 @@ def build_news_viewer_keyboard(idx: int, total: int, script: str = "cyrillic") -
 def build_news_menu_inline() -> InlineKeyboardMarkup:
     return build_news_viewer_keyboard(0, len(get_news_db()))
 
-@dp.message(F.text == "📰 Асаларичилик Янгиликлари")
+@dp.message(F.text.in_({"📰 Асаларичилик янгиликлари", "📰 Асаларичилик Янгиликлари", "Асаларичилик янгиликлари", "Асаларичилик Янгиликлари"}))
 async def news_cmd(message: types.Message):
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
@@ -4007,30 +4007,7 @@ async def poll_cmd(message: types.Message):
     )
 
 # ==============================================================================
-# 22. SHAXSIY YOZISHMA (LICHKA): FAQAT BOT EGASI UCHUN MUTAXASSIS
-# ==============================================================================
-@dp.message(F.chat.type == "private")
-async def private_chat_handler(message: types.Message):
-    if message.from_user.id != OWNER_ID:
-        await message.reply(
-            "⛔️ **Кириш чекланган!**\n\n"
-            f"Кечирасиз, ушбу ботдан фойдаланиш фақат бот эгаси ({OWNER_USERNAME}) учун очиқ."
-        )
-        return
-
-    if not message.text or message.text.startswith("/"):
-        return
-
-    text = message.text
-    chat_id = message.chat.id
-
-    try:
-        await bot.send_chat_action(chat_id=chat_id, action="typing")
-        reply_text = await ask_beekeeping_expert(text)
-        await message.reply(f"🐝 **Asalarichilik.Uz 🇺🇿 Мутахассиси:**\n\n{reply_text}")
-    except Exception as e:
-        logging.error(f"Xatolik (private): {e}")
-        await message.reply("Кечирасиз, саволга жавоб олишда вақтинчалик узилиш бўлди.")
+# (private_chat_handler moved to the bottom of all message handlers)
 
 # ==============================================================================
 # 23. GURUHLARNI NAZORAT QILISH VA SAVOLLARGA JAVOB BERISH
@@ -4298,92 +4275,11 @@ async def daily_scheduler_loop():
 # ==============================================================================
 # 25. MAIN ENTRY POINT
 # ==============================================================================
-async def main():
-    global bot
-    print("=" * 70, flush=True)
-    print("🐝 Asalarichilik.Uz 🇺🇿 Rasmiy Telegram Boti va Post Konstruktori (bot.py)", flush=True)
-    print(f"👑 Bot egasi: {OWNER_USERNAME} (ID: {OWNER_ID})", flush=True)
-    print("📊 2-rasmdagidek Native Telegram Quiz Poll & Avto-jadval faollashtirildi.", flush=True)
-    print("📰 1000+ gacha yangilanuvchi Asalarichilik Yangiliklari va Shablonlar tizimi tayyor.", flush=True)
-    print("=" * 70, flush=True)
 
-    # Ulanishni sinash va eng yaxshi kanalni (Proxy yoki To'g'ridan-to'g'ri) aniqlash
-    connected = False
-    proxy_url = get_proxy()
-    if proxy_url:
-        try:
-            print(f"🔄 PythonAnywhere proksi ({proxy_url}) orqali tekshirilmoqda...", flush=True)
-            test_bot = get_bot_instance(use_proxy=True)
-            me = await test_bot.get_me()
-            print(f"✅ Proksi orqali muvaffaqiyatli ulandi: @{me.username} (ID: {me.id})", flush=True)
-            bot = test_bot
-            connected = True
-        except Exception as pe:
-            print(f"⚠️ Proksi vaqtinchalik xatolik berdi ({pe}). To'g'ridan-to'g'ri ulanish sinab ko'rilmoqda...", flush=True)
 
-    if not connected:
-        try:
-            print("🌐 To'g'ridan-to'g'ri internet orqali ulanish tekshirilmoqda...", flush=True)
-            test_bot = get_bot_instance(use_proxy=False)
-            me = await test_bot.get_me()
-            print(f"✅ To'g'ridan-to'g'ri muvaffaqiyatli ulandi: @{me.username} (ID: {me.id})", flush=True)
-            bot = test_bot
-            connected = True
-        except Exception as de:
-            print(f"⚠️ To'g'ridan-to'g'ri ulanishda ham uzilish: {de}", flush=True)
-            bot = get_bot_instance(use_proxy=bool(proxy_url))
 
-    # Telegram menyu buyruqlarini faqat shaxsiy chat uchun o'rnatish, guruhlarda mutlaqo ko'rinmasin
-    try:
-        # Guruhlar va standart menyudan buyruqlarni butunlay o'chirish
-        await bot.delete_my_commands(scope=types.BotCommandScopeDefault())
-        await bot.delete_my_commands(scope=types.BotCommandScopeAllGroupChats())
-        await bot.delete_my_commands(scope=types.BotCommandScopeAllChatAdministrators())
 
-        # Faqat shaxsiy chat (Private) uchun menyuni belgilash
-        private_commands = [
-            types.BotCommand(command="start", description="🚀 Асосий Меню"),
-            types.BotCommand(command="settings", description="⚙️ Созламалар"),
-            types.BotCommand(command="savol", description="🐝 Савол бериш")
-        ]
-        await bot.set_my_commands(private_commands, scope=types.BotCommandScopeAllPrivateChats())
-        print("✅ Telegram buyruqlar menyusi faqat shaxsiy chat uchun sozlandi (Guruhlarda buyruqlar yashirildi).", flush=True)
-    except Exception as ce:
-        logging.warning(f"set_my_commands error: {ce}")
 
-    # bee_news_collection.py mavjud bo'lsa, avtomatik sinxronlash
-    try:
-        sync_res = sync_bee_news_collection()
-        if sync_res.get("success") and (sync_res.get("news", 0) > 0 or sync_res.get("quizzes", 0) > 0):
-            print(f"📦 {sync_res.get('msg')}", flush=True)
-    except Exception as se:
-        logging.warning(f"sync_bee_news_collection startup error: {se}")
-
-    # Avtomatik jadval fon jarayonini ishga tushirish
-    asyncio.create_task(daily_scheduler_loop())
-
-    # Avtomatik qayta ulanuvchi (auto-reconnect) polling sikli
-    retry_count = 0
-    while True:
-        try:
-            print("🚀 Bot Telegram serveriga ulandi va xabarlarni qabul qilmoqda...", flush=True)
-            # PythonAnywhere bepul proksisida 503 xatosi bo'lmasligi uchun polling_timeout=3 soniya o'rnatiladi
-            await dp.start_polling(bot, polling_timeout=3, handle_signals=False)
-        except Exception as e:
-            retry_count += 1
-            err_msg = str(e)
-            print(f"⚠️ Ulanish uzildi ({err_msg}). #{retry_count} urinish: 3 soniyadan so'ng qayta ulanadi...", flush=True)
-            await asyncio.sleep(3)
-            if "503" in err_msg or "ProxyError" in err_msg or "proxy" in err_msg.lower():
-                try:
-                    alt_use_proxy = not bool(getattr(getattr(bot, "session", None), "proxy", None))
-                    print(f"🔄 Ulanish rejimini almashtirish: use_proxy={alt_use_proxy}...", flush=True)
-                    bot = get_bot_instance(use_proxy=alt_use_proxy)
-                except Exception:
-                    pass
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 
 # ==============================================================================
@@ -5132,3 +5028,137 @@ async def group_media_limiter_handler(message: types.Message):
                 logging.warning(f"restrict error: {re}")
     except Exception as e:
         logging.error(f"group_media_limiter_handler error: {e}")
+
+# ==============================================================================
+# 24. SHAXSIY YOZISHMA (LICHKA): FAQAT BOT EGASI UCHUN MUTAXASSIS SAVOL-JAVOB
+# (Barcha menyu tugmalari ishlaganidan so'nggina erkin savollarga javob beradi)
+# ==============================================================================
+@dp.message(F.chat.type == "private")
+async def private_chat_handler(message: types.Message):
+    if message.from_user.id != OWNER_ID:
+        await message.reply(
+            "⛔️ **Кириш чекланган!**\n\n"
+            f"Кечирасиз, ушбу ботдан фойдаланиш фақат бот эгаси ({OWNER_USERNAME}) учун очиқ."
+        )
+        return
+
+    if not message.text or message.text.startswith("/"):
+        return
+
+    KNOWN_BUTTONS = [
+        "гуруҳга қўшиш", "каналга қўшиш", "гуруҳ созламалари", "созламалар",
+        "каналлар бошқаруви", "асаларичилик янгиликлари", "апитерапия",
+        "викторина", "сўровнома", "бот эгаси", "реклама тарқатиш",
+        "гуруҳлар назорати", "тилни ўзгартириш", "бот қўлланмаси",
+        "старт", "асосий меню", "пост яратиш", "статистика",
+        "отложенные", "таҳрирлаш", "канални реклама қилиш", "обуначилар қизиқиши",
+        "тозалаш", "кўриб чиқиш", "бекор қилиш", "кейингиси ➡️", "юбориш"
+    ]
+
+    clean_text = message.text.strip().lower()
+    for btn in KNOWN_BUTTONS:
+        if btn in clean_text:
+            return  # Maxsus tugma handleri ishlasin, AI ga savol deb yuborilmasin
+
+    text = message.text
+    chat_id = message.chat.id
+
+    try:
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        reply_text = await ask_beekeeping_expert(text)
+        await message.reply(f"🐝 **Asalarichilik.Uz 🇺🇿 Мутахассиси:**\n\n{reply_text}")
+    except Exception as e:
+        logging.error(f"Xatolik (private): {e}")
+        await message.reply("Кечирасиз, саволга жавоб олишда вақтинчалик узилиш бўлди.")
+
+
+# ==============================================================================
+# 25. MAIN ENTRY POINT (Faylning eng oxiri)
+# ==============================================================================
+async def main():
+    global bot
+    print("=" * 70, flush=True)
+    print("🐝 Asalarichilik.Uz 🇺🇿 Rasmiy Telegram Boti va Post Konstruktori (bot.py)", flush=True)
+    print(f"👑 Bot egasi: {OWNER_USERNAME} (ID: {OWNER_ID})", flush=True)
+    print("📊 2-rasmdagidek Native Telegram Quiz Poll & Avto-jadval faollashtirildi.", flush=True)
+    print("📰 1000+ gacha yangilanuvchi Asalarichilik Yangiliklari va Shablonlar tizimi tayyor.", flush=True)
+    print("=" * 70, flush=True)
+
+    # Ulanishni sinash va eng yaxshi kanalni (Proxy yoki To'g'ridan-to'g'ri) aniqlash
+    connected = False
+    proxy_url = get_proxy()
+    if proxy_url:
+        try:
+            print(f"🔄 PythonAnywhere proksi ({proxy_url}) orqali tekshirilmoqda...", flush=True)
+            test_bot = get_bot_instance(use_proxy=True)
+            me = await test_bot.get_me()
+            print(f"✅ Proksi orqali muvaffaqiyatli ulandi: @{me.username} (ID: {me.id})", flush=True)
+            bot = test_bot
+            connected = True
+        except Exception as pe:
+            print(f"⚠️ Proksi vaqtinchalik xatolik berdi ({pe}). To'g'ridan-to'g'ri ulanish sinab ko'rilmoqda...", flush=True)
+
+    if not connected:
+        try:
+            print("🌐 To'g'ridan-to'g'ri internet orqali ulanish tekshirilmoqda...", flush=True)
+            test_bot = get_bot_instance(use_proxy=False)
+            me = await test_bot.get_me()
+            print(f"✅ To'g'ridan-to'g'ri muvaffaqiyatli ulandi: @{me.username} (ID: {me.id})", flush=True)
+            bot = test_bot
+            connected = True
+        except Exception as de:
+            print(f"⚠️ To'g'ridan-to'g'ri ulanishda ham uzilish: {de}", flush=True)
+            bot = get_bot_instance(use_proxy=bool(proxy_url))
+
+    # Telegram menyu buyruqlarini faqat shaxsiy chat uchun o'rnatish, guruhlarda mutlaqo ko'rinmasin
+    try:
+        # Guruhlar va standart menyudan buyruqlarni butunlay o'chirish
+        await bot.delete_my_commands(scope=types.BotCommandScopeDefault())
+        await bot.delete_my_commands(scope=types.BotCommandScopeAllGroupChats())
+        await bot.delete_my_commands(scope=types.BotCommandScopeAllChatAdministrators())
+
+        # Faqat shaxsiy chat (Private) uchun menyuni belgilash
+        private_commands = [
+            types.BotCommand(command="start", description="🚀 Асосий Меню"),
+            types.BotCommand(command="settings", description="⚙️ Созламалар"),
+            types.BotCommand(command="savol", description="🐝 Савол бериш")
+        ]
+        await bot.set_my_commands(private_commands, scope=types.BotCommandScopeAllPrivateChats())
+        print("✅ Telegram buyruqlar menyusi faqat shaxsiy chat uchun sozlandi (Guruhlarda buyruqlar yashirildi).", flush=True)
+    except Exception as ce:
+        logging.warning(f"set_my_commands error: {ce}")
+
+    # bee_news_collection.py mavjud bo'lsa, avtomatik sinxronlash
+    try:
+        sync_res = sync_bee_news_collection()
+        if sync_res.get("success") and (sync_res.get("news", 0) > 0 or sync_res.get("quizzes", 0) > 0):
+            print(f"📦 {sync_res.get('msg')}", flush=True)
+    except Exception as se:
+        logging.warning(f"sync_bee_news_collection startup error: {se}")
+
+    # Avtomatik jadval fon jarayonini ishga tushirish
+    asyncio.create_task(daily_scheduler_loop())
+
+    # Avtomatik qayta ulanuvchi (auto-reconnect) polling sikli
+    retry_count = 0
+    while True:
+        try:
+            print("🚀 Bot Telegram serveriga ulandi va xabarlarni qabul qilmoqda...", flush=True)
+            # PythonAnywhere bepul proksisida 503 xatosi bo'lmasligi uchun polling_timeout=3 soniya o'rnatiladi
+            await dp.start_polling(bot, polling_timeout=3, handle_signals=False)
+        except Exception as e:
+            retry_count += 1
+            err_msg = str(e)
+            print(f"⚠️ Ulanish uzildi ({err_msg}). #{retry_count} urinish: 3 soniyadan so'ng qayta ulanadi...", flush=True)
+            await asyncio.sleep(3)
+            if "503" in err_msg or "ProxyError" in err_msg or "proxy" in err_msg.lower():
+                try:
+                    alt_use_proxy = not bool(getattr(getattr(bot, "session", None), "proxy", None))
+                    print(f"🔄 Ulanish rejimini almashtirish: use_proxy={alt_use_proxy}...", flush=True)
+                    bot = get_bot_instance(use_proxy=alt_use_proxy)
+                except Exception:
+                    pass
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
