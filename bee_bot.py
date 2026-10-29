@@ -84,6 +84,8 @@ SCHEDULER_LOG_FILE = os.path.join(BASE_DIR, "scheduler_log.json")
 APITHERAPY_DB_FILE = os.path.join(BASE_DIR, "apitherapy_db.json")
 PENDING_CHATS_FILE = os.path.join(BASE_DIR, "pending_chats.json")
 MEDIA_LIMITS_FILE = os.path.join(BASE_DIR, "media_limits.json")
+SENT_HISTORY_FILE = os.path.join(BASE_DIR, "sent_history.json")
+CONNECTED_CHATS_FILE = os.path.join(BASE_DIR, "connected_chats.json")
 
 # Standart reaksiyalar to'plamlari
 REACTION_PRESETS = [
@@ -198,8 +200,17 @@ def get_settings() -> dict:
         "news_schedule_enabled": True,       # Avtomatik yangiliklar jadvali
         "news_schedule_time": "14:00",
         "apitherapy_schedule_enabled": True,
-        "apitherapy_schedule_time": "16:00",       # Har kuni 14:00 da
-        "silent_send": False
+        "apitherapy_schedule_time": "16:00",
+        "silent_send": False,
+        "news_auto_enabled": True,
+        "news_auto_time": "14:00",
+        "news_auto_target": "both",          # "channel", "group", "both"
+        "quiz_auto_enabled": True,
+        "quiz_auto_time": "10:00",
+        "quiz_auto_target": "both",          # "channel", "group", "both"
+        "apitherapy_auto_enabled": True,
+        "apitherapy_auto_time": "16:00",
+        "apitherapy_auto_target": "both"
     }
     data = load_json_file(SETTINGS_FILE, defaults)
     for k, v in defaults.items():
@@ -320,6 +331,172 @@ def is_chat_allowed(chat_id: int, chat_username: Optional[str] = None) -> bool:
     return False
 
 # ==============================================================================
+
+# ==============================================================================
+# 3.5. AVTO-POSTING DEDUPLIKATSIYA VA CHATLAR NAZORATI BAZASI
+# ==============================================================================
+def load_sent_history() -> dict:
+    defaults = {
+        "sent_news_ids": [],
+        "sent_quiz_ids": [],
+        "sent_poll_ids": [],
+        "sent_apitherapy_ids": []
+    }
+    return load_json_file(SENT_HISTORY_FILE, defaults)
+
+def save_sent_history(data: dict):
+    save_json_file(SENT_HISTORY_FILE, data)
+
+def mark_item_as_sent(category: str, item_id: Any, title_or_q: Optional[str] = None):
+    """Жўнатилган хабарни тарихга ёзиб қўйиш (ҳеч қачон такрорланмаслиги учун)"""
+    hist = load_sent_history()
+    key = f"sent_{category}_ids"
+    if key not in hist:
+        hist[key] = []
+    if item_id is not None and str(item_id) not in [str(x) for x in hist[key]]:
+        hist[key].append(item_id)
+    if title_or_q and title_or_q not in hist[key]:
+        hist[key].append(title_or_q)
+    save_sent_history(hist)
+
+def get_unsent_news() -> dict:
+    """Аввал жўнатилмаган навбатдаги асаларичилик янгилигини олиш"""
+    news_list = get_news_db()
+    hist = load_sent_history()
+    sent = set([str(x) for x in hist.get("sent_news_ids", [])])
+    unsent = [n for n in news_list if str(n.get("id")) not in sent and n.get("title") not in sent]
+    if unsent:
+        return unsent[0]
+    return news_list[0] if news_list else INITIAL_NEWS[0]
+
+def get_unsent_quiz(level: str = "mixed", poll_type: str = "quiz") -> dict:
+    """Аввал жўнатилмаган янги викторина ёки сўровномани олиш"""
+    hist = load_sent_history()
+    if poll_type == "regular":
+        polls = get_polls_db()
+        sent = set([str(x) for x in hist.get("sent_poll_ids", [])])
+        unsent = [p for p in polls if str(p.get("id")) not in sent and p.get("question") not in sent]
+        if unsent:
+            return unsent[0]
+        return polls[0] if polls else INITIAL_POLLS[0]
+    else:
+        quizzes = get_quizzes_db()
+        sent = set([str(x) for x in hist.get("sent_quiz_ids", [])])
+        unsent = [
+            q for q in quizzes
+            if str(q.get("id")) not in sent and q.get("question") not in sent
+            and (level == "mixed" or q.get("level") == level)
+        ]
+        if unsent:
+            return unsent[0]
+        return quizzes[0] if quizzes else INITIAL_QUIZZES[0]
+
+def get_unsent_apitherapy() -> Optional[dict]:
+    """Аввал жўнатилмаган янги апитерапия мақоласини олиш (1000+ базадан)"""
+    db = load_apitherapy_db()
+    if not db:
+        return None
+    hist = load_sent_history()
+    sent = set([str(x) for x in hist.get("sent_apitherapy_ids", [])])
+    unsent = [a for a in db if str(a.get("id")) not in sent and a.get("title") not in sent]
+    if unsent:
+        return unsent[0]
+    return db[0] if db else None
+
+def get_autopost_stats() -> dict:
+    """Барча 3 бўлим бўйича жами, юборилган ва қолган янги маълумотлар статистикаси"""
+    hist = load_sent_history()
+    news = get_news_db()
+    quizzes = get_quizzes_db()
+    api_db = load_apitherapy_db()
+
+    sent_news = set([str(x) for x in hist.get("sent_news_ids", [])])
+    sent_quiz = set([str(x) for x in hist.get("sent_quiz_ids", [])])
+    sent_api = set([str(x) for x in hist.get("sent_apitherapy_ids", [])])
+
+    rem_news = sum(1 for n in news if str(n.get("id")) not in sent_news and n.get("title") not in sent_news)
+    rem_quiz = sum(1 for q in quizzes if str(q.get("id")) not in sent_quiz and q.get("question") not in sent_quiz)
+    rem_api = sum(1 for a in api_db if str(a.get("id")) not in sent_api and a.get("title") not in sent_api)
+
+    return {
+        "news": {"total": len(news), "sent": len(sent_news), "unsent": rem_news},
+        "quiz": {"total": len(quizzes), "sent": len(sent_quiz), "unsent": rem_quiz},
+        "api": {"total": len(api_db), "sent": len(sent_api), "unsent": rem_api}
+    }
+
+def load_connected_chats() -> dict:
+    return load_json_file(CONNECTED_CHATS_FILE, {})
+
+def save_connected_chat(chat_id: int, title: str, chat_type: str, username: str = "", status: str = "approved"):
+    chats = load_connected_chats()
+    chats[str(chat_id)] = {
+        "id": chat_id,
+        "title": title or "Nomsiz chat",
+        "type": chat_type,
+        "username": username or "",
+        "status": status,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    save_json_file(CONNECTED_CHATS_FILE, chats)
+
+def remove_connected_chat(chat_id: int):
+    cid_str = str(chat_id)
+    chats = load_connected_chats()
+    if cid_str in chats:
+        del chats[cid_str]
+        save_json_file(CONNECTED_CHATS_FILE, chats)
+    
+    allowed = load_allowed_chats()
+    if cid_str in allowed:
+        del allowed[cid_str]
+        save_json_file(ALLOWED_CHATS_FILE, allowed)
+        
+    pending = load_json_file(PENDING_CHATS_FILE, {})
+    if cid_str in pending:
+        del pending[cid_str]
+        save_json_file(PENDING_CHATS_FILE, pending)
+
+def get_destinations_for_target(target_mode: str) -> list:
+    """Манзилга кўра (Канал, Гуруҳ, ёки Иккаласи) жўнатиладиган барча чат ID ва юзернеймлари"""
+    chats = load_allowed_chats()
+    conn = load_connected_chats()
+
+    official_channel = get_official_channel()
+    official_group = get_official_group()
+
+    channel_targets = set()
+    group_targets = set()
+
+    if official_channel:
+        channel_targets.add(official_channel)
+    if official_group:
+        group_targets.add(official_group)
+
+    merged = {}
+    merged.update(chats)
+    merged.update(conn)
+
+    for cid_str, info in merged.items():
+        if info.get("status") not in [None, "approved", "active"]:
+            continue
+        c_type = info.get("type", "")
+        try:
+            cid = int(cid_str)
+        except ValueError:
+            cid = cid_str
+
+        if c_type in ["channel", "Kanal"]:
+            channel_targets.add(cid)
+        elif c_type in ["group", "supergroup", "Guruh"]:
+            group_targets.add(cid)
+
+    if target_mode == "channel":
+        return list(channel_targets)
+    elif target_mode == "group":
+        return list(group_targets)
+    else:  # "both"
+        return list(channel_targets | group_targets)
+
 # 4. VIKTORINA BAZASI (QUIZ DATABASE) - YOSH VA SPETS ASALARICHILAR UCHUN
 # ==============================================================================
 INITIAL_QUIZZES = [
@@ -2446,6 +2623,7 @@ async def on_quiz_send_chan(call: types.CallbackQuery):
     target = get_official_channel()
     res = await send_quiz_poll_to_chat(target, quizzes[idx], poll_mode="quiz")
     if res:
+        mark_item_as_sent("quiz", quizzes[idx].get("id"), quizzes[idx].get("question"))
         await call.answer(f"✅ Расмий канал ({target}) га викторина муваффақиятли юборилди!", show_alert=True)
     else:
         await call.message.answer(
@@ -2472,6 +2650,7 @@ async def on_quiz_send_grp(call: types.CallbackQuery):
     target = get_official_group()
     res = await send_quiz_poll_to_chat(target, quizzes[idx], poll_mode="quiz")
     if res:
+        mark_item_as_sent("quiz", quizzes[idx].get("id"), quizzes[idx].get("question"))
         await call.answer(f"✅ Расмий гуруҳ ({target}) га викторина муваффақиятли юборилди!", show_alert=True)
     else:
         await call.message.answer(
@@ -2783,6 +2962,7 @@ async def on_news_send_chan(call: types.CallbackQuery):
     target = get_official_channel()
     res = await publish_news_to_target(target, news_list[idx], pin=False)
     if res:
+        mark_item_as_sent("news", news_list[idx].get("id"), news_list[idx].get("title"))
         await call.answer(f"✅ Расмий канал ({target}) га янгилик муваффақиятли юборилди!", show_alert=True)
     else:
         await call.answer(f"⚠️ {target} га юбориб бўлмади. Ботни ушбу каналга админ қилганингизни текширинг!", show_alert=True)
@@ -2804,6 +2984,7 @@ async def on_news_send_grp(call: types.CallbackQuery):
     target = get_official_group()
     res = await publish_news_to_target(target, news_list[idx], pin=False)
     if res:
+        mark_item_as_sent("news", news_list[idx].get("id"), news_list[idx].get("title"))
         await call.answer(f"✅ Расмий гуруҳ ({target}) га янгилик муваффақиятли юборилди!", show_alert=True)
     else:
         await call.answer(f"⚠️ {target} га юбориб бўлмади. Ботни ушбу гуруҳга админ қилганингизни текширинг!", show_alert=True)
@@ -3179,6 +3360,70 @@ async def on_cquiz_actions(call: types.CallbackQuery, state: FSMContext):
 # ==============================================================================
 # 19. SOZLAMALAR (⚙️ Созламалар) MENYUSI
 # ==============================================================================
+
+# ==============================================================================
+# 18.1. AVTO-POSTING VA JADVAL MENYUSI (KLAVIATURALAR)
+# ==============================================================================
+def build_autopost_overview_inline() -> InlineKeyboardMarkup:
+    """Барча 3 бўлим бўйича умумий авто-постинг бошқарув тугмалари"""
+    settings = get_settings()
+    stats = get_autopost_stats()
+
+    n_en = "✅" if settings.get("news_auto_enabled", True) else "❌"
+    n_time = settings.get("news_auto_time", "14:00")
+    n_tgt = {"channel": "📢 Канал", "group": "👥 Гуруҳ", "both": "🚀 Канал+Гуруҳ"}.get(settings.get("news_auto_target", "both"), "🚀 Канал+Гуруҳ")
+
+    q_en = "✅" if settings.get("quiz_auto_enabled", True) else "❌"
+    q_time = settings.get("quiz_auto_time", "10:00")
+    q_tgt = {"channel": "📢 Канал", "group": "👥 Гуруҳ", "both": "🚀 Канал+Гуруҳ"}.get(settings.get("quiz_auto_target", "both"), "🚀 Канал+Гуруҳ")
+
+    a_en = "✅" if settings.get("apitherapy_auto_enabled", True) else "❌"
+    a_time = settings.get("apitherapy_auto_time", "16:00")
+    a_tgt = {"channel": "📢 Канал", "group": "👥 Гуруҳ", "both": "🚀 Канал+Гуруҳ"}.get(settings.get("apitherapy_auto_target", "both"), "🚀 Канал+Гуруҳ")
+
+    rows = [
+        [InlineKeyboardButton(text=f"📰 Янгиликлар: {n_en} {n_time} ({n_tgt})", callback_data="autopost_menu:news")],
+        [InlineKeyboardButton(text=f"🐝 Викторина & Сўровнома: {q_en} {q_time} ({q_tgt})", callback_data="autopost_menu:quiz")],
+        [InlineKeyboardButton(text=f"🌿 Апитерапия: {a_en} {a_time} ({a_tgt})", callback_data="autopost_menu:api")],
+        [InlineKeyboardButton(text="🚀 Барчасидан синов постини юбориш", callback_data="autopost_test_all")],
+        [InlineKeyboardButton(text="« Созламаларга қайтиш", callback_data="set_menu:back")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def build_autopost_category_inline(category: str) -> InlineKeyboardMarkup:
+    """Алоҳида бўлим (news, quiz, api) учун авто-постинг созламаси тугмалари"""
+    settings = get_settings()
+    en_key = f"{category}_auto_enabled"
+    time_key = f"{category}_auto_time"
+    tgt_key = f"{category}_auto_target"
+
+    is_en = settings.get(en_key, True)
+    en_label = "✅ Ёқилган (Фаол)" if is_en else "❌ Ўчирилган"
+    cur_tgt = settings.get(tgt_key, "both")
+    tgt_label = {"channel": "📢 Фақат Каналга", "group": "👥 Фақат Гуруҳга", "both": "🚀 Канал ва Гуруҳга (Иккаласига)"}.get(cur_tgt, "🚀 Канал ва Гуруҳга (Иккаласига)")
+    cur_time = settings.get(time_key, "14:00" if category == "news" else ("10:00" if category == "quiz" else "16:00"))
+
+    time_options = ["07:00", "08:00", "09:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "21:00"]
+    rows = [
+        [InlineKeyboardButton(text=f"🔄 Ҳолати: {en_label}", callback_data=f"autopost_toggle:{category}")],
+        [InlineKeyboardButton(text=f"🎯 Манзил: {tgt_label}", callback_data=f"autopost_target:{category}")],
+    ]
+
+    # Time grid (3 per row)
+    time_row = []
+    for t in time_options:
+        mark = "🔹 " if t == cur_time else ""
+        time_row.append(InlineKeyboardButton(text=f"{mark}{t}", callback_data=f"autopost_time:{category}:{t}"))
+        if len(time_row) == 3:
+            rows.append(time_row)
+            time_row = []
+    if time_row:
+        rows.append(time_row)
+
+    rows.append([InlineKeyboardButton(text="🚀 Ҳозир янгисини синаб юбориш", callback_data=f"autopost_fire:{category}")])
+    rows.append([InlineKeyboardButton(text="« Авто-постингга қайтиш", callback_data="set_menu:autopost")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMarkup:
     settings = get_settings()
     auto_r = "✅ Ёқилган" if settings.get("auto_reactions", True) else "❌ Ўчирилган"
@@ -3243,6 +3488,253 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
 
 @dp.message(F.text == "⚙️ Созламалар")
 @dp.message(Command("settings"))
+
+# ==============================================================================
+# 18.2. AVTO-POSTING VA JADVAL CALLBACK HANDLERLARI
+# ==============================================================================
+@dp.callback_query(F.data == "set_menu:autopost")
+async def on_autopost_overview(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    settings = get_settings()
+    stats = get_autopost_stats()
+
+    n_en = "✅ Ёқилган" if settings.get("news_auto_enabled", True) else "❌ Ўчирилган"
+    n_time = settings.get("news_auto_time", "14:00")
+    n_tgt = {"channel": "📢 Фақат Канал", "group": "👥 Фақат Гуруҳ", "both": "🚀 Канал ва Гуруҳга (Иккаласига)"}.get(settings.get("news_auto_target", "both"), "🚀 Канал ва Гуруҳга (Иккаласига)")
+
+    q_en = "✅ Ёқилган" if settings.get("quiz_auto_enabled", True) else "❌ Ўчирилган"
+    q_time = settings.get("quiz_auto_time", "10:00")
+    q_tgt = {"channel": "📢 Фақат Канал", "group": "👥 Фақат Гуруҳ", "both": "🚀 Канал ва Гуруҳга (Иккаласига)"}.get(settings.get("quiz_auto_target", "both"), "🚀 Канал ва Гуруҳга (Иккаласига)")
+
+    a_en = "✅ Ёқилган" if settings.get("apitherapy_auto_enabled", True) else "❌ Ўчирилган"
+    a_time = settings.get("apitherapy_auto_time", "16:00")
+    a_tgt = {"channel": "📢 Фақат Канал", "group": "👥 Фақат Гуруҳ", "both": "🚀 Канал ва Гуруҳга (Иккаласига)"}.get(settings.get("apitherapy_auto_target", "both"), "🚀 Канал ва Гуруҳга (Иккаласига)")
+
+    lines_txt = [
+        "⏰ **АВТОМАТИК ПОСТИНГ ВА ЖАДВАЛ СОЗЛАМАЛАРИ**\n",
+        "Бот админ белгилаган соатларда канал ва гуруҳларга **ФАҚАТ ЯНГИ (аввал жўнатилмаган)** маълумотларни автоматик тарзда жойлаб боради. Аввал юборилган хабар ёки савол ҳеч қачон такрорланмайди!\n",
+        f"1. 📰 **Асаларичилик янгиликлари:**",
+        f"   • Ҳолати: {n_en}",
+        f"   • Манзил: {n_tgt}",
+        f"   • Вақти: {n_time}",
+        f"   • База: {stats['news']['total']} та | Юборилган: {stats['news']['sent']} та | Қолган янги: **{stats['news']['unsent']} та**\n",
+        f"2. 🐝 **Викторина ва сўровномалар:**",
+        f"   • Ҳолати: {q_en}",
+        f"   • Манзил: {q_tgt}",
+        f"   • Вақти: {q_time}",
+        f"   • База: {stats['quiz']['total']} та | Юборилган: {stats['quiz']['sent']} та | Қолган янги: **{stats['quiz']['unsent']} та**\n",
+        f"3. 🌿 **Апитерапия янгиликлари:**",
+        f"   • Ҳолати: {a_en}",
+        f"   • Манзил: {a_tgt}",
+        f"   • Вақти: {a_time}",
+        f"   • База: {stats['api']['total']} та | Юборилган: {stats['api']['sent']} та | Қолган янги: **{stats['api']['unsent']} та**\n",
+        "Созлаш учун қуйидаги бўлимлардан бирини танланг:"
+    ]
+    text = "\n".join(lines_txt)
+    await call.message.edit_text(text, reply_markup=build_autopost_overview_inline(), parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("autopost_menu:"))
+async def on_autopost_category_menu(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    cat = call.data.split(":")[1]
+    titles = {
+        "news": "📰 АСАЛАРИЧИЛИК ЯНГИЛИКЛАРИ АВТО-ПОСТИНГ СОЗЛАМАСИ",
+        "quiz": "🐝 ВИКТОРИНА ВА СЎРОВНОМА АВТО-ПОСТИНГ СОЗЛАМАСИ",
+        "api": "🌿 АПИТЕРАПИЯ ЯНГИЛИКЛАРИ АВТО-ПОСТИНГ СОЗЛАМАСИ"
+    }
+    stats = get_autopost_stats().get(cat, {})
+    settings = get_settings()
+    en_key = f"{cat}_auto_enabled"
+    time_key = f"{cat}_auto_time"
+    tgt_key = f"{cat}_auto_target"
+
+    is_en = settings.get(en_key, True)
+    en_label = "✅ Ёқилган" if is_en else "❌ Ўчирилган"
+    cur_tgt = settings.get(tgt_key, "both")
+    tgt_label = {"channel": "📢 Фақат Каналга", "group": "👥 Фақат Гуруҳга", "both": "🚀 Канал ва Гуруҳга (Иккаласига)"}.get(cur_tgt, "🚀 Канал ва Гуруҳга (Иккаласига)")
+    cur_time = settings.get(time_key, "14:00" if cat == "news" else ("10:00" if cat == "quiz" else "16:00"))
+
+    lines_txt = [
+        f"**{titles.get(cat, 'АВТО-ПОСТИНГ СОЗЛАМАСИ')}**\n",
+        f"• **Ҳолати:** {en_label}",
+        f"• **Манзил:** {tgt_label}",
+        f"• **Жўнатиш вақти:** {cur_time}",
+        f"• **База ҳолати:** Жами: {stats.get('total', 0)} та | Юборилган: {stats.get('sent', 0)} та | Янги қолган: **{stats.get('unsent', 0)} та**\n",
+        "💡 *Ҳар куни ушбу вақтда фақат аввал жўнатилмаган янги маълумот танланади ва белгиланган манзилга узатилади.*"
+    ]
+    text = "\n".join(lines_txt)
+    await call.message.edit_text(text, reply_markup=build_autopost_category_inline(cat), parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("autopost_toggle:"))
+async def on_autopost_toggle(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    cat = call.data.split(":")[1]
+    key = f"{cat}_auto_enabled"
+    settings = get_settings()
+    cur = settings.get(key, True)
+    update_setting(key, not cur)
+    # Also sync legacy keys if needed
+    if cat == "news":
+        update_setting("news_schedule_enabled", not cur)
+    elif cat == "quiz":
+        update_setting("quiz_schedule_enabled", not cur)
+    elif cat == "api":
+        update_setting("apitherapy_schedule_enabled", not cur)
+
+    await call.answer(f"Ҳолат: {'Ўчирилди ❌' if cur else 'Ёқилди ✅'}")
+    await on_autopost_category_menu(call)
+
+@dp.callback_query(F.data.startswith("autopost_target:"))
+async def on_autopost_target(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    cat = call.data.split(":")[1]
+    key = f"{cat}_auto_target"
+    settings = get_settings()
+    cur = settings.get(key, "both")
+    cycle = ["both", "channel", "group"]
+    next_val = cycle[(cycle.index(cur) + 1) % len(cycle)] if cur in cycle else "both"
+    update_setting(key, next_val)
+    lbl = {"channel": "Фақат Каналга 📢", "group": "Фақат Гуруҳга 👥", "both": "Канал ва Гуруҳга (Иккаласига) 🚀"}[next_val]
+    await call.answer(f"Манзил: {lbl}")
+    await on_autopost_category_menu(call)
+
+@dp.callback_query(F.data.startswith("autopost_time:"))
+async def on_autopost_time(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    parts = call.data.split(":")
+    cat = parts[1]
+    t = parts[2]
+    update_setting(f"{cat}_auto_time", t)
+    if cat == "news":
+        update_setting("news_schedule_time", t)
+    elif cat == "quiz":
+        update_setting("quiz_schedule_time", t)
+    elif cat == "api":
+        update_setting("apitherapy_schedule_time", t)
+    await call.answer(f"Вақт белгиланди: {t} ✅")
+    await on_autopost_category_menu(call)
+
+@dp.callback_query(F.data.startswith("autopost_fire:"))
+async def on_autopost_fire(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    cat = call.data.split(":")[1]
+    settings = get_settings()
+    tgt = settings.get(f"{cat}_auto_target", "both")
+    targets = get_destinations_for_target(tgt)
+    await call.answer("🚀 Янги маълумот юборилмоқда...", show_alert=False)
+
+    success_cnt = 0
+    if cat == "news":
+        item = get_unsent_news()
+        script = settings.get("script_mode", "cyrillic")
+        text = format_news_post_text(item, script, is_admin=False)
+        for c in targets:
+            try:
+                markup = build_post_markup(
+                    chat_id=int(c) if str(c).replace("-", "").isdigit() else 0,
+                    message_id=0,
+                    reactions_list=settings.get("reactions"),
+                    share_title=f"📰 {item.get('title', '')[:60]}",
+                    share_text=item.get('body', '')[:300]
+                )
+                sent = await bot.send_message(chat_id=c, text=text, reply_markup=markup, parse_mode="Markdown")
+                success_cnt += 1
+            except Exception as e:
+                logging.error(f"Fire news error ({c}): {e}")
+        mark_item_as_sent("news", item.get("id"), item.get("title"))
+
+    elif cat == "quiz":
+        poll_type = settings.get("poll_type", "quiz")
+        item = get_unsent_quiz(level=settings.get("quiz_level", "mixed"), poll_type=poll_type)
+        for c in targets:
+            try:
+                res = await send_quiz_poll_to_chat(c, item, poll_mode=poll_type)
+                if res:
+                    success_cnt += 1
+            except Exception as e:
+                logging.error(f"Fire quiz error ({c}): {e}")
+        mark_item_as_sent("quiz" if poll_type == "quiz" else "poll", item.get("id"), item.get("question"))
+
+    elif cat == "api":
+        item = get_unsent_apitherapy()
+        if item:
+            script = settings.get("script_mode", "cyrillic")
+            text = format_apitherapy_post_text(item, 0, 1000, script=script)
+            for c in targets:
+                try:
+                    markup = build_post_markup(
+                        chat_id=int(c) if str(c).replace("-", "").isdigit() else 0,
+                        message_id=0,
+                        reactions_list=settings.get("reactions"),
+                        is_channel_post=(c == get_official_channel()),
+                        share_title=f"🌿 Апитерапия: {item.get('title', '')[:60]}",
+                        share_text=item.get("body", "")[:300]
+                    )
+                    await bot.send_message(chat_id=c, text=text, reply_markup=markup, parse_mode=None)
+                    success_cnt += 1
+                except Exception as e:
+                    logging.error(f"Fire api error ({c}): {e}")
+            mark_item_as_sent("apitherapy", item.get("id"), item.get("title"))
+
+    if success_cnt > 0:
+        await call.message.answer(f"✅ **{cat.upper()} муваффақиятли {success_cnt} та манзилга юборилди ва тарихга ёзилди!**\\nЭнди у қайта такрорланмайди.", parse_mode="Markdown")
+    else:
+        await call.message.answer("⚠️ Юборишда хатолик юз берди. Канал ва гуруҳларда бот админлигини текширинг.", parse_mode="Markdown")
+    await on_autopost_category_menu(call)
+
+@dp.callback_query(F.data == "autopost_test_all")
+async def on_autopost_test_all(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("🚀 Барча 3 бўлимдан навбатдаги янги маълумотлар юборилмоқда...", show_alert=True)
+    settings = get_settings()
+
+    # 1. News
+    n_targets = get_destinations_for_target(settings.get("news_auto_target", "both"))
+    news = get_unsent_news()
+    script = settings.get("script_mode", "cyrillic")
+    for c in n_targets:
+        try:
+            markup = build_post_markup(chat_id=int(c) if str(c).replace("-", "").isdigit() else 0, message_id=0, reactions_list=settings.get("reactions"))
+            await bot.send_message(chat_id=c, text=format_news_post_text(news, script, is_admin=False), reply_markup=markup, parse_mode="Markdown")
+        except Exception:
+            pass
+    mark_item_as_sent("news", news.get("id"), news.get("title"))
+
+    # 2. Quiz
+    q_targets = get_destinations_for_target(settings.get("quiz_auto_target", "both"))
+    poll_type = settings.get("poll_type", "quiz")
+    quiz = get_unsent_quiz(level="mixed", poll_type=poll_type)
+    for c in q_targets:
+        try:
+            await send_quiz_poll_to_chat(c, quiz, poll_mode=poll_type)
+        except Exception:
+            pass
+    mark_item_as_sent("quiz" if poll_type == "quiz" else "poll", quiz.get("id"), quiz.get("question"))
+
+    # 3. Apitherapy
+    a_targets = get_destinations_for_target(settings.get("apitherapy_auto_target", "both"))
+    api_item = get_unsent_apitherapy()
+    if api_item:
+        for c in a_targets:
+            try:
+                markup = build_post_markup(chat_id=int(c) if str(c).replace("-", "").isdigit() else 0, message_id=0, reactions_list=settings.get("reactions"))
+                await bot.send_message(chat_id=c, text=format_apitherapy_post_text(api_item, 0, 1000, script=script), reply_markup=markup, parse_mode=None)
+            except Exception:
+                pass
+        mark_item_as_sent("apitherapy", api_item.get("id"), api_item.get("title"))
+
+    await call.message.answer("✅ **3 та янги маълумот (Янгилик, Викторина, Апитерапия) муваффақиятли юборилди ва базага киритилди!**", parse_mode="Markdown")
+    await on_autopost_overview(call)
+
 async def settings_cmd(message: types.Message):
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
@@ -4195,8 +4687,9 @@ async def group_handler(message: types.Message):
 # ==============================================================================
 async def daily_scheduler_loop():
     """
-    Ҳар куни соатма-соат текшириб, белгиланган вақтда викторина ва янгиликларни
-    уланган барча канал ва гуруҳларга автоматик жойлаштириш цикли.
+    Ҳар куни соатма-соат текшириб, белгиланган вақтда викторина, янгиликлар ва
+    апитерапияни белгиланган манзилларга ФАҚАТ ЯНГИ (аввал жўнатилмаган) ҳолатда
+    автоматик жойлаштириш цикли.
     """
     while True:
         try:
@@ -4207,59 +4700,91 @@ async def daily_scheduler_loop():
             log = load_json_file(SCHEDULER_LOG_FILE, {})
             settings = get_settings()
 
-            # 1. Avtomatik Viktorina jadvali
-            if settings.get("quiz_schedule_enabled", True):
-                target_q_time = settings.get("quiz_schedule_time", "09:00")
-                key_q = f"quiz_{today_str}_{target_q_time}"
-                if cur_hhmm == target_q_time and not log.get(key_q):
-                    logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Kanal va guruhlarga yuborilmoqda...")
-                    chats = load_allowed_chats()
-                    target_chats = list(chats.keys()) or [get_official_channel(), get_official_group()]
-                    quiz = get_next_quiz(level=settings.get("quiz_level", "mixed"))
-                    for cid in target_chats:
-                        await send_quiz_poll_to_chat(cid, quiz)
-                    log[key_q] = True
-                    save_json_file(SCHEDULER_LOG_FILE, log)
+            # 1. Avtomatik Yangiliklar
+            news_enabled = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
+            news_time = settings.get("news_auto_time", settings.get("news_schedule_time", "14:00"))
+            news_target = settings.get("news_auto_target", "both")
+            key_n = f"news_{today_str}_{news_time}"
 
-            # 2. Avtomatik Yangiliklar jadvali
-            if settings.get("news_schedule_enabled", True):
-                target_n_time = settings.get("news_schedule_time", "14:00")
-                key_n = f"news_{today_str}_{target_n_time}"
-                if cur_hhmm == target_n_time and not log.get(key_n):
-                    logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Kanal va guruhlarga yuborilmoqda...")
-                    chats = load_allowed_chats()
-                    target_chats = list(chats.keys()) or [get_official_channel(), get_official_group()]
-                    news = get_next_news()
-                    text = format_news_post_text(news, settings.get("script_mode", "cyrillic"), is_admin=False)
-                    for cid in target_chats:
+            if news_enabled and cur_hhmm == news_time and not log.get(key_n):
+                logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {news_target}")
+                targets = get_destinations_for_target(news_target)
+                news = get_unsent_news()
+                script = settings.get("script_mode", "cyrillic")
+                text = format_news_post_text(news, script, is_admin=False)
+                for cid in targets:
+                    try:
+                        markup = build_post_markup(
+                            chat_id=int(cid) if str(cid).replace("-", "").isdigit() else 0,
+                            message_id=0,
+                            reactions_list=settings.get("reactions"),
+                            share_title=f"📰 {news.get('title', '')[:60]}",
+                            share_text=news.get('body', '')[:300]
+                        )
+                        sent = await bot.send_message(chat_id=cid, text=text, reply_markup=markup, parse_mode="Markdown")
                         try:
-                            init_markup = build_post_markup(chat_id=0, message_id=0, include_template_btn=True, template_type="news", template_id=news.get("id", 1))
-                            sent = await bot.send_message(chat_id=cid, text=text, reply_markup=init_markup, parse_mode="Markdown")
-                            final_markup = build_post_markup(chat_id=sent.chat.id, message_id=sent.message_id, include_template_btn=True, template_type="news", template_id=news.get("id", 1))
-                            await bot.edit_message_reply_markup(chat_id=sent.chat.id, message_id=sent.message_id, reply_markup=final_markup)
-                            try:
-                                await bot.pin_chat_message(chat_id=cid, message_id=sent.message_id, both_silent=False)
-                            except Exception:
-                                pass
+                            await bot.pin_chat_message(chat_id=cid, message_id=sent.message_id, both_silent=True)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        logging.error(f"Auto-news xatolik ({cid}): {e}")
+                mark_item_as_sent("news", news.get("id"), news.get("title"))
+                log[key_n] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
+
+            # 2. Avtomatik Viktorina va So'rovnomalar
+            quiz_enabled = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
+            quiz_time = settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "10:00"))
+            quiz_target = settings.get("quiz_auto_target", "both")
+            key_q = f"quiz_{today_str}_{quiz_time}"
+
+            if quiz_enabled and cur_hhmm == quiz_time and not log.get(key_q):
+                logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {quiz_target}")
+                targets = get_destinations_for_target(quiz_target)
+                poll_type = settings.get("poll_type", "quiz")
+                quiz = get_unsent_quiz(level=settings.get("quiz_level", "mixed"), poll_type=poll_type)
+                for cid in targets:
+                    try:
+                        await send_quiz_poll_to_chat(cid, quiz, poll_mode=poll_type)
+                    except Exception as e:
+                        logging.error(f"Auto-quiz xatolik ({cid}): {e}")
+                mark_item_as_sent("quiz" if poll_type == "quiz" else "poll", quiz.get("id"), quiz.get("question"))
+                log[key_q] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
+
+            # 3. Avtomatik Apiterapiya
+            api_enabled = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
+            api_time = settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "16:00"))
+            api_target = settings.get("apitherapy_auto_target", "both")
+            key_a = f"apitherapy_{today_str}_{api_time}"
+
+            if api_enabled and cur_hhmm == api_time and not log.get(key_a):
+                logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {api_target}")
+                targets = get_destinations_for_target(api_target)
+                item = get_unsent_apitherapy()
+                if item:
+                    script = settings.get("script_mode", "cyrillic")
+                    text = format_apitherapy_post_text(item, 0, 1000, script=script)
+                    for cid in targets:
+                        try:
+                            markup = build_post_markup(
+                                chat_id=int(cid) if str(cid).replace("-", "").isdigit() else 0,
+                                message_id=0,
+                                reactions_list=settings.get("reactions"),
+                                is_channel_post=(cid == get_official_channel()),
+                                share_title=f"🌿 Апитерапия: {item.get('title', '')[:60]}",
+                                share_text=item.get("body", "")[:300]
+                            )
+                            await bot.send_message(chat_id=cid, text=text, reply_markup=markup, parse_mode=None)
                         except Exception as e:
-                            logging.error(f"Auto-news yuborishda xatolik ({cid}): {e}")
-                    log[key_n] = True
-                    save_json_file(SCHEDULER_LOG_FILE, log)
+                            logging.error(f"Auto-apitherapy xatolik ({cid}): {e}")
+                    mark_item_as_sent("apitherapy", item.get("id"), item.get("title"))
+                log[key_a] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # 4. Avtomatik Apiterapiya jadvali
-            if settings.get("apitherapy_schedule_enabled", True):
-                target_a_time = settings.get("apitherapy_schedule_time", "16:00")
-                key_a = f"apitherapy_{today_str}_{target_a_time}"
-                if cur_hhmm == target_a_time and not log.get(key_a):
-                    logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Kanal va guruhlarga yuborilmoqda...")
-                    await post_scheduled_apitherapy()
-                    log[key_a] = True
-                    save_json_file(SCHEDULER_LOG_FILE, log)
-
-            # 3. Har kuni yangi ilmiy yangilik qo'shish (Auto-curate fresh news)
+            # 4. Kunlik yangi ilmiy yangilik zaxirasini tekshirish
             key_curate = f"auto_news_curate_{today_str}"
             if not log.get(key_curate):
-                logging.info(f"🌐 Kunlik yangi ilmiy yangilik qidirilmoqda/qo'shilmoqda ({today_str})...")
                 try:
                     await generate_news_with_ai()
                     log[key_curate] = True
@@ -4623,6 +5148,7 @@ async def on_api_send(call: types.CallbackQuery):
             logging.error(f"api_send error ({t}): {se}")
 
     if success_cnt > 0:
+        mark_item_as_sent("apitherapy", item.get("id"), item.get("title"))
         await call.answer(f"✅ {success_cnt} та чатга муваффақиятли узатилди!", show_alert=True)
     else:
         await call.answer("❌ Юборишда хатолик. Бот админлигини текширинг.", show_alert=True)
@@ -4789,64 +5315,194 @@ async def group_control_menu(message: types.Message):
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
     chats = load_allowed_chats()
-    groups = {cid: c for cid, c in chats.items() if c.get("type") in ["group", "supergroup", "Guruh"]}
-    
+    conn = load_connected_chats()
+    pending = load_json_file(PENDING_CHATS_FILE, {})
+
+    all_groups = {}
+    for cid, c in {**chats, **conn}.items():
+        if c.get("type") in ["group", "supergroup", "Guruh"]:
+            all_groups[cid] = c
+
+    # Agar rasmiy guruh bazada bo'lmasa avtomatik qo'shish
+    off_g = get_official_group()
+    if off_g and not any(c.get("username") == off_g.lstrip("@") for c in all_groups.values()):
+        all_groups[off_g] = {"title": "Asalarichilik Guruhi (Rasmiy)", "type": "group", "username": off_g.lstrip("@"), "status": "approved"}
+
     rows = []
-    for cid, c in list(groups.items())[:10]:
+    # 1. Pending (tasdiq kutilayotgan) guruhlar
+    if pending:
+        rows.append([InlineKeyboardButton(text="⏳ ТАСДИҚ КУТИЛАЁТГАН ГУРУҲЛАР:", callback_data="grp_header_pending")])
+        for pid, p in list(pending.items())[:5]:
+            p_title = p.get("title", "Guruh")
+            rows.append([
+                InlineKeyboardButton(text=f"❓ {p_title[:16]}", callback_data=f"grp_info:{pid}"),
+                InlineKeyboardButton(text="✅ Рухсат", callback_data=f"chat_auth_ok:{pid}"),
+                InlineKeyboardButton(text="🚪 Чиқиш", callback_data=f"chat_auth_no:{pid}")
+            ])
+
+    # 2. Ulangan faol guruhlar
+    rows.append([InlineKeyboardButton(text="👥 УЛАНГАН ФАОЛ ГУРУҲЛАР:", callback_data="grp_header_active")])
+    for cid, c in list(all_groups.items())[:15]:
         title = c.get("title", "Guruh")
         rows.append([
-            InlineKeyboardButton(text=f"👥 {title[:20]}", callback_data=f"grp_info:{cid}"),
-            InlineKeyboardButton(text="❌ Чиқиш", callback_data=f"grp_leave:{cid}")
+            InlineKeyboardButton(text=f"👥 {title[:18]}", callback_data=f"grp_info:{cid}"),
+            InlineKeyboardButton(text="🚪 Тарк этиш", callback_data=f"grp_leave:{cid}")
         ])
+
+    rows.append([InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="grp_refresh")])
     rows.append([InlineKeyboardButton(text="➕ Янги гуруҳга қўшиш қўлланмаси", callback_data="grp_add_guide")])
     rows.append([InlineKeyboardButton(text="« Орқага", callback_data="set_close")])
 
-    text = (
-        "👑 **ГУРУҲЛАР НАЗОРАТИ ВА ХАВФСИЗЛИГИ**\n\n"
-        f"Бот уланган расмий гуруҳлар сони: **{len(groups)} та**\n\n"
-        "• Ҳар бир гуруҳга бегона фойдаланувчи ботни қўшса, аввал сиздан тасдиқ олинади.\n"
-        "• Гуруҳда 1 кунда 3 тадан кўп расм/видео юборган аъзолар 1 кунга МУТЕ қилинади."
-    )
-    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+    lines_txt = [
+        "👑 **БОТ ҚЎШИЛГАН ГУРУҲЛАР НАЗОРАТИ ВА ХАВФСИЗЛИГИ**\n",
+        f"Бот ҳозирда уланган гуруҳлар сони: **{len(all_groups)} та**",
+        f"Тасдиқ кутилаётган таклифлар: **{len(pending)} та**\n",
+        "• **Гуруҳни тарк этиш:** Агар бегона ёки номаъқул гуруҳ бўлса, «🚪 Тарк этиш» тугмасини босинг. Бот ушбу гуруҳдан дарҳол чиқиб кетади.",
+        "• **Хавфсизлик:** Админ розилигисиз бот бегона гуруҳларда ишламайди.",
+        "• **Спам ҳимояси:** Бир кунда 3 тадан ортиқ медиа юборган аъзо 24 соатга МУТЕ қилинади."
+    ]
+    text = "\n".join(lines_txt)
+    if isinstance(message, types.CallbackQuery):
+        await message.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+    else:
+        await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "grp_refresh")
+async def on_grp_refresh(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("Рўйхат янгиланди!")
+    await group_control_menu(call)
+
+@dp.callback_query(F.data.startswith("grp_info:"))
+async def on_grp_info(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    cid = call.data.split(":")[1]
+    title = "Guruh"
+    member_count_str = "Номаълум"
+    username_str = "йўқ"
+    bot_status = "Аъзо"
+
+    try:
+        chat_obj = await bot.get_chat(int(cid) if str(cid).replace("-", "").isdigit() else cid)
+        title = chat_obj.title or title
+        if chat_obj.username:
+            username_str = f"@{chat_obj.username}"
+        try:
+            cnt = await bot.get_chat_member_count(chat_obj.id)
+            member_count_str = f"{cnt} та аъзо"
+        except Exception:
+            pass
+        try:
+            me_m = await bot.get_chat_member(chat_obj.id, bot.id)
+            bot_status = "Администратор ⭐️" if me_m.status in ["administrator", "creator"] else "Оддий аъзо"
+        except Exception:
+            pass
+    except Exception as e:
+        chats = load_allowed_chats()
+        conn = load_connected_chats()
+        info = {**chats, **conn}.get(str(cid), {})
+        title = info.get("title", title)
+        username_str = f"@{info.get('username')}" if info.get("username") else "йўқ"
+
+    info_lines = [
+        "ℹ️ **ГУРУҲ МАЪЛУМОТЛАРИ:**\n",
+        f"📍 **Номи:** {title}",
+        f"🆔 **ID:** `{cid}`",
+        f"🔗 **Юзернейм:** {username_str}",
+        f"👥 **Аъзолар:** {member_count_str}",
+        f"🛡 **Бот мақоми:** {bot_status}\n",
+        "Агар бот ушбу гуруҳдан чиқишини хоҳласангиз, пастдаги қизил тугмани босинг:"
+    ]
+    text = "\n".join(info_lines)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚪 Гуруҳни дарҳол тарк этиш", callback_data=f"grp_leave:{cid}")],
+        [InlineKeyboardButton(text="« Гуруҳлар рўйхатига қайтиш", callback_data="grp_refresh")]
+    ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("grp_leave:"))
 async def on_grp_leave(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     cid = call.data.split(":")[1]
-    chats = load_allowed_chats()
-    if cid in chats:
-        del chats[cid]
-        save_json_file(ALLOWED_CHATS_FILE, chats)
+    
+    # Guruhga xayrlashuv xabari yuborish
     try:
-        await bot.leave_chat(int(cid))
+        await bot.send_message(
+            chat_id=int(cid) if str(cid).replace("-", "").isdigit() else cid,
+            text="🚪 **Бот маъмур (@JamshidjonDavronov) кўрсатмасига биноан ушбу гуруҳни тарк этди.**"
+        )
     except Exception:
         pass
-    await call.answer("Бот гуруҳдан чиқарилди!", show_alert=True)
-    await group_control_menu(call.message)
 
-@dp.message(F.text.in_({"📢 Каналлар бошқаруви", "Каналлар бошқаруви"}))
+    try:
+        await bot.leave_chat(int(cid) if str(cid).replace("-", "").isdigit() else cid)
+    except Exception as e:
+        logging.warning(f"leave_chat error ({cid}): {e}")
+
+    remove_connected_chat(int(cid) if str(cid).replace("-", "").isdigit() else cid)
+    await call.answer("✅ Бот гуруҳни муваффақиятли тарк этди!", show_alert=True)
+    await group_control_menu(call)
+
 async def channel_control_menu(message: types.Message):
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
     off_c = get_official_channel()
     title = get_channel_title()
     
-    rows = [
+    chats = load_allowed_chats()
+    conn = load_connected_chats()
+    all_channels = {}
+    for cid, c in {**chats, **conn}.items():
+        if c.get("type") in ["channel", "Kanal"]:
+            all_channels[cid] = c
+
+    rows = []
+    # Ulangan kanallar
+    if all_channels:
+        rows.append([InlineKeyboardButton(text="📢 УЛАНГАН КАНАЛЛАР:", callback_data="chan_header")])
+        for cid, c in list(all_channels.items())[:5]:
+            c_title = c.get("title", "Kanal")
+            rows.append([
+                InlineKeyboardButton(text=f"📢 {c_title[:18]}", callback_data="chan_check"),
+                InlineKeyboardButton(text="🚪 Чиқиш", callback_data=f"chan_leave:{cid}")
+            ])
+
+    rows.extend([
         [InlineKeyboardButton(text="🔄 Канал уланишини текшириш", callback_data="chan_check")],
         [InlineKeyboardButton(text="📝 Синов постини юбориш", callback_data="chan_test_post")],
         [InlineKeyboardButton(text="✏️ Канал ҳаволасини ўзгартириш", callback_data="set_change_channel")],
         [InlineKeyboardButton(text="🏷 Канал номини ўзгартириш", callback_data="set_change_channel_title")],
         [InlineKeyboardButton(text="« Орқага", callback_data="set_close")]
+    ])
+    lines_txt = [
+        "📢 **КАНАЛЛАР БОШҚАРУВИ**\n",
+        f"• **Асосий расмий канал:** {off_c}",
+        f"• **Канал номи:** {title}",
+        f"• **Бот уланган қўшимча каналлар:** {len(all_channels)} та",
+        "• **Ҳолати:** Фаол\n",
+        "Ушбу каналга бот админ белгилаган соатларда автоматик равишда фақат янги янгиликлар, апитерапия мақолалари ва кун викториналарини юборади."
     ]
-    text = (
-        "📢 **КАНАЛЛАР БОШҚАРУВИ**\n\n"
-        f"• **Асосий расмий канал:** {off_c}\n"
-        f"• **Канал номи:** {title}\n"
-        "• **Ҳолати:** Фаол\n\n"
-        "Ушбу каналга бот автоматик равишда янгиликлар, апитерапия мақолалари ва кун викториналарини юборади."
-    )
-    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+    text = "\n".join(lines_txt)
+    if isinstance(message, types.CallbackQuery):
+        await message.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+    else:
+        await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("chan_leave:"))
+async def on_chan_leave(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    cid = call.data.split(":")[1]
+    try:
+        await bot.leave_chat(int(cid) if str(cid).replace("-", "").isdigit() else cid)
+    except Exception as e:
+        logging.warning(f"Leave channel error ({cid}): {e}")
+    remove_connected_chat(int(cid) if str(cid).replace("-", "").isdigit() else cid)
+    await call.answer("✅ Бот канални тарк этди!", show_alert=True)
+    await channel_control_menu(call)
 
 @dp.callback_query(F.data == "chan_check")
 async def on_chan_check(call: types.CallbackQuery):
