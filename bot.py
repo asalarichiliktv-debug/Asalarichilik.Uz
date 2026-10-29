@@ -8049,8 +8049,8 @@ def handle_all_callbacks(call):
         )
         return
 
-    # 10. Қулфлар (Locks toggles)
-    elif data.startswith("toggle_"):
+    # 10. Қулфлар (Locks toggles - фақат аниқ қулф префикслари учун)
+    elif any(data.startswith(pfx) for pfx in ["toggle_links_", "toggle_fwd_", "toggle_spam_", "toggle_badwords_", "toggle_stickers_", "toggle_arabic_", "toggle_files_", "toggle_voice_", "toggle_media_", "toggle_welcome_", "toggle_approval_", "toggle_joins_"]):
         lock_map = {
             "toggle_links_": "lock_links",
             "toggle_fwd_": "lock_forwards",
@@ -8092,7 +8092,7 @@ def handle_all_callbacks(call):
         conn.commit()
         cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (gid,))
         r_al = cursor.fetchone()
-        is_now_enabled = (r_al and r_al.get("autolock_enabled", 0) == 1)
+        is_now_enabled = bool(r_al and ("autolock_enabled" in r_al) and r_al["autolock_enabled"] == 1)
         if is_now_enabled:
             bot.answer_callback_query(call.id, "🌙 Тунги авто-қулф ёқилди! ✅")
             if is_autolock_active_now(r_al):
@@ -8141,7 +8141,7 @@ def handle_all_callbacks(call):
         conn.commit()
         cursor.execute("SELECT limit_enabled FROM groups WHERE chat_id = ?", (gid,))
         r = cursor.fetchone()
-        is_en = (r and r.get("limit_enabled", 0) == 1)
+        is_en = bool(r and ("limit_enabled" in r) and r["limit_enabled"] == 1)
         bot.answer_callback_query(call.id, "✅ Медиа лимит ёқилди" if is_en else "⚪️ Медиа лимит ўчирилди")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
@@ -8176,7 +8176,7 @@ def handle_all_callbacks(call):
         conn.commit()
         cursor.execute("SELECT limit_repeat_mute FROM groups WHERE chat_id = ?", (gid,))
         r = cursor.fetchone()
-        is_m = (r and r.get("limit_repeat_mute", 0) == 1)
+        is_m = bool(r and ("limit_repeat_mute" in r) and r["limit_repeat_mute"] == 1)
         bot.answer_callback_query(call.id, "✅ 24 соатлик МУТ ёқилди" if is_m else "⚪️ 24 соатлик МУТ ўчирилди")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
@@ -8711,7 +8711,13 @@ def group_protection_filter(message):
 
     # 3. Хабар канал ёки гуруҳ номидан (sender_chat) юборилган бўлса
     if getattr(message, 'sender_chat', None):
-        return
+        # Фақат гуруҳнинг ўз аноним админи (sender_chat.id == chat_id) бўлса ўтказиш
+        if message.sender_chat.id == chat_id:
+            return
+        # Агар ташқаридан канал номи билан пост қўйилса, унга ҳам қулфлар ва медиа лимит қўлланади:
+        user_id = message.sender_chat.id
+        u_name = html.escape(message.sender_chat.title or "Канал")
+        u_tag = f"<b>{u_name}</b>"
 
     # 4. Ботнинг ўз хабарлари
     try:
@@ -9276,10 +9282,10 @@ def group_protection_filter(message):
                 delete_msg_safe(chat_id, message.message_id)
 
                 is_repeat_within_24h = (warn_cnt >= 1 and (now_ts - last_warn_time) < 86400)
-                album_first_violation = (mg_id and not _media_album_warned.get((chat_id, mg_id), False))
+                # Агар фойдаланувчи 24 соат ичида қайта ташласа ёки бирданига 5+ та расм/видео ташласа: ДАРҲОЛ 24 СОАТЛИК МУТ!
+                should_mute = is_repeat_within_24h or (mg_id and album_cnt >= 5) or (total_cnt >= 5)
 
-                # 24 соат ичида такрорий қоидабузарлик бўлса: 24 СОАТЛИК ТЎЛИҚ МУТ!
-                if is_repeat_within_24h and (not mg_id or not album_first_violation):
+                if should_mute:
                     try:
                         until_ts = int(time.time() + 86400)
                         restrict_perms = types.ChatPermissions(
