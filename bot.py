@@ -217,7 +217,43 @@ def row_dict_factory(cursor, row):
     items = {cols[i]: row[i] for i in range(len(cols))}
     return RowDict(items, cols)
 
-_raw_conn = sqlite3.connect("asalarichilik.db", check_same_thread=False, timeout=30.0)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CANONICAL_DB_PATH = os.path.join(BASE_DIR, "asalarichilik.db")
+SETTINGS_BACKUP_PATH = os.path.join(BASE_DIR, "asalarichilik_settings_backup.json")
+
+# Мустаҳкам база йўли: қаердан ишга туширилмасин (~, консоль, Always-On, cron) доим ягона базага уланади
+candidate_db_locations = [
+    CANONICAL_DB_PATH,
+    os.path.abspath("asalarichilik.db"),
+    os.path.join(os.path.expanduser("~"), "asalarichilik.db"),
+    "/home/JamshidjonDavronov/asalarichilik.db",
+    "/home/JamshidjonDavronov/AsalarichilikBot/asalarichilik.db"
+]
+
+best_db_path = CANONICAL_DB_PATH
+best_db_size = -1
+
+for loc in candidate_db_locations:
+    try:
+        if os.path.exists(loc) and os.path.isfile(loc):
+            sz = os.path.getsize(loc)
+            if sz > best_db_size:
+                best_db_size = sz
+                best_db_path = loc
+    except Exception:
+        pass
+
+if best_db_path != CANONICAL_DB_PATH and os.path.exists(best_db_path) and best_db_size > 0:
+    try:
+        import shutil
+        if not os.path.exists(CANONICAL_DB_PATH) or os.path.getsize(CANONICAL_DB_PATH) < best_db_size:
+            shutil.copy2(best_db_path, CANONICAL_DB_PATH)
+            logging.info(f"🔄 Маълумотлар базаси {best_db_path} дан {CANONICAL_DB_PATH} га кўчирилди!")
+    except Exception as me:
+        logging.warning(f"DB migration notice: {me}")
+
+DB_PATH = CANONICAL_DB_PATH
+_raw_conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
 _raw_conn.execute("PRAGMA journal_mode=WAL;")
 _raw_conn.execute("PRAGMA busy_timeout=15000;")
 _raw_conn.row_factory = row_dict_factory
@@ -645,6 +681,111 @@ try:
 except Exception as e:
     logging.error(f"groups extra migration error: {e}")
 
+# ==================== ЗАХИРА ВА ДОИМИЙЛИК (BACKUP & PERSISTENCE) ====================
+def backup_settings_to_file():
+    """Гуруҳлар ва каналлар созламаларини JSON захира файлига сақлайди"""
+    try:
+        with _db_lock:
+            cur = _raw_conn.cursor()
+            cur.execute("SELECT * FROM groups")
+            groups_data = [dict(r) for r in cur.fetchall()]
+            cur.execute("SELECT * FROM channels")
+            channels_data = [dict(r) for r in cur.fetchall()]
+            data = {
+                "groups": groups_data,
+                "channels": channels_data,
+                "saved_at": time.time()
+            }
+            with open(SETTINGS_BACKUP_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as be:
+        logging.warning(f"Backup settings notice: {be}")
+
+def restore_settings_from_backup():
+    """База бўшаб қолса ёки қайта ишга тушганда JSON захира файлидан тиклайди"""
+    if not os.path.exists(SETTINGS_BACKUP_PATH):
+        return
+    try:
+        with open(SETTINGS_BACKUP_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        groups_data = data.get("groups", [])
+        channels_data = data.get("channels", [])
+        with _db_lock:
+            cur = _raw_conn.cursor()
+            for g in groups_data:
+                cols = [k for k in g.keys() if k != "rowid"]
+                vals = [g[k] for k in cols]
+                placeholders = ", ".join(["?"] * len(cols))
+                col_names = ", ".join(cols)
+                cur.execute(f"INSERT OR IGNORE INTO groups ({col_names}) VALUES ({placeholders})", vals)
+            for c in channels_data:
+                cur.execute(
+                    "INSERT OR IGNORE INTO channels (chat_id, title, username) VALUES (?, ?, ?)",
+                    (c.get("chat_id"), c.get("title"), c.get("username"))
+                )
+            _raw_conn.commit()
+            logging.info("✅ Гуруҳ созламалари JSON захира файлидан муваффақиятли тикланди!")
+    except Exception as re:
+        logging.warning(f"Restore settings notice: {re}")
+
+def ensure_main_group_seeded():
+    """
+    Асосий гуруҳ (-1001275726275) ва канал (-1001849204910) базада ҳар доим сақланишини кафолатлайди.
+    Бот ҳар қандай вазиятда тўхтаб қолса ҳам созламалар ва гуруҳ йўқолмайди!
+    """
+    MAIN_GROUP_ID = -1001275726275
+    MAIN_GROUP_TITLE = "🐝 Asalarichilik.Uz (Асосий гуруҳ)"
+    MAIN_CHANNEL_ID = -1001849204910
+    MAIN_CHANNEL_TITLE = "🍯🐝Asalarichilik.Uz🇺🇿 Kanali: 💎🍯🐝"
+    MAIN_CHANNEL_USER = "@Uz_Asalarichilik"
+
+    try:
+        restore_settings_from_backup()
+        with _db_lock:
+            cur = _raw_conn.cursor()
+            cur.execute("SELECT chat_id, title, is_authorized FROM groups WHERE chat_id = ?", (MAIN_GROUP_ID,))
+            g_row = cur.fetchone()
+            if not g_row:
+                cur.execute('''
+                    INSERT INTO groups (
+                        chat_id, title, added_by, is_authorized, lang,
+                        lock_links, lock_forwards, lock_spam, clean_joins, lock_badwords,
+                        lock_stickers, lock_arabic, lock_media, lock_files, lock_voice,
+                        autolock_enabled, welcome_enabled, forcesub_enabled, approval_enabled,
+                        limit_enabled, limit_max, limit_photos, limit_videos, limit_hours, limit_notice_del,
+                        autolock_start_time, autolock_end_time, autolock_delete_media, autolock_msg_delete_minutes,
+                        timezone_offset, timezone_city, weather_enabled, weather_city, weather_time, weather_forecast_type
+                    ) VALUES (
+                        ?, ?, ?, 1, 'uz_kr',
+                        1, 1, 1, 1, 1,
+                        0, 1, 0, 0, 0,
+                        1, 1, 0, 0,
+                        1, 3, 1, 1, 24, 2,
+                        '23:00', '06:30', 1, 60,
+                        5, 'Тошкент (UTC+5)', 1, 'Тошкент', '08:00', '10_days'
+                    )
+                ''', (MAIN_GROUP_ID, MAIN_GROUP_TITLE, OWNER_ID))
+                _raw_conn.commit()
+                logging.info(f"✅ Асосий гуруҳ {MAIN_GROUP_TITLE} ({MAIN_GROUP_ID}) базага тикланди ва созланди!")
+            else:
+                if not g_row.get("is_authorized"):
+                    cur.execute("UPDATE groups SET is_authorized = 1 WHERE chat_id = ?", (MAIN_GROUP_ID,))
+                    _raw_conn.commit()
+
+            cur.execute("SELECT chat_id FROM channels WHERE chat_id = ?", (MAIN_CHANNEL_ID,))
+            if not cur.fetchone():
+                cur.execute(
+                    "INSERT INTO channels (chat_id, title, username) VALUES (?, ?, ?)",
+                    (MAIN_CHANNEL_ID, MAIN_CHANNEL_TITLE, MAIN_CHANNEL_USER)
+                )
+                _raw_conn.commit()
+        backup_settings_to_file()
+    except Exception as e:
+        logging.warning(f"ensure_main_group_seeded notice: {e}")
+
+# Ишга тушганда дарҳол асосий гуруҳ ва канални тиклаб қўйиш
+ensure_main_group_seeded()
+
 # 3. Ёрдамчи Функциялар
 def delete_msg_safe(chat_id, msg_id):
     try:
@@ -676,12 +817,9 @@ def safe_edit_or_send(chat_id, message_id, text, markup=None):
         logging.error(f"safe_edit_or_send error: {e}")
 
 def register_group(chat_id, title, added_by=0):
-    cursor.execute("SELECT 1 FROM channels WHERE chat_id = ?", (chat_id,))
-    if cursor.fetchone():
-        return
     cursor.execute("SELECT chat_id FROM groups WHERE chat_id = ?", (chat_id,))
     if not cursor.fetchone():
-        auth = 1 if added_by == OWNER_ID else 0
+        auth = 1 if (added_by == OWNER_ID or chat_id == -1001275726275) else 0
         cursor.execute(
             "INSERT INTO groups (chat_id, title, added_by, is_authorized) VALUES (?, ?, ?, ?)",
             (chat_id, title, added_by, auth)
@@ -690,18 +828,24 @@ def register_group(chat_id, title, added_by=0):
     else:
         cursor.execute("UPDATE groups SET title = ? WHERE chat_id = ?", (title, chat_id))
         conn.commit()
+    backup_settings_to_file()
 
 def register_channel(chat_id, title, username=None):
-    cursor.execute("DELETE FROM groups WHERE chat_id = ?", (chat_id,))
     cursor.execute(
         "INSERT OR REPLACE INTO channels (chat_id, title, username) VALUES (?, ?, ?)",
         (chat_id, title, username)
     )
     conn.commit()
+    backup_settings_to_file()
 
 def get_group(group_id):
     cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (group_id,))
-    return cursor.fetchone()
+    row = cursor.fetchone()
+    if not row and int(group_id) == -1001275726275:
+        ensure_main_group_seeded()
+        cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (group_id,))
+        row = cursor.fetchone()
+    return row
 
 def is_admin(chat_id, user_id):
     # Telegram хизмат ҳисоблари ва бот эгаси
@@ -3966,6 +4110,7 @@ def show_owner_groups_panel(chat_id, message_id=None, lang="uz_kr"):
 
 # 9. ГУРУҲ ТАНЛАШ ВА АДМИН ЭМАС ОГОҲЛАНТИРИШИ (КЎПТИЛЛИК)
 def open_group_selection(chat_id, message_id=None, lang="uz_kr"):
+    ensure_main_group_seeded()
     cursor.execute("SELECT chat_id, title, added_by, is_authorized FROM groups ORDER BY rowid DESC")
     all_groups = cursor.fetchall()
 
@@ -8070,6 +8215,7 @@ def handle_all_callbacks(call):
                 gid = int(data.replace(prefix, ""))
                 cursor.execute(f"UPDATE groups SET {col} = CASE WHEN {col} = 1 THEN 0 ELSE 1 END WHERE chat_id = ?", (gid,))
                 conn.commit()
+                backup_settings_to_file()
                 # Агар медиа очилса (lock_media == 0), Telegram рухсатини ҳам автоматик очиш:
                 if col == "lock_media":
                     cursor.execute("SELECT lock_media FROM groups WHERE chat_id = ?", (gid,))
@@ -8090,6 +8236,7 @@ def handle_all_callbacks(call):
         gid = int(data.replace("toggle_autolock_en_", ""))
         cursor.execute("UPDATE groups SET autolock_enabled = CASE WHEN autolock_enabled = 1 THEN 0 ELSE 1 END WHERE chat_id = ?", (gid,))
         conn.commit()
+        backup_settings_to_file()
         cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (gid,))
         r_al = cursor.fetchone()
         is_now_enabled = bool(r_al and ("autolock_enabled" in r_al) and r_al["autolock_enabled"] == 1)
@@ -8118,6 +8265,7 @@ def handle_all_callbacks(call):
         next_t = times[(times.index(cur_t) + 1) % len(times)] if cur_t in times else "23:00"
         cursor.execute("UPDATE groups SET autolock_start_time = ? WHERE chat_id = ?", (next_t, gid))
         conn.commit()
+        backup_settings_to_file()
         bot.answer_callback_query(call.id, f"🔒 Қулфлаш вақти: {next_t}")
         show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
@@ -8131,6 +8279,7 @@ def handle_all_callbacks(call):
         next_t = times[(times.index(cur_t) + 1) % len(times)] if cur_t in times else "06:30"
         cursor.execute("UPDATE groups SET autolock_end_time = ? WHERE chat_id = ?", (next_t, gid))
         conn.commit()
+        backup_settings_to_file()
         bot.answer_callback_query(call.id, f"🔓 Очилиш вақти: {next_t}")
         show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
@@ -8139,6 +8288,7 @@ def handle_all_callbacks(call):
         gid = int(data.replace("toggle_limit_en_", ""))
         cursor.execute("UPDATE groups SET limit_enabled = CASE WHEN limit_enabled = 1 THEN 0 ELSE 1 END WHERE chat_id = ?", (gid,))
         conn.commit()
+        backup_settings_to_file()
         cursor.execute("SELECT limit_enabled FROM groups WHERE chat_id = ?", (gid,))
         r = cursor.fetchone()
         is_en = bool(r and ("limit_enabled" in r) and r["limit_enabled"] == 1)
@@ -8155,6 +8305,7 @@ def handle_all_callbacks(call):
         next_m = maxes[(maxes.index(cur_m) + 1) % len(maxes)] if cur_m in maxes else 3
         cursor.execute("UPDATE groups SET limit_max = ? WHERE chat_id = ?", (next_m, gid))
         conn.commit()
+        backup_settings_to_file()
         bot.answer_callback_query(call.id, f"Максимум лимит: {next_m} та қилиб белгиланди! ✅")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
@@ -8166,6 +8317,7 @@ def handle_all_callbacks(call):
         lim_val = int(lim_str)
         cursor.execute("UPDATE groups SET limit_max = ? WHERE chat_id = ?", (lim_val, gid))
         conn.commit()
+        backup_settings_to_file()
         bot.answer_callback_query(call.id, f"Лимит: {lim_val} та қилиб белгиланди! ✅")
         show_limits_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
@@ -8174,6 +8326,7 @@ def handle_all_callbacks(call):
         gid = int(data.replace("toggle_limit_mute_", ""))
         cursor.execute("UPDATE groups SET limit_repeat_mute = CASE WHEN limit_repeat_mute = 1 THEN 0 ELSE 1 END WHERE chat_id = ?", (gid,))
         conn.commit()
+        backup_settings_to_file()
         cursor.execute("SELECT limit_repeat_mute FROM groups WHERE chat_id = ?", (gid,))
         r = cursor.fetchone()
         is_m = bool(r and ("limit_repeat_mute" in r) and r["limit_repeat_mute"] == 1)
