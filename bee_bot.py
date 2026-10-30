@@ -5538,30 +5538,47 @@ async def on_chan_test_post(call: types.CallbackQuery):
     except Exception as e:
         await call.answer(f"Хатолик: {e}", show_alert=True)
 
-@dp.message(F.text.in_({"➕ Гуруҳга қўшиш", "Гуруҳга қўшиш"}))
+@dp.message(F.text.in_({
+    "➕ Гуруҳга қўшиш", "Гуруҳга қўшиш", "➕ Груҳга қўшиш", "Груҳга қўшиш",
+    "гуруҳга қўшиш", "груҳга қўшиш", "гуруҳга", "груҳга",
+    "➕ Guruhga qo'shish", "Guruhga qo'shish", "Guruhga qoshish"
+}))
 async def add_to_group_guide(message: types.Message):
     text = (
-        "➕ **БОТНИ ГУРУҲГА ҚЎШИШ:**\n\n"
-        "1. Гуруҳингиз профилига киринг ва «Администраторлар» бўлимини очинг.\n"
-        "2. «Админ қўшиш»ни босиб, @Asalarichilikuz_bot ни изланг.\n"
-        "3. Ботга хабар ёзиш ва хабарларни ўчириш ҳуқуқини бериб админ қилинг.\n\n"
-        "⚠️ **МУҲИМ:** Бегона гуруҳларга қўшилганда, бот эгаси @JamshidjonDavronov розилик берганидан кейингина фаоллашади."
+        "➕ **БОТНИ ГУРУҲГА ҚЎШИШ ЙЎРИҚНОМАСИ:**\n\n"
+        "Ботни ўз асаларичилик гуруҳингизга улаш учун қуйидаги «Гуруҳга қўшиш» тугмасини босинг ёки:\n\n"
+        "1. Гуруҳингиз профилига кириб **«Администраторлар»** бўлимига ўтинг.\n"
+        "2. **«Админ қўшиш (Add Admin)»**ни босиб, **@Asalarichilikuz_bot** ни изланг.\n"
+        "3. Ботга қуйидаги асосий рухсатларни беринг:\n"
+        "   • Хабар ёзиш (Send Messages) ✅\n"
+        "   • Сўровнома юбориш (Send Polls) ✅\n"
+        "   • Хабарларни қадаш (Pin Messages) ✅\n\n"
+        "4. Гуруҳга қўшилгач, бот ушбу гуруҳни автоматик тарзда созламалар рўйхатига киритади ва сиз унга тест ҳамда эълонларни осонлик билан йўналтиришингиз мумкин бўлади!"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Гуруҳга қўшиш", url="https://t.me/Asalarichilikuz_bot?startgroup=true")]
+        [InlineKeyboardButton(text="➕ Ҳозироқ гуруҳга қўшиш", url="https://t.me/Asalarichilikuz_bot?startgroup=true")],
+        [InlineKeyboardButton(text="👥 Расмий гуруҳимиз: @asalarichilik_uzbekistan", url="https://t.me/asalarichilik_uzbekistan")],
+        [InlineKeyboardButton(text="👑 Гуруҳлар назорати", callback_data="groups_ctrl:refresh")]
     ])
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
-@dp.message(F.text.in_({"➕ Каналга қўшиш", "Каналга қўшиш"}))
+@dp.message(F.text.in_({
+    "➕ Каналга қўшиш", "Каналга қўшиш", "каналга қўшиш", "каналга",
+    "➕ Kanalga qo'shish", "Kanalga qo'shish", "Kanalga qoshish"
+}))
 async def add_to_channel_guide(message: types.Message):
     text = (
-        "➕ **БОТНИ КАНАЛГА ҚЎШИШ:**\n\n"
-        "1. Каналингиз профилига кириб, «Администраторлар» бўлимига киринг.\n"
-        "2. @Asalarichilikuz_bot ни қидириб топинг ва админ қилиб тайинланг.\n"
-        "3. Ботга «Пост юбориш (Post Messages)» ва «Постларни қадаш (Pin Messages)» ҳуқуқларини беринг."
+        "➕ **БОТНИ КАНАЛГА ҚЎШИШ ЙЎРИҚНОМАСИ:**\n\n"
+        "Ботни асаларичилик каналингизга улаш учун қуйидаги «Каналга қўшиш» тугмасини босинг ёки:\n\n"
+        "1. Каналингиз профилига кириб **«Администраторлар»** бўлимини очинг.\n"
+        "2. **«Администратор қўшиш (Add Administrator)»**ни босиб, **@Asalarichilikuz_bot** ни изланг.\n"
+        "3. Ботга «Пост юбориш (Post Messages)» ва «Постларни қадаш (Pin Messages)» ҳуқуқларини беринг.\n\n"
+        "4. Каналга улангач, бот созламалар рўйхатида пайдо бўлади ва унга 1 та тугма билан янгилик ва тестларни эълон қилишингиз мумкин бўлади!"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Каналга қўшиш", url="https://t.me/Asalarichilikuz_bot?startchannel=true")]
+        [InlineKeyboardButton(text="➕ Ҳозироқ каналга қўшиш", url="https://t.me/Asalarichilikuz_bot?startchannel=true")],
+        [InlineKeyboardButton(text="📢 Расмий каналимиз: @uz_asalarichilik", url="https://t.me/uz_asalarichilik")],
+        [InlineKeyboardButton(text="📢 Каналлар бошқаруви", callback_data="channel_ctrl:refresh")]
     ])
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
@@ -5720,12 +5737,168 @@ def build_group_settings_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     ]
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
-@dp.message(F.text.in_({"⚙️ Гуруҳ созламалари", "Гуруҳ созламалари"}))
+@dp.message(F.text.in_({
+    "⚙️ Гуруҳ созламалари", "Гуруҳ созламалари",
+    "⚙️ Груҳ созламалари", "Груҳ созламалари",
+    "⚙️ Гуруҳ созламалар", "Гуруҳ созламалар",
+    "⚙️ Груҳ созламалар", "Груҳ созламалар",
+    "гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар",
+    "созламалари", "созламалар", "созлама", "Guruh sozlamalari", "Gruh sozlamalari"
+}))
 async def group_settings_btn_cmd(message: types.Message):
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
     text, kb = build_group_settings_dashboard()
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
+    off_group = get_official_group()
+    allowed = load_allowed_chats()
+    conn = load_connected_chats()
+    all_chats = {}
+    all_chats.update(allowed)
+    all_chats.update(conn)
+
+    group_list = [
+        f"• 👑 **Asalarichilik.Uz Расмий Супергуруҳи**\n"
+        f"  ├ Юзернейм: `{off_group}`\n"
+        f"  ├ ID: `-1001275726275`\n"
+        f"  └ Ҳолати: 🟢 ФАОЛ (Бот ва Админ тўлиқ уланган)"
+    ]
+
+    for cid, info in all_chats.items():
+        c_title = info.get("title", "Гуруҳ")
+        c_type = info.get("type", "group")
+        if c_title in ["Asalarichilik.Uz", "Asalarichilik.Uz Гуруҳи", off_group] or str(cid) == "-1001275726275":
+            continue
+        if c_type in ["group", "supergroup", "Guruh"]:
+            group_list.append(f"• 🔹 **{c_title}**\n  ├ ID: `{cid}`\n  └ Ҳолати: ✅ Уланган")
+
+    grps_text = "\n\n".join(group_list)
+    text = (
+        "👥 **ГУРУҲЛАР НАЗОРАТИ ВА БОШҚАРУВИ**\n\n"
+        "Ушбу бўлимда бот фаолият кўрсатаётган барча асаларичилик гуруҳлари назорат қилинади.\n\n"
+        "────────────────────────\n"
+        f"📋 **НАЗОРАТДАГИ ГУРУҲЛАР ({len(group_list)} та):**\n"
+        f"{grps_text}\n\n"
+        "────────────────────────\n"
+        "🛡 **Гуруҳ хавфсизлиги:** Бегона бот ва спам реклама ҳаволаларини ўчириш ва муте қилиш махсус тозаловчи ботга бириктирилган.\n"
+        "🎯 **Имкониятлар:** Бот гуруҳда аричилар саволларига автоматик мутахассис жавобини беради ҳамда викторина ва илмий тестларни ўтказади."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Гуруҳга ботни қўшиш", url="https://t.me/Asalarichilikuz_bot?startgroup=true"),
+            InlineKeyboardButton(text="⚙️ Гуруҳ созламалари", callback_data="grp_set_dest:open")
+        ],
+        [
+            InlineKeyboardButton(text="🚀 Гуруҳга тест бошлаш", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="groups_ctrl:refresh")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
+    ])
+    return text, kb
+
+@dp.message(F.text.in_({
+    "👑 Гуруҳлар назорати", "Гуруҳлар назорати", "Гуруҳ назорати",
+    "Груҳлар назорати", "Груҳ назорати",
+    "гуруҳлар назорати", "груҳлар назорати", "гуруҳ назорати", "груҳ назорати",
+    "гуруҳлар", "груҳлар", "гуруҳ", "груҳ", "Guruhlar nazorati", "Gruh nazorati"
+}))
+async def groups_control_cmd(message: types.Message):
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    text, kb = build_groups_control_dashboard()
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "groups_ctrl:refresh")
+async def on_groups_ctrl_refresh(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("🔄 Янгиланмоқда...", show_alert=False)
+    text, kb = build_groups_control_dashboard()
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+def build_channel_mgmt_dashboard() -> tuple[str, InlineKeyboardMarkup]:
+    off_channel = get_official_channel()
+    chan_title = get_channel_title()
+    allowed = load_allowed_chats()
+    conn = load_connected_chats()
+    all_chats = {}
+    all_chats.update(allowed)
+    all_chats.update(conn)
+
+    chan_list = [
+        f"• 📢 **{chan_title}**\n"
+        f"  ├ Юзернейм: `{off_channel}`\n"
+        f"  ├ ID: `-1001261575171`\n"
+        f"  └ Ҳолати: 🟢 ФАОЛ (Асосий расмий тарқатиш канали)"
+    ]
+
+    for cid, info in all_chats.items():
+        c_title = info.get("title", "Канал")
+        c_type = info.get("type", "channel")
+        if c_title in [chan_title, off_channel] or str(cid) == "-1001261575171":
+            continue
+        if c_type in ["channel", "Kanal"]:
+            chan_list.append(f"• 🔹 **{c_title}**\n  ├ ID: `{cid}`\n  └ Ҳолати: ✅ Уланган")
+
+    chans_text = "\n\n".join(chan_list)
+    text = (
+        "📢 **КАНАЛЛАР НАЗОРАТИ ВА БОШҚАРУВИ**\n\n"
+        "Ушбу бўлимда бот уланган барча асаларичилик телеграм каналлари назорат қилинади.\n\n"
+        "────────────────────────\n"
+        f"📋 **НАЗОРАТДАГИ КАНАЛЛАР ({len(chan_list)} та):**\n"
+        f"{chans_text}\n\n"
+        "────────────────────────\n"
+        "⚙️ **Канал параметрлари:**\n"
+        "• Расмий муаллифлик имзоси: ✅ Бириктирилган\n"
+        "• Реакциялар ва улашиш тугмалари: ✅ Фаол\n"
+        "• Сўровномалар (Poll): Аноним тарзда ўтказилади (Телеграм канали стандарти)\n"
+        "• Тест ва янгиликлар тарқатиш: 🚀 Фаол"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Каналга ботни қўшиш", url="https://t.me/Asalarichilikuz_bot?startchannel=true"),
+            InlineKeyboardButton(text="⚙️ Юбориш созламалари", callback_data="grp_set_dest:open")
+        ],
+        [
+            InlineKeyboardButton(text="📢 Каналга янгилик юбориш", callback_data="news_nav:create"),
+            InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="channel_ctrl:refresh")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
+    ])
+    return text, kb
+
+@dp.message(F.text.in_({
+    "📢 Каналлар бошқаруви", "Каналлар бошқаруви", "Канал бошқаруви",
+    "Каналлар назорати", "Канал назорати",
+    "каналлар бошқаруви", "канал бошқаруви", "каналлар назорати", "канал назорати",
+    "каналлар", "канал", "Kanallar boshqaruvi", "Kanal nazorati"
+}))
+async def channel_mgmt_cmd(message: types.Message):
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    text, kb = build_channel_mgmt_dashboard()
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "channel_ctrl:refresh")
+async def on_channel_ctrl_refresh(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("🔄 Янгиланмоқда...", show_alert=False)
+    text, kb = build_channel_mgmt_dashboard()
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "grp_set_dest:open")
+async def on_grp_set_dest_open(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    text, kb = build_group_settings_dashboard()
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("grp_set_dest:"))
 async def on_grp_set_dest_select(call: types.CallbackQuery):
@@ -6102,6 +6275,7 @@ async def dispatch_scientific_pre_notice(bot_instance: Bot) -> int:
     return sent_cnt
 
 async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]:
+    session_id = f"sci_{int(time.time())}"
     settings = get_sci_settings()
     script = settings.get("script_mode", "cyrillic")
     cat = settings.get("current_category", "young_beekeepers")
@@ -6125,13 +6299,38 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     test_set = set_questions[:10]
     global_target = get_settings().get("post_target_mode", "both")
     eff_target = global_target if global_target in ["channel", "group", "both"] else settings.get("target", "both")
-    targets = get_destinations_for_target(eff_target)
+    raw_targets = get_destinations_for_target(eff_target)
+
+    # Sanitize and resolve targets
+    official_channel_id = -1001261575171
+    official_group_id = -1001275726275
+    targets = []
+    for t in raw_targets:
+        if str(t) in ["@uz_asalarichilik", "uz_asalarichilik", str(official_channel_id)]:
+            if official_channel_id not in targets:
+                targets.append(official_channel_id)
+        elif str(t) in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", str(official_group_id)]:
+            if official_group_id not in targets:
+                targets.append(official_group_id)
+        else:
+            try:
+                targets.append(int(t))
+            except Exception:
+                targets.append(t)
+
+    if not targets:
+        if eff_target == "channel":
+            targets = [official_channel_id]
+        elif eff_target == "group":
+            targets = [official_group_id]
+        else:
+            targets = [official_channel_id, official_group_id]
 
     session = {
         "is_active": True,
         "session_id": session_id,
         "category": cat,
-        "target": settings.get("target", "both"),
+        "target": eff_target,
         "started_at": time.time(),
         "duration_sec": dur,
         "poll_map": {},
@@ -6145,6 +6344,7 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
         "",
         "🏛 " + apply_script("Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот институтлари расмий синов тести.", script),
         f"🔬 {apply_script('Йўналиш', script)}: **{cat_title}**",
+        f"📑 {apply_script('Серия рақами', script)}: **#{active_set}-серия**",
         "📊 " + apply_script("Жами саволлар: 10 та савол (A, B, C, D, E вариантлар)", script),
         f"⏱ " + apply_script(f"Вақт чеклови: {dur} сония" if dur > 0 else "Вақт чеклови: Чекловсиз", script),
         "",
@@ -6186,6 +6386,9 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
             expl = expl[:197] + "..."
 
         for cid in targets:
+            # Telegram restriction: Channel chats CANNOT receive non-anonymous polls!
+            is_chan = (cid == official_channel_id or str(cid).startswith("-1001261575171"))
+            is_anon = True if is_chan else False
             try:
                 poll_msg = await bot_instance.send_poll(
                     chat_id=cid,
@@ -6194,7 +6397,7 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     type="quiz",
                     correct_option_id=correct_id,
                     explanation=expl,
-                    is_anonymous=False,
+                    is_anonymous=is_anon,
                     open_period=open_period
                 )
                 if poll_msg and poll_msg.poll:
@@ -6206,6 +6409,27 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     polls_sent_count += 1
             except Exception as pe:
                 logging.error(f"Poll send error ({cid}, q={q_idx}): {pe}")
+                if not is_anon:
+                    try:
+                        poll_msg = await bot_instance.send_poll(
+                            chat_id=cid,
+                            question=q_text,
+                            options=poll_opts,
+                            type="quiz",
+                            correct_option_id=correct_id,
+                            explanation=expl,
+                            is_anonymous=True,
+                            open_period=open_period
+                        )
+                        if poll_msg and poll_msg.poll:
+                            session["poll_map"][poll_msg.poll.id] = {
+                                "q_idx": q_idx,
+                                "correct_id": correct_id,
+                                "chat_id": cid
+                            }
+                            polls_sent_count += 1
+                    except Exception as pe2:
+                        logging.error(f"Poll anon fallback error ({cid}): {pe2}")
 
     save_sci_session(session)
     return len(targets), polls_sent_count, session_id
@@ -6493,19 +6717,23 @@ async def on_sci_pre_notice_cb(call: types.CallbackQuery):
 async def on_sci_launch_now_cb(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
-    await call.answer("🚀 Тест бошланмоқда...")
-    t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
-    report_lines = [
-        "🚀 **АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТИ МУВАФФАҚИЯТЛИ БОШЛАНДИ!**",
-        "",
-        f"📍 Юборилган чатлар сони: {t_cnt} та",
-        f"📊 Юборилган тест саволлари (Poll): 10 та савол (A, B, C, D, E)",
-        f"🔑 Сессия ID: `{s_id}`",
-        "",
-        "💡 Фойдаланувчилар овоз берганда уларнинг тўғри жавоблари ва профиллари онлайн қайд этиб борилади. "
-        "Тест якунлангач, «🏆 Натижаларни эълон қилиш» тугмасини босинг!"
-    ]
-    await call.message.answer(chr(10).join(report_lines), parse_mode="Markdown")
+    await call.answer("🚀 Тест бошланмоқда! 10 та савол юборилмоқда...", show_alert=False)
+    try:
+        t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
+        report_lines = [
+            "🚀 **АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТИ МУВАФФАҚИЯТЛИ БОШЛАНДИ!**",
+            "",
+            f"📍 Юборилган чатлар сони: {t_cnt} та (Гуруҳ ва Канал)",
+            f"📊 Юборилган тест саволлари (Poll): {p_cnt} та савол (A, B, C, D, E)",
+            f"🔑 Сессия ID: `{s_id}`",
+            "",
+            "💡 Иштирокчилар овоз берганда уларнинг тўғри жавоблари ва профиллари онлайн қайд этиб борилади. "
+            "Тест якунлангач, «🏆 Натижаларни эълон қилиш» тугмасини босинг!"
+        ]
+        await call.message.answer(chr(10).join(report_lines), parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"on_sci_launch_now_cb error: {e}")
+        await call.message.answer(f"⚠️ Тестни бошлашда хатолик бўлди: {e}")
 
 @dp.callback_query(F.data == "sci_act:participants")
 async def on_sci_participants_cb(call: types.CallbackQuery):
@@ -6809,17 +7037,24 @@ async def private_chat_handler(message: types.Message):
 
     clean_text = message.text.strip().lower()
 
-    # Barcha menyu tugmalarini 100% aniq ushlab qolish va xatoliksiz ishlatish
-    if any(k in clean_text for k in ["илмий", "тест", "test", "саволлар", "savol"]):
-        return await scientific_tests_menu_cmd(message)
+    # 1. Каналлар бошқаруви ва каналга қўшиш
     if any(k in clean_text for k in ["каналга қўшиш", "каналга", "kanalga"]):
         return await add_to_channel_guide(message)
-    if any(k in clean_text for k in ["гуруҳга қўшиш", "гуруҳга", "guruhga"]):
-        return await add_to_group_guide(message)
-    if any(k in clean_text for k in ["гуруҳ созламалари", "созлама", "sozlama"]):
-        return await group_settings_btn_cmd(message)
-    if any(k in clean_text for k in ["каналлар бошқаруви", "каналлар", "kanal"]):
+    if any(k in clean_text for k in ["каналлар бошқаруви", "канал бошқаруви", "каналлар назорати", "канал назорати", "каналлар", "канал", "kanallar", "kanal"]):
         return await channel_mgmt_cmd(message)
+
+    # 2. Гуруҳлар бошқаруви, созламалари ва гуруҳга қўшиш
+    if any(k in clean_text for k in ["гуруҳга қўшиш", "груҳга қўшиш", "гуруҳга", "груҳга", "guruhga", "gruhga"]):
+        return await add_to_group_guide(message)
+    if any(k in clean_text for k in ["гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар", "гуруҳ созлама", "груҳ созлама", "созламалари", "созламалар", "созлама", "sozlama"]):
+        return await group_settings_btn_cmd(message)
+    if any(k in clean_text for k in ["гуруҳлар назорати", "груҳлар назорати", "гуруҳ назорати", "груҳ назорати", "гуруҳлар", "груҳлар", "гуруҳ", "груҳ", "guruhlar", "gruhlar"]):
+        return await groups_control_cmd(message)
+
+    # 3. Илмий тестлар ва саволлар
+    if any(k in clean_text for k in ["илмий тадқиқот", "илмий тест", "тестлар", "тест", "test", "саволлар", "savol"]):
+        return await scientific_tests_menu_cmd(message)
+
     if any(k in clean_text for k in ["асаларичилик янгиликлари", "янгиликлари", "yangilik"]):
         return await news_cmd(message)
     if any(k in clean_text for k in ["апитерапия", "apiterapiya"]):
@@ -6830,8 +7065,6 @@ async def private_chat_handler(message: types.Message):
         return await bot_owner_card(message)
     if any(k in clean_text for k in ["реклама тарқатиш", "реклама", "reklama"]):
         return await ad_broadcast_menu(message)
-    if any(k in clean_text for k in ["гуруҳлар назорати", "назорати", "nazorati"]):
-        return await groups_control_cmd(message)
     if any(k in clean_text for k in ["тилни ўзгартириш", "тил", "til"]):
         return await change_lang_menu(message)
     if any(k in clean_text for k in ["қўлланма", "qollanma"]):
