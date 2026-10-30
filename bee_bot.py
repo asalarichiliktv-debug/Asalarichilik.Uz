@@ -5628,9 +5628,151 @@ async def bot_guide_menu(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
+def build_group_settings_dashboard() -> tuple[str, InlineKeyboardMarkup]:
+    settings = get_settings()
+    cur_target = settings.get("post_target_mode", "channel")
+    off_group = get_official_group()
+    off_channel = get_official_channel()
+    chan_title = get_channel_title()
+
+    target_labels = {
+        "channel": f"📢 Фақат Каналга ({off_channel})",
+        "group": f"👥 Фақат Гуруҳга ({off_group})",
+        "both": "🚀 Канал ва Гуруҳга (Иккаласига бирданига)",
+        "ask": "❓ Ҳар сафар сўралсин"
+    }
+    cur_lbl = target_labels.get(cur_target, f"📢 Фақат Каналга ({off_channel})")
+
+    allowed = load_allowed_chats()
+    groups_list = []
+    channels_list = []
+
+    groups_list.append(
+        f"• 🟢 **Asalarichilik.Uz Гуруҳи**\n"
+        f"  ├ Юзернейм: `{off_group}`\n"
+        f"  ├ Тури: Супергуруҳ (Supergroup)\n"
+        f"  └ Ҳолати: ✅ Фаол (Админ ва Бот уланган)"
+    )
+
+    channels_list.append(
+        f"• 🟢 **{chan_title}**\n"
+        f"  ├ Юзернейм: `{off_channel}`\n"
+        f"  ├ Тури: Расмий Канал (Channel)\n"
+        f"  └ Ҳолати: ✅ Фаол (Пост ва тестлар узатилади)"
+    )
+
+    for cid, info in allowed.items():
+        c_title = info.get("title", "Guruh")
+        c_type = info.get("type", "group")
+        if c_title in ["Asalarichilik.Uz", "Asalarichilik.Uz Гуруҳи", off_group, off_channel]:
+            continue
+        if c_type in ["group", "supergroup", "Guruh"]:
+            groups_list.append(f"• 🔹 **{c_title}**\n  ├ ID: `{cid}`\n  └ Ҳолати: ✅ Уланган")
+        elif c_type in ["channel", "Kanal"]:
+            channels_list.append(f"• 🔹 **{c_title}**\n  ├ ID: `{cid}`\n  └ Ҳолати: ✅ Уланган")
+
+    groups_txt = "\n\n".join(groups_list)
+    channels_txt = "\n\n".join(channels_list)
+
+    text = (
+        "⚙️ **ГУРУҲ ВА КАНАЛ СОЗЛАМАЛАРИ БЎЛИМИ**\n\n"
+        "Ушбу бўлимда бот уланган барча гуруҳ ва каналлар рўйхатини кўришингиз ҳамда "
+        "ботдан юбориладиган ҳар қандай хабар (янгилик, викторина, илмий тест, апитерапия ва постлар) учун "
+        "**олдиндан белгиланган манзил**ни созлашингиз мумкин.\n\n"
+        "────────────────────────\n"
+        f"🎯 **ОЛДИНДАН БЕЛГИЛАНГАН ЮБОРИШ МАНЗИЛИ:**\n"
+        f"👉 **{cur_lbl}**\n\n"
+        "*(Ҳар қандай пост ёки тест юборилганда бот автоматик тарзда шу танланган манзилга йўналтиради)*\n"
+        "────────────────────────\n\n"
+        f"👥 **АДМИН ВА БОТ УЛАНГАН ГУРУҲЛАР ({len(groups_list)} та):**\n"
+        f"{groups_txt}\n\n"
+        f"📢 **УЛАНГАН КАНАЛЛАР ({len(channels_list)} та):**\n"
+        f"{channels_txt}\n\n"
+        "────────────────────────\n"
+        "Юбориладиган хабарлар учун олдиндан белгиланган манзилни танланг:"
+    )
+
+    btn_chan = ("✅ " if cur_target == "channel" else "") + "📢 1. Фақат Каналга"
+    btn_grp = ("✅ " if cur_target == "group" else "") + "👥 2. Фақат Гуруҳга"
+    btn_both = ("✅ " if cur_target == "both" else "") + "🚀 3. Канал + Гуруҳ"
+    btn_ask = ("✅ " if cur_target == "ask" else "") + "❓ 4. Ҳар сафар сўралсин"
+
+    rows = [
+        [
+            InlineKeyboardButton(text=btn_chan, callback_data="grp_set_dest:channel"),
+            InlineKeyboardButton(text=btn_grp, callback_data="grp_set_dest:group")
+        ],
+        [
+            InlineKeyboardButton(text=btn_both, callback_data="grp_set_dest:both"),
+            InlineKeyboardButton(text=btn_ask, callback_data="grp_set_dest:ask")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Расмий гуруҳни ўзгартириш", callback_data="set_change_group"),
+            InlineKeyboardButton(text="✏️ Расмий канални ўзгартириш", callback_data="set_change_channel")
+        ],
+        [
+            InlineKeyboardButton(text="➕ Янги гуруҳга қўшиш йўриқномаси", callback_data="grp_nav:guide"),
+            InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="grp_nav:refresh")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
 @dp.message(F.text.in_({"⚙️ Гуруҳ созламалари", "Гуруҳ созламалари"}))
 async def group_settings_btn_cmd(message: types.Message):
-    await settings_cmd(message)
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    text, kb = build_group_settings_dashboard()
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("grp_set_dest:"))
+async def on_grp_set_dest_select(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    mode = call.data.split(":")[1]
+    update_setting("post_target_mode", mode)
+    update_sci_setting("target", "both" if mode in ["both", "ask"] else mode)
+    update_setting("news_auto_target", "both" if mode in ["both", "ask"] else mode)
+    update_setting("quiz_auto_target", "both" if mode in ["both", "ask"] else mode)
+    update_setting("apitherapy_auto_target", "both" if mode in ["both", "ask"] else mode)
+
+    labels = {
+        "channel": "Фақат КАНАЛГА 📢",
+        "group": "Фақат ГУРУҲГА 👥",
+        "both": "КАНАЛ ва ГУРУҲГА (Иккаласига) 🚀",
+        "ask": "Ҳар сафар сўралади ❓"
+    }
+    chosen = labels.get(mode, mode)
+    await call.answer(f"✅ Олдиндан белгиланди: Барча хабар ва тестлар {chosen} юборилади!", show_alert=True)
+    text, kb = build_group_settings_dashboard()
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "grp_nav:refresh")
+async def on_grp_nav_refresh(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("🔄 Янгиланмоқда...", show_alert=False)
+    text, kb = build_group_settings_dashboard()
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "grp_nav:guide")
+async def on_grp_nav_guide(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    text = (
+        "➕ **БОТНИ ЯНГИ ГУРУҲГА ҚЎШИШ ЙЎРИҚНОМАСИ:**\n\n"
+        "1. Телеграмда исталган асаларичилик гуруҳига киринг.\n"
+        "2. Гуруҳ созламаларидан **«Add Members»** (Аъзо қўшиш) бўлимига ўтинг.\n"
+        "3. **`@Asalarichilikuz_bot`** ни қидириб топинг ва гуруҳга қўшинг.\n"
+        "4. Ботга **Админ (Administrator)** ҳуқуқини беринг (хабар ёзиш ва сўровнома юбориш учун).\n"
+        "5. Шундан сўнг ушбу гуруҳ автоматик тарзда ушбу рўйхатда пайдо бўлади ва сиз унга тест ва постлар юборишингиз мумкин бўлади!"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Гуруҳ созламаларига қайтиш", callback_data="grp_nav:refresh")]
+    ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
 # ==============================================================================
 # 22. GURUHLARDA MODERATSIYA (BOSHQA BOTGA TOPSHIRILGAN)
@@ -5657,7 +5799,8 @@ DEFAULT_SCIENTIFIC_SETTINGS = {
     "auto_enabled": False,
     "auto_time": "19:00",
     "script_mode": "cyrillic",
-    "reactions_enabled": True
+    "reactions_enabled": True,
+    "selected_set_id": 1
 }
 
 def load_scientific_tests_db() -> dict:
@@ -5794,6 +5937,11 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
     active_lbl = "🟢 ТЕСТ ДАВОМ ЭТМОҚДА" if session.get("is_active") else "⚪️ ТАЙЁР ТУРИБДИ"
     participants_cnt = len(session.get("participants", {}))
 
+    total_sets = max(1, len(questions) // 10)
+    active_set = settings.get("selected_set_id", 1)
+    if active_set > total_sets or active_set < 1:
+        active_set = 1
+
     text_lines = [
         "🎓 **АСАЛАРИЧИЛИК ИЛМИЙ ТАДҚИҚОТ ИНСТИТУТЛАРИ ТЕСТ МАРКАЗИ**",
         "",
@@ -5801,7 +5949,8 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
         "Ҳар бир тест тўплами **10 та савол**дан ва ҳар бир савол **5 та вариант (A, B, C, D, E)** дан иборат.",
         "",
         f"🔬 **Жорий танланган йўналиш:** {cat_title}",
-        f"📊 **Базадаги саволлар:** {len(questions)} та (10 талик расмий серия)",
+        f"📊 **Базадаги саволлар:** {len(questions)} та ({total_sets} та 10 талик расмий серия)",
+        f"📑 **Танланган серия:** {active_set}-серия (10 та савол)",
         f"📡 **Ҳолати:** {active_lbl}",
         "",
         "⚙️ **Жорий созламалар:**",
@@ -5820,7 +5969,9 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
     text = chr(10).join(text_lines)
 
     cat_yosh_lbl = "👉 👶 Ёш асаларичилар" if cat == "young_beekeepers" else "👶 Ёш асаларичилар"
-    cat_ustoz_lbl = "👉 🎓 Устоз аричилар" if cat == "master_beekeepers" else "🎓 Устоз аричиlar"
+    cat_ustoz_lbl = "👉 🎓 Устоз аричилар" if cat == "master_beekeepers" else "🎓 Устоз аричилар"
+
+    start_preview_page = (active_set - 1) * 10
 
     rows = [
         [
@@ -5828,11 +5979,12 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
             InlineKeyboardButton(text=cat_ustoz_lbl, callback_data="sci_cat:master_beekeepers")
         ],
         [
-            InlineKeyboardButton(text="👁 Тестни кўриб чиқиш (10 та савол)", callback_data="sci_prev_page:0")
+            InlineKeyboardButton(text=f"🔄 Серия: {active_set}/{total_sets}", callback_data="sci_act:choose_set"),
+            InlineKeyboardButton(text=f"👁 {active_set}-серияни кўриш (10 та)", callback_data=f"sci_prev_page:{start_preview_page}")
         ],
         [
-            InlineKeyboardButton(text="🚀 Ҳозироқ тестни бошлаш (10 талик)", callback_data="sci_act:launch_now"),
-            InlineKeyboardButton(text="⏰ 1 соат олдин эълон бериш", callback_data="sci_act:pre_notice")
+            InlineKeyboardButton(text=f"🚀 {active_set}-серияни бошлаш (10 талик)", callback_data="sci_act:launch_now"),
+            InlineKeyboardButton(text="⏰ 1 соат олдин эълон", callback_data="sci_act:pre_notice")
         ],
         [
             InlineKeyboardButton(text=f"👥 Онлайн қатнашчилар ({participants_cnt} нафар)", callback_data="sci_act:participants"),
@@ -5840,7 +5992,7 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
         ],
         [
             InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings"),
-            InlineKeyboardButton(text="➕ Янги 10 талик тест тузиш", callback_data="sci_act:new_test")
+            InlineKeyboardButton(text="➕ Янги 10 талик тест қўшиш", callback_data="sci_act:new_test")
         ],
         [
             InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
@@ -5925,7 +6077,9 @@ async def dispatch_scientific_pre_notice(bot_instance: Bot) -> int:
     ]
     notice_text = chr(10).join(text_lines)
 
-    targets = get_destinations_for_target(settings.get("target", "both"))
+    global_target = get_settings().get("post_target_mode", "both")
+    eff_target = global_target if global_target in ["channel", "group", "both"] else settings.get("target", "both")
+    targets = get_destinations_for_target(eff_target)
     sent_cnt = 0
     for cid in targets:
         try:
@@ -5960,9 +6114,18 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     if not questions:
         return 0, 0, "Тестлар базаси бўш!"
 
-    test_set = questions[:10]
-    session_id = f"sci_{cat}_{int(time.time())}"
-    targets = get_destinations_for_target(settings.get("target", "both"))
+    active_set = settings.get("selected_set_id", 1)
+    set_questions = [q for q in questions if q.get("set_id") == active_set]
+    if not set_questions:
+        start_idx = (active_set - 1) * 10
+        set_questions = questions[start_idx : start_idx + 10]
+    if not set_questions:
+        set_questions = questions[:10]
+
+    test_set = set_questions[:10]
+    global_target = get_settings().get("post_target_mode", "both")
+    eff_target = global_target if global_target in ["channel", "group", "both"] else settings.get("target", "both")
+    targets = get_destinations_for_target(eff_target)
 
     session = {
         "is_active": True,
@@ -6503,27 +6666,131 @@ async def on_scientific_poll_answer(poll_answer: types.PollAnswer):
 async def on_sci_new_test_builder(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
+    s = get_sci_settings()
+    cat = s.get("current_category", "young_beekeepers")
+    cat_title = get_sci_category_title(cat)
+    db = load_scientific_tests_db()
+    yb_count = len(db.get("young_beekeepers", []))
+    mb_count = len(db.get("master_beekeepers", []))
+    yb_sets = max(1, yb_count // 10)
+    mb_sets = max(1, mb_count // 10)
+
     builder_lines = [
-        "➕ **ЯНГИ 10 ТАЛИК ИЛМИЙ ТЕСТ ҚЎШИШ:**",
+        "➕ **ЯНГИ 10 ТАЛИК ИЛМИЙ ТЕСТЛАР БЎЛИМИ**",
         "",
-        "Сиз янги 10 талик тест саволларини қуйидаги форматда тайёрлаб юборишингиз мумкин:",
+        "Ҳар бир йўналиш учун алоҳида янги 10 талик тест саволлари ва жавобларини (5 тадан A, B, C, D, E вариантлари, тўғри жавоб кўрсаткичи ва илмий изоҳи билан) автоматик тарзда қўшишингиз мумкин.",
         "",
-        "1. Савол матни?",
-        "A) 1-вариант",
-        "B) 2-вариант",
-        "C) 3-вариант",
-        "D) 4-вариант",
-        "E) 5-вариант",
-        "Жавоб: A",
-        "Изоҳ: Илмий тадқиқот изоҳи...",
+        "📊 **Базадаги мавжуд саволлар:**",
+        f"• 👶 **Ёш асаларичилар:** {yb_count} та савол ({yb_sets} та 10 талик серия)",
+        f"• 🎓 **Устоз аричилар:** {mb_count} та савол ({mb_sets} та 10 талик серия)",
         "",
-        "Шунингдек, бот таркибида 1000+ илмий асаларичилик саволлари мавжуд бўлиб, "
-        "улар автомат тарзда сараланиб 10 талик расмий серияларга бирлаштирилган."
+        f"🔬 **Жорий фаол йўналиш:** {cat_title}",
+        "",
+        "Қайси бўлимга янги 10 талик тест қўшмоқчисиз? Танланг:"
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Тест марказига қайтиш", callback_data="sci_act:dashboard")]
+        [
+            InlineKeyboardButton(text="🤖 👶 «Ёш асаларичилар»га янги 10 та қўшиш", callback_data="sci_auto_add:young_beekeepers")
+        ],
+        [
+            InlineKeyboardButton(text="🤖 🎓 «Устоз аричилар»га янги 10 та қўшиш", callback_data="sci_auto_add:master_beekeepers")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Серияларни танлаш", callback_data="sci_act:choose_set"),
+            InlineKeyboardButton(text="🔙 Тест марказига қайтиш", callback_data="sci_act:dashboard")
+        ]
     ])
     await call.message.edit_text(chr(10).join(builder_lines), reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("sci_auto_add:"))
+async def on_sci_auto_add_btn(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    cat = call.data.split(":")[1]
+    cat_title = "👶 «Ёш асаларичилар»" if cat == "young_beekeepers" else "🎓 «Устоз аричилар»"
+    
+    try:
+        import scientific_test_bank
+        next_set, added, total = scientific_test_bank.auto_add_next_10_scientific_test(cat)
+        update_sci_setting("selected_set_id", next_set)
+        update_sci_setting("current_category", cat)
+        
+        start_page = max(0, (next_set - 1) * 10)
+        text = (
+            f"🎉 **ЯНГИ 10 ТАЛИК ИЛМИЙ ТЕСТ АВТОМАТИК ҚЎШИЛДИ!**\n\n"
+            f"📁 **Йўналиш:** {cat_title}\n"
+            f"🔢 **Янги серия рақами:** #{next_set}-серия (10 та янги савол)\n"
+            f"📊 **Ушбу бўлимдаги жами саволлар:** {total} тага етди ({total // 10} та тўлиқ 10 талик серия)!\n\n"
+            f"🏛 **Илмий стандартлар:**\n"
+            f"• Барча 10 та савол 5 тадан (A, B, C, D, E) вариантга эга\n"
+            f"• Тўғри жавоб калити бириктирилган\n"
+            f"• Илмий-амалий ва тадқиқот изоҳлари мавжуд\n\n"
+            f"Энди ушбу янги тест сериясини кўриб чиқишингиз ёки канал ва гуруҳларга бошлашингиз мумкин!"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text=f"👁 {next_set}-серияни кўриш (10 та)", callback_data=f"sci_prev_page:{start_page}"),
+                InlineKeyboardButton(text="🚀 Тестни бошлаш", callback_data="sci_act:launch_now")
+            ],
+            [
+                InlineKeyboardButton(text="➕ Яна 10 та қўшиш", callback_data="sci_act:new_test"),
+                InlineKeyboardButton(text="🔙 Тест марказига қайтиш", callback_data="sci_act:dashboard")
+            ]
+        ])
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        await call.answer(f"✅ {cat_title} га 10 та янги тест қўшилди!", show_alert=True)
+    except Exception as e:
+        logging.error(f"auto_add error: {e}")
+        await call.answer(f"Хатолик: {e}", show_alert=True)
+
+@dp.callback_query(F.data == "sci_act:choose_set")
+async def on_sci_choose_set(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    s = get_sci_settings()
+    cat = s.get("current_category", "young_beekeepers")
+    cat_title = get_sci_category_title(cat)
+    db = load_scientific_tests_db()
+    q_list = db.get(cat, [])
+    total_sets = max(1, len(q_list) // 10)
+    active_set = s.get("selected_set_id", 1)
+    if active_set > total_sets or active_set < 1:
+        active_set = 1
+        
+    rows = []
+    row = []
+    for set_num in range(1, total_sets + 1):
+        mark = "✅ " if set_num == active_set else ""
+        row.append(InlineKeyboardButton(text=f"{mark}{set_num}-серия", callback_data=f"sci_set_select:{set_num}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="➕ Янги 10 талик қўшиш", callback_data="sci_act:new_test"),
+        InlineKeyboardButton(text="🔙 Тест марказига қайтиш", callback_data="sci_act:dashboard")
+    ])
+    
+    await call.message.edit_text(
+        f"📑 **ТЕСТ СЕРИЯСИНИ ТАНЛАНГ:**\n\n"
+        f"Йўналиш: {cat_title}\n"
+        f"Жами мавжуд: **{total_sets} та серия** ({len(q_list)} та савол).\n"
+        f"Ҳозирда танланган: **{active_set}-серия**\n\n"
+        f"Кўрмоқчи ёки ўтказмоқчи бўлган 10 талик серияни танланг:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query(F.data.startswith("sci_set_select:"))
+async def on_sci_set_select_btn(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    selected_set = int(call.data.split(":")[1])
+    update_sci_setting("selected_set_id", selected_set)
+    await call.answer(f"Танланди: {selected_set}-серия (10 та савол)", show_alert=True)
+    text, kb = build_scientific_dashboard()
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
 # ==============================================================================
 # 24. SHAXSIY YOZISHMA (LICHKA): FAQAT BOT EGASI UCHUN MUTAXASSIS SAVOL-JAVOB
@@ -6550,7 +6817,7 @@ async def private_chat_handler(message: types.Message):
     if any(k in clean_text for k in ["гуруҳга қўшиш", "гуруҳга", "guruhga"]):
         return await add_to_group_guide(message)
     if any(k in clean_text for k in ["гуруҳ созламалари", "созлама", "sozlama"]):
-        return await settings_cmd(message)
+        return await group_settings_btn_cmd(message)
     if any(k in clean_text for k in ["каналлар бошқаруви", "каналлар", "kanal"]):
         return await channel_mgmt_cmd(message)
     if any(k in clean_text for k in ["асаларичилик янгиликлари", "янгиликлари", "yangilik"]):
