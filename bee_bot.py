@@ -2005,21 +2005,45 @@ async def on_channel_post(message: types.Message):
 # ==============================================================================
 @dp.message(Command("start"))
 @dp.message(F.text.in_({"🚀 Старт", "Старт", "🏠 Асосий Меню"}))
-async def start_cmd(message: types.Message, state: FSMContext):
-    await state.clear()
+async def start_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
     user_id = message.from_user.id
     chat_type = message.chat.type
 
     if chat_type != "private":
         return
 
+    raw_text = (message.text or "").strip()
+    parts = raw_text.split()
+    start_arg = parts[1] if len(parts) > 1 else ""
+
+    # DTM testga yo'naltirish:
+    if start_arg.startswith("sci_test") or start_arg.startswith("test") or start_arg == "dtm":
+        set_id = 1
+        try:
+            if "_" in start_arg:
+                set_id = int(start_arg.split("_")[-1])
+        except Exception:
+            set_id = 1
+        text, kb = get_dtm_agreement_text_and_kb(set_id=set_id, user_id=user_id)
+        return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    elif start_arg.startswith("sci_rank") or start_arg == "rank":
+        text, kb = build_dtm_leaderboard_view()
+        return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
     if user_id != OWNER_ID:
-        await message.reply(
-            "⛔️ **Кириш чекланган!**\n\n"
-            f"Кечирасиз, ушбу ботдан фойдаланиш фақат бот эгаси ({OWNER_USERNAME}) учун очиқ.\n"
-            "Бегона фойдаланувчилар учун кириш ва фойдаланиш ёпиқ."
+        welcome_text = (
+            "🐝 **Asalarichilik.Uz 🇺🇿 расмий илмий тест ботига хуш келибсиз!**\n\n"
+            "🔬 Ушбу бот орқали сиз асаларичилик мутахассислиги бўйича ўз билимингизни Давлат Тест Маркази (ДТМ) стандартидаги 10 талик тест саволлари орқали синаб кўришингиз ва республика бўйича энг кучли асаларичилар рейтингига қўшилишингиз мумкин.\n\n"
+            "👇 Синовдан ўтиш учун пастдаги тугмани босинг:"
         )
-        return
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔬 Асаларичилик тестини бошлаш 🚀", callback_data="dtm_agree:1")],
+            [InlineKeyboardButton(text="🏆 Онлайн рейтинг (1-2-3-4-5-ўринлар)", callback_data="dtm_rank:view")],
+            [InlineKeyboardButton(text="👑 Бот эгаси билан боғланиш", url=f"https://t.me/{OWNER_USERNAME.replace('@','')}")]
+        ])
+        return await message.answer(welcome_text, reply_markup=kb, parse_mode="Markdown")
     chats = load_allowed_chats()
     group_count = sum(1 for c in chats.values() if c.get("type") in ["group", "supergroup", "Guruh"])
     channel_count = sum(1 for c in chats.values() if c.get("type") in ["channel", "Kanal"])
@@ -6163,6 +6187,10 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
             InlineKeyboardButton(text="⏰ 1 соат олдин эълон", callback_data="sci_act:pre_notice")
         ],
         [
+            InlineKeyboardButton(text="🎯 ДТМ синов тестини ечиш", callback_data=f"dtm_agree:{active_set}"),
+            InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг", callback_data="dtm_rank:view")
+        ],
+        [
             InlineKeyboardButton(text=f"👥 Онлайн қатнашчилар ({participants_cnt} нафар)", callback_data="sci_act:participants"),
             InlineKeyboardButton(text="🏆 Натижаларни эълон қилиш", callback_data="sci_act:results")
         ],
@@ -6277,14 +6305,184 @@ async def dispatch_scientific_pre_notice(bot_instance: Bot) -> int:
             logging.error(f"Pre-notice error ({cid}): {e}")
     return sent_cnt
 
+# ==============================================================================
+# DTM TEST INTERACTIVE ENGINE (Foydalanuvchilar uchun bosqichma-bosqich test tizimi)
+# ==============================================================================
+USER_DTM_EXAMS: Dict[int, dict] = {}
+
+def get_dtm_agreement_text_and_kb(set_id: int = 1, user_id: int = None):
+    settings = get_sci_settings()
+    cat = settings.get("current_category", "young_beekeepers")
+    cat_title = "👶 Ёш асаларичилар" if cat == "young_beekeepers" else "🎓 Устоз аричилар (Илмий-амалий)"
+    time_limit = settings.get("duration_limit_sec", 60)
+
+    text = (
+        "🔬 **Асаларичилик мутахассислиги бўйича ўз билимингизни синаб кўринг!**\n\n"
+        "🏛 Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот марказлари расмий синов тести.\n\n"
+        f"📚 **Йўналиш:** {cat_title}\n"
+        f"📑 **Серия:** #{set_id}-серия (10 та ДТМ саволи)\n"
+        f"⏱ **Вақт чеклови:** Ҳар бир савол учун {time_limit} сония\n\n"
+        "📋 **СИНОВ ҚОИДАЛАРИ:**\n"
+        "1️⃣ Тест 10 та саволдан иборат.\n"
+        "2️⃣ Саволлар кетма-кет, битта-биттадан тақдим этилади.\n"
+        "3️⃣ Давлат тест марказлари каби, олдиндан тўғри жавоблар кўрсатилмайди.\n"
+        "4️⃣ 1-саволга жавоб белгилангандан сўнг автоматик 2-саволга ўтилади.\n"
+        "5️⃣ Ҳар бир савол учун онлайн вақт назорат қилинади.\n"
+        "6️⃣ 10 та савол якунида: нечта тўғри ва нечта хато қилганингиз ҳамда хато жавобларингизнинг тўлиқ илмий таҳлили кўрсатилади!\n"
+        "7️⃣ Натижангиз барча қатнашчиларнинг умумий онлайн рейтингида (1-2-3-4-5-ўринлар) акс этади!\n\n"
+        "Ҳурматли асаларичи, синовдан ўтишга тайёрмисиз?"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ҳа, розиман! Тестни бошлаш 🚀", callback_data=f"dtm_start:{set_id}")],
+        [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5)", callback_data="dtm_rank:view")],
+        [InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="dtm_cancel:main")]
+    ])
+    return text, kb
+
+def build_dtm_question_card(exam: dict):
+    q_idx = exam["q_idx"]
+    total = len(exam["questions"])
+    q_item = exam["questions"][q_idx]
+    time_limit = exam.get("time_limit", 60)
+
+    q_text = q_item.get("question", "")
+    options = q_item.get("options", [])
+    opt_labels = ["A", "B", "C", "D", "E"]
+
+    lines = [
+        f"⏱ **Вақт чеклови: {time_limit} сония** | 📑 **{q_idx + 1}-савол / {total}**",
+        "",
+        f"❓ **{q_text}**",
+        ""
+    ]
+
+    clean_options = []
+    for idx, opt in enumerate(options[:5]):
+        label = opt_labels[idx]
+        clean_opt = re.sub(r"^[A-Ea-e][\)\.\:\s]+", "", opt).strip()
+        lines.append(f"**{label})** {clean_opt}")
+        clean_options.append((label, clean_opt))
+
+    lines.append("")
+    lines.append("💡 *Тўғри жавоб вариантини танланг:*")
+
+    row1 = [InlineKeyboardButton(text=f"🔘 {lbl}", callback_data=f"dtm_ans:{exam['set_id']}:{q_idx}:{i}") for i, (lbl, _) in enumerate(clean_options[:3])]
+    row2 = [InlineKeyboardButton(text=f"🔘 {lbl}", callback_data=f"dtm_ans:{exam['set_id']}:{q_idx}:{i}") for i, (lbl, _) in enumerate(clean_options[3:5], start=3)]
+    row3 = [InlineKeyboardButton(text="❌ Тестни тўхтатиш", callback_data="dtm_cancel:stop")]
+
+    rows = [row1]
+    if row2:
+        rows.append(row2)
+    rows.append(row3)
+
+    return chr(10).join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+def build_dtm_results_card(exam: dict):
+    total = len(exam["questions"])
+    score = exam["score"]
+    wrong = total - score
+    pct = int((score / total) * 100) if total > 0 else 0
+    total_time = max(1.0, time.time() - exam["started_at"])
+    min_t = int(total_time) // 60
+    sec_t = int(total_time) % 60
+    t_str = f"{min_t} дақиқа {sec_t} сония" if min_t > 0 else f"{sec_t} сония"
+
+    opt_labels = ["A", "B", "C", "D", "E"]
+
+    lines = [
+        "🎉 **ТАБРИКЛАЙМИЗ! СИЗ ТЕСТНИ ЯКУНЛАДИНГИЗ!** 🎓",
+        "",
+        f"👤 **Қатнашчи:** {exam['name']}",
+        f"📊 **Умумий натижа:** {total} та саволдан **{score} та ТЎҒРИ**, **{wrong} та ХАТО**!",
+        f"🎯 **Тўпланган балл:** **{pct} балл ({pct}%)**",
+        f"⏱ **Сарфланган умумий вақт:** {t_str}",
+        "",
+        "══════════════════════════════",
+        "📝 **САВОЛЛАР ТАҲЛИЛИ ВА ЖАВОБЛАР:**",
+        "══════════════════════════════"
+    ]
+
+    for a in exam["answers"]:
+        q_num = a["q_idx"] + 1
+        c_lbl = opt_labels[a["correct_id"]] if a["correct_id"] < len(opt_labels) else "A"
+        s_lbl = opt_labels[a["selected_id"]] if a["selected_id"] < len(opt_labels) else "?"
+
+        if a["is_correct"]:
+            lines.append(f"✅ **{q_num}-савол:** ТЎҒРИ! (Сиз танлаган жавоб: {s_lbl})")
+        else:
+            corr_text = a["options"][a["correct_id"]] if a["correct_id"] < len(a["options"]) else ""
+            corr_clean = re.sub(r"^[A-Ea-e][\)\.\:\s]+", "", corr_text).strip()
+            user_text = a["options"][a["selected_id"]] if a["selected_id"] < len(a["options"]) else ""
+            user_clean = re.sub(r"^[A-Ea-e][\)\.\:\s]+", "", user_text).strip()
+
+            lines.append(f"❌ **{q_num}-савол: НОТЎҒРИ!**")
+            lines.append(f"   • Сиз белгилаган жавоб: **{s_lbl}) {user_clean}**")
+            lines.append(f"   • Тўғри жавоб: **{c_lbl}) {corr_clean}**")
+            if a.get("explanation"):
+                lines.append(f"   💡 *Илмий изоҳ:* {a['explanation']}")
+        lines.append("")
+
+    lines.append("══════════════════════════════")
+    lines.append("🏆 **Сизнинг натижангиз умумий онлайн рейтингга киритилди!**")
+    lines.append("Энг юқори балл тўплаган 1-2-3-ўрин соҳибларига Олтин, Кумуш ва Бронза фахрий медаллар тақдим этилади.")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏆 Онлайн рейтинг (1-2-3-4-5-ўринлар)", callback_data="dtm_rank:view")],
+        [InlineKeyboardButton(text="🔄 Янги тест сериясини ечиш", callback_data="dtm_agree:1")],
+        [InlineKeyboardButton(text="🏠 Асосий меню", callback_data="dtm_cancel:main")]
+    ])
+    return chr(10).join(lines), kb
+
+def build_dtm_leaderboard_view():
+    session = get_sci_session()
+    leaderboard = calculate_leaderboard(session)
+
+    lines = [
+        "🏆 **АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ОНЛАЙН РЕЙТИНГ** 🏆",
+        "",
+        "🏛 Ўзбекистон ва Халқаро Асаларичилик расмий синов тести пешқадамлар жадвали.",
+        f"📊 **Жами қатнашчилар:** {len(leaderboard)} нафар",
+        "",
+        "══════════════════════════════"
+    ]
+
+    if not leaderboard:
+        lines.append("Ҳозирча қатнашчилар тестни якунламаган. Биринчи бўлиб қатнашинг ва 1-ўринни эгалланг!")
+    else:
+        medals = {1: "🥇 1-ЎРИН (Олтин медаль) 🥇", 2: "🥈 2-ЎРИН (Кумуш медаль) 🥈", 3: "🥉 3-ЎРИН (Бронза медаль) 🥉"}
+        for rank, p in enumerate(leaderboard[:10], start=1):
+            t_sec = int(p.get("time_taken", 0))
+            min_p = t_sec // 60
+            sec_p = t_sec % 60
+            t_str = f"{min_p}м {sec_p}с" if min_p > 0 else f"{sec_p}с"
+            u_name = f"(@{p['username']})" if p.get("username") else ""
+
+            if rank in medals:
+                lines.append(f"{medals[rank]}")
+                lines.append(f"👤 **{p['name']}** {u_name}")
+                lines.append(f"🎯 Натижа: **{p['score']}/10 та тўғри** ({t_str})")
+                lines.append("")
+            else:
+                lines.append(f"**{rank}-ўрин.** 👤 {p['name']} {u_name} — **{p['score']}/10 та тўғри** ({t_str})")
+
+    lines.append("══════════════════════════════")
+    lines.append("💡 *Рейтинг тўғри жавоблар сони ва сарфланган вақт тезлигига қараб автоматик янгиланади.*")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Рейтингни янгилаш", callback_data="dtm_rank:view")],
+        [InlineKeyboardButton(text="🚀 Тестда қатнашиш", callback_data="dtm_agree:1")],
+        [InlineKeyboardButton(text="🔙 Ортга", callback_data="dtm_cancel:main")]
+    ])
+    return chr(10).join(lines), kb
+
 async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]:
+    import time
     session_id = f"sci_{int(time.time())}"
     settings = get_sci_settings()
     script = settings.get("script_mode", "cyrillic")
     cat = settings.get("current_category", "young_beekeepers")
     cat_title = get_sci_category_title(cat, script)
     dur = settings.get("duration_limit_sec", 60)
-    open_period = dur if (dur >= 5 and dur <= 600) else None
 
     db = load_scientific_tests_db()
     questions = db.get(cat, [])
@@ -6304,7 +6502,6 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     eff_target = global_target if global_target in ["channel", "group", "both"] else settings.get("target", "both")
     raw_targets = get_destinations_for_target(eff_target)
 
-    # Sanitize and resolve targets
     official_channel_id = -1001261575171
     official_group_id = -1001275726275
     targets = []
@@ -6336,106 +6533,52 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
         "target": eff_target,
         "started_at": time.time(),
         "duration_sec": dur,
-        "poll_map": {},
+        "set_id": active_set,
         "questions_count": len(test_set),
         "participants": {},
         "pre_notice_sent": True
     }
 
     banner_lines = [
-        "🚀 " + apply_script("ДИҚҚАТ! АСАЛАРИЧИЛИК ИЛМИЙ ТАДҚИҚОТ ТЕСТИ БОШЛАНДИ!", script) + " 🚀",
+        "🏛 **ДИҚҚАТ! АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ДАВЛАТ СТАНДАРТ ТЕСТИ БОШЛАНДИ!** 🚀",
         "",
-        "🏛 " + apply_script("Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот институтлари расмий синов тести.", script),
-        f"🔬 {apply_script('Йўналиш', script)}: **{cat_title}**",
-        f"📑 {apply_script('Серия рақами', script)}: **#{active_set}-серия**",
-        "📊 " + apply_script("Жами саволлар: 10 та савол (A, B, C, D, E вариантлар)", script),
-        f"⏱ " + apply_script(f"Вақт чеклови: {dur} сония" if dur > 0 else "Вақт чеклови: Чекловсиз", script),
+        "Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот институтлари расмий синов тести.",
+        f"🔬 **Йўналиш:** {cat_title}",
+        f"📑 **Серия рақами:** #{active_set}-серия (10 та расмий ДТМ саволи)",
+        f"⏱ **Вақт чеклови:** Ҳар бир савол учун {dur} сония",
+        "📊 **Формат:** Давлат тест маркази стандарти (5 та вариант: A, B, C, D, E)",
+        "🏆 **Мукофотлар:** 1-2-3-ўрин эгаларига Олтин, Кумуш ва Бронза фахрий медаллар!",
         "",
-        apply_script("Ҳар бир саволга диққат билан тўғри жавобни танланг.", script),
-        apply_script("10 та савол якунлангач, онлайн натижалар эълон қилинади ва ғолибларга медаллар тақдим этилади! Омад! 🐝🇺🇿", script),
+        "📋 **СИНОВ ТАРТИБИ:**",
+        "• Саволлар кетма-кет, битта-биттадан тақдим этилади.",
+        "• Тўғри жавоблар олдиндан кўрсатилмайди.",
+        "• 1-саволга жавоб белгилангандан сўнг дарҳол 2-саволга ўтилади.",
+        "• Охирида тўлиқ натижа ва хато қилинган саволларнинг аниқ илмий таҳлили чиқарилади!",
         "",
-        get_official_footer()
+        "👇 **Тестни бошлаш ва республика рейтингида қатнашиш учун пастдаги тугмани босинг:**"
     ]
     banner_text = chr(10).join(banner_lines)
 
+    bot_username = "Asalarichilikuz_bot"
+    post_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👉 Ҳа, розиман! Тестни бошлаш 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
+        [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5-ўринлар)", url=f"https://t.me/{bot_username}?start=sci_rank")]
+    ])
+
+    sent_cnt = 0
     for cid in targets:
         try:
-            await bot_instance.send_message(chat_id=cid, text=banner_text, parse_mode=None)
-        except Exception as e:
-            logging.error(f"Banner send error ({cid}): {e}")
-
-    polls_sent_count = 0
-    for q_idx, item in enumerate(test_set):
-        raw_q = item.get("question", "")
-        q_text = f"[{q_idx + 1}/10] " + apply_script(raw_q, script)
-        if len(q_text) > 300:
-            q_text = q_text[:297] + "..."
-
-        raw_opts = item.get("options", [])
-        poll_opts = []
-        for opt in raw_opts[:5]:
-            opt_clean = apply_script(opt, script)
-            if len(opt_clean) > 100:
-                opt_clean = opt_clean[:97] + "..."
-            poll_opts.append(opt_clean)
-
-        correct_id = item.get("correct_option_id", 0)
-        if correct_id >= len(poll_opts):
-            correct_id = 0
-
-        raw_expl = item.get("explanation", "")
-        expl = apply_script(raw_expl, script)
-        if len(expl) > 200:
-            expl = expl[:197] + "..."
-
-        for cid in targets:
-            # Telegram restriction: Channel chats CANNOT receive non-anonymous polls!
-            is_chan = (cid == official_channel_id or str(cid).startswith("-1001261575171"))
-            is_anon = True if is_chan else False
+            sent_msg = await bot_instance.send_message(chat_id=cid, text=banner_text, reply_markup=post_markup, parse_mode="Markdown")
+            sent_cnt += 1
             try:
-                poll_msg = await bot_instance.send_poll(
-                    chat_id=cid,
-                    question=q_text,
-                    options=poll_opts,
-                    type="quiz",
-                    correct_option_id=correct_id,
-                    explanation=expl,
-                    is_anonymous=is_anon,
-                    open_period=open_period
-                )
-                if poll_msg and poll_msg.poll:
-                    session["poll_map"][poll_msg.poll.id] = {
-                        "q_idx": q_idx,
-                        "correct_id": correct_id,
-                        "chat_id": cid
-                    }
-                    polls_sent_count += 1
-            except Exception as pe:
-                logging.error(f"Poll send error ({cid}, q={q_idx}): {pe}")
-                if not is_anon:
-                    try:
-                        poll_msg = await bot_instance.send_poll(
-                            chat_id=cid,
-                            question=q_text,
-                            options=poll_opts,
-                            type="quiz",
-                            correct_option_id=correct_id,
-                            explanation=expl,
-                            is_anonymous=True,
-                            open_period=open_period
-                        )
-                        if poll_msg and poll_msg.poll:
-                            session["poll_map"][poll_msg.poll.id] = {
-                                "q_idx": q_idx,
-                                "correct_id": correct_id,
-                                "chat_id": cid
-                            }
-                            polls_sent_count += 1
-                    except Exception as pe2:
-                        logging.error(f"Poll anon fallback error ({cid}): {pe2}")
+                await bot_instance.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
+            except Exception:
+                pass
+        except Exception as e:
+            logging.error(f"Test launch broadcast error ({cid}): {e}")
 
     save_sci_session(session)
-    return len(targets), polls_sent_count, session_id
+    return sent_cnt, len(test_set), session_id
 
 def calculate_leaderboard(session: dict) -> list:
     participants = session.get("participants", {})
@@ -6560,8 +6703,11 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     "Илмий тестлар", "Тестлар", "🎓 Асаларичилик илмий тестлари", "илмий тестлар"
 }))
 async def scientific_tests_menu_cmd(message: types.Message):
-    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+    if message.chat.type != "private":
         return
+    if message.from_user.id != OWNER_ID:
+        text, kb = get_dtm_agreement_text_and_kb(1, message.from_user.id)
+        return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
     text, markup = build_scientific_dashboard()
     await message.answer(text, reply_markup=markup, parse_mode="Markdown")
 
@@ -6720,23 +6866,198 @@ async def on_sci_pre_notice_cb(call: types.CallbackQuery):
 async def on_sci_launch_now_cb(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
-    await call.answer("🚀 Тест бошланмоқда! 10 та савол юборилмоқда...", show_alert=False)
+    await call.answer("🚀 ДТМ тести бошланмоқда! Канал ва Гуруҳга расмий эълон юборилмоқда...", show_alert=False)
     try:
         t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
         report_lines = [
-            "🚀 **АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТИ МУВАФФАҚИЯТЛИ БОШЛАНДИ!**",
+            "🚀 **АСАЛАРИЧИЛИК ДАВЛАТ СТАНДАРТ ТЕСТИ МУВАФФАҚИЯТЛИ БОШЛАНДИ!**",
             "",
-            f"📍 Юборилган чатлар сони: {t_cnt} та (Гуруҳ ва Канал)",
-            f"📊 Юборилган тест саволлари (Poll): {p_cnt} та савол (A, B, C, D, E)",
+            f"📍 Расмий эълон юборилган манзиллар: {t_cnt} та (Канал ва Гуруҳга қотирилди)",
+            f"📊 Тест саволлари: {p_cnt} та ДТМ саволи (A, B, C, D, E вариантлар)",
             f"🔑 Сессия ID: `{s_id}`",
             "",
-            "💡 Иштирокчилар овоз берганда уларнинг тўғри жавоблари ва профиллари онлайн қайд этиб борилади. "
-            "Тест якунлангач, «🏆 Натижаларни эълон қилиш» тугмасини босинг!"
+            "✨ **ДТМ СИНОВ ТАРТИБИ ТАЪМИНЛАНДИ:**",
+            "1️⃣ Фойдаланувчиларга саволлар кетма-кет, битта-биттадан чиқади.",
+            "2️⃣ Тўғри жавоблар олдиндан кўрсатилмайди (ДТМ стандарти).",
+            "3️⃣ 1-саволга жавоб белгилангандан сўнг дарҳол 2-саволга ўтилади.",
+            "4️⃣ Тест якунида «10 тадан 9 та тўғри, 1 та хато» ва хато қилинган саволларнинг аниқ илмий таҳлили автоматик кўрсатилади.",
+            "5️⃣ Барча қатнашчилар ҳисоблаб борилиб, онлайн рейтингда (1-2-3-4-5-ўринлар) реал вақтда кўриниб туради!",
+            "",
+            "💡 Тест якунлангач, «🏆 Натижаларни эълон қилиш» тугмасини босиб, расмий ғолиблар ва медал соҳибларини Канал ва Гуруҳга юборишингиз мумкин."
         ]
         await call.message.answer(chr(10).join(report_lines), parse_mode="Markdown")
     except Exception as e:
         logging.error(f"on_sci_launch_now_cb error: {e}")
         await call.message.answer(f"⚠️ Тестни бошлашда хатолик бўлди: {e}")
+
+@dp.callback_query(F.data.startswith("dtm_agree:"))
+async def on_dtm_agree_cb(call: types.CallbackQuery):
+    set_id = 1
+    try:
+        parts = call.data.split(":")
+        if len(parts) > 1 and parts[1].isdigit():
+            set_id = int(parts[1])
+    except Exception:
+        set_id = 1
+    text, kb = get_dtm_agreement_text_and_kb(set_id=set_id, user_id=call.from_user.id)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("dtm_start:"))
+async def on_dtm_start_cb(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    set_id = 1
+    try:
+        set_id = int(call.data.split(":")[1])
+    except Exception:
+        set_id = 1
+
+    settings = get_sci_settings()
+    cat = settings.get("current_category", "young_beekeepers")
+    dur = settings.get("duration_limit_sec", 60)
+
+    db = load_scientific_tests_db()
+    questions = db.get(cat, [])
+    if not questions:
+        await call.answer("Тестлар базаси бўш!", show_alert=True)
+        return
+
+    set_questions = [q for q in questions if q.get("set_id") == set_id]
+    if not set_questions:
+        start_idx = (set_id - 1) * 10
+        set_questions = questions[start_idx : start_idx + 10]
+    if not set_questions:
+        set_questions = questions[:10]
+
+    test_set = set_questions[:10]
+
+    exam = {
+        "user_id": user_id,
+        "name": call.from_user.full_name or "Асаларичи",
+        "username": call.from_user.username or "",
+        "category": cat,
+        "set_id": set_id,
+        "questions": test_set,
+        "q_idx": 0,
+        "answers": [],
+        "score": 0,
+        "started_at": time.time(),
+        "q_start_time": time.time(),
+        "time_limit": dur
+    }
+    USER_DTM_EXAMS[user_id] = exam
+
+    text, kb = build_dtm_question_card(exam)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer("🚀 Тест бошланди! Омад!", show_alert=False)
+
+@dp.callback_query(F.data.startswith("dtm_ans:"))
+async def on_dtm_ans_cb(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    if user_id not in USER_DTM_EXAMS:
+        await call.answer("⚠️ Тест якунланган ёки сессия тугаган.", show_alert=True)
+        text, kb = get_dtm_agreement_text_and_kb(1, user_id)
+        try:
+            await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            pass
+        return
+
+    exam = USER_DTM_EXAMS[user_id]
+    parts = call.data.split(":")
+    if len(parts) < 4:
+        return
+
+    set_id = int(parts[1])
+    q_idx = int(parts[2])
+    opt_idx = int(parts[3])
+
+    if q_idx != exam["q_idx"]:
+        await call.answer("Сиз бу саволга аллақачон жавоб бердингиз.")
+        return
+
+    q_item = exam["questions"][q_idx]
+    correct_id = q_item.get("correct_option_id", 0)
+    is_correct = (opt_idx == correct_id)
+
+    time_spent = round(time.time() - exam["q_start_time"], 1)
+    exam["answers"].append({
+        "q_idx": q_idx,
+        "question": q_item.get("question", ""),
+        "options": q_item.get("options", []),
+        "selected_id": opt_idx,
+        "correct_id": correct_id,
+        "is_correct": is_correct,
+        "time_spent": time_spent,
+        "explanation": q_item.get("explanation", "")
+    })
+
+    if is_correct:
+        exam["score"] += 1
+
+    # Keyingi savol yoki yakuniy natija
+    if exam["q_idx"] + 1 < len(exam["questions"]):
+        exam["q_idx"] += 1
+        exam["q_start_time"] = time.time()
+        text, kb = build_dtm_question_card(exam)
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await call.answer()
+    else:
+        # 10-savol yakunlandi! Natijalarni global sessiyaga yozamiz
+        total_time = max(1.0, time.time() - exam["started_at"])
+        session = get_sci_session()
+        participants = session.setdefault("participants", {})
+        participants[str(user_id)] = {
+            "name": exam["name"],
+            "username": exam["username"],
+            "score": exam["score"],
+            "time_taken": total_time,
+            "finished": True,
+            "answers_count": len(exam["questions"]),
+            "answers": {str(a["q_idx"]): {"selected": a["selected_id"], "is_correct": a["is_correct"]} for a in exam["answers"]}
+        }
+        save_sci_session(session)
+
+        text, kb = build_dtm_results_card(exam)
+        USER_DTM_EXAMS.pop(user_id, None)
+
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await call.answer("🎉 Тест муваффақиятли якунланди!", show_alert=False)
+
+@dp.callback_query(F.data.startswith("dtm_rank:"))
+async def on_dtm_rank_cb(call: types.CallbackQuery):
+    text, kb = build_dtm_leaderboard_view()
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("dtm_cancel:"))
+async def on_dtm_cancel_cb(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    USER_DTM_EXAMS.pop(user_id, None)
+    if call.from_user.id == OWNER_ID:
+        text, kb = build_scientific_dashboard()
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    else:
+        await call.message.answer("Тест бекор қилинди. Исталган вақт қайта синаб кўришингиз мумкин! 🐝")
+    await call.answer()
 
 @dp.callback_query(F.data == "sci_act:participants")
 async def on_sci_participants_cb(call: types.CallbackQuery):
