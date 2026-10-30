@@ -4604,38 +4604,8 @@ async def group_handler(message: types.Message):
             except Exception:
                 pass
 
-    # Rasmiy kanal, guruh va bot havolalariga ruxsat (Whitelist)
-    is_whitelisted = is_admin or any(wl in text_lower for wl in [
-        "t.me/asalarichilik", "@asalarichilik", "@uz_asalarichilik", 
-        "@asalarichilik_uzbekistan", "@asalarichiliktv_bot", "@asalarichilikuz_bot",
-        "youtube.com", "youtu.be"
-    ])
-
-    if not is_whitelisted and SPAM_LINK_REGEX.search(text_lower):
-        try:
-            await message.delete()
-            if user and user.id not in (777000, 1087968824, OWNER_ID):
-                await bot.restrict_chat_member(
-                    chat_id=chat_id,
-                    user_id=user.id,
-                    permissions=ChatPermissions(can_send_messages=False),
-                    until_date=datetime.now() + timedelta(hours=2)
-                )
-                warn = await message.answer(f"🛡️ Реклама тақиқланган! @{user.username or user.first_name} 2 соатга чекланди.")
-                await asyncio.sleep(5)
-                await warn.delete()
-        except Exception:
-            pass
-        return
-
-    if not is_admin:
-        for bad in SPAM_WORDS:
-            if bad in text_lower:
-                try:
-                    await message.delete()
-                except Exception:
-                    pass
-                return
+    # Гуруҳ ҳаволаларини тозалаш ва муте қилиш бошқа махсус ботга топширилган.
+    # Ushbu bot guruhda begona havolalarni o'chirmaydi va a'zolarni mute qilmaydi.
 
     is_trade_ad = bool(TRADE_REGEX.search(text_lower))
     is_reply_to_bot = (
@@ -5653,7 +5623,7 @@ async def bot_guide_menu(message: types.Message):
         "1. 🐝 **Викторина & Сўровнома:** Камида 1000 та савол базаси. Сўровнома кўринишида кўриб, сўнг канал ва гуруҳга узатиш мумкин.\n"
         "2. 📰 **Асаларичилик янгиликлари:** Жаҳон ва Ўзбекистон асаларичилик соҳаси янгиликлари.\n"
         "3. 🌿 **Апитерапия янгиликлари:** Асал, прополис, она сути, ари заҳри, перга ва мум куясидан даволаш рецептлари ва технологиялари (1000+ база + кунлик 10 та янгилик).\n"
-        "4. 🛡 **Гуруҳ хавфсизлиги:** 1 кунда 3 тадан кўп расм/видео юборган аъзо 1 кунга ёзишдан чекланади (МУТЕ).\n"
+        "4. 🎓 **Илмий тестлар:** Институт тестлари (Ёш асаларичилар ва Устозлар учун 10 талик тест, лидерлар ва медаллар).\n"
         "5. ⚙️ **Созламалар:** Постлар остига реакциялар, улашиш ва мутахассис тугмаларини ёқиш/ўчириш."
     )
     await message.answer(text, parse_mode="Markdown")
@@ -5663,55 +5633,12 @@ async def group_settings_btn_cmd(message: types.Message):
     await settings_cmd(message)
 
 # ==============================================================================
-# 22. GURUHLARDA RASM/VIDEO CHEKLOVI (1 KUNDA 3 TA, 4-CHISIDA 1 KUNLIK MUTE)
+# 22. GURUHLARDA MODERATSIYA (BOSHQA BOTGA TOPSHIRILGAN)
 # ==============================================================================
 @dp.message(F.chat.type.in_({"group", "supergroup"}) & (F.photo | F.video | F.animation))
 async def group_media_limiter_handler(message: types.Message):
-    try:
-        chat_id = message.chat.id
-        user = message.from_user
-        if not user or user.id == OWNER_ID:
-            return
-            
-        # Adminlarni tekshirish - adminlarga cheklov qo'llanilmaydi
-        try:
-            m = await bot.get_chat_member(chat_id, user.id)
-            if m.status in ["administrator", "creator"]:
-                return
-        except Exception:
-            pass
-            
-        today = datetime.now().strftime("%Y-%m-%d")
-        limits = load_json_file(MEDIA_LIMITS_FILE, {})
-        day_data = limits.setdefault(today, {})
-        chat_data = day_data.setdefault(str(chat_id), {})
-        
-        user_cnt = chat_data.get(str(user.id), 0) + 1
-        chat_data[str(user.id)] = user_cnt
-        save_json_file(MEDIA_LIMITS_FILE, limits)
-        
-        if user_cnt > 3:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            try:
-                until_ts = int(datetime.now().timestamp() + 86400)
-                await bot.restrict_chat_member(
-                    chat_id=chat_id,
-                    user_id=user.id,
-                    permissions=ChatPermissions(can_send_messages=False),
-                    until_date=until_ts
-                )
-                warn = (
-                    f"⚠️ <b>{user.full_name}</b>: Гуруҳда бир кунда 3 тадан кўп расм/видео юбориш тақиқланган!\n"
-                    f"🚫 <b>24 соатга ёзиш чекланди (1 кунлик МУТЕ)!</b>"
-                )
-                await bot.send_message(chat_id=chat_id, text=warn, parse_mode="HTML")
-            except Exception as re:
-                logging.warning(f"restrict error: {re}")
-    except Exception as e:
-        logging.error(f"group_media_limiter_handler error: {e}")
+    # Guruh moderatsiyasi (havolalar, tozalash va mute) boshqa maxsus botga topshirilgan
+    return
 
 # ==============================================================================
 # 23. АСАЛАРИЧИЛИК ИЛМИЙ ТАДҚИҚОТ ИНСТИТУТЛАРИ ТЕСТЛАРИ БЎЛИМИ
