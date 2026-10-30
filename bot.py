@@ -105,7 +105,7 @@ logging.basicConfig(
 )
 
 # 1. Токен ва Эгаси маълумотлари
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN", "8832904946:AAGxTbhWQQZjKODdca4H7vqRVFBJgNuNixk")
 OWNER_ID = int(os.getenv("ADMIN_ID", "2047501151"))  # Бот асосий эгаси ID рақами
 OWNER_USERNAME = "@JamshidjonDavronov"
 BOT_USERNAME = "Asalarichiliktv_bot"
