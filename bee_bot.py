@@ -32,6 +32,7 @@ import random
 import re
 import socket
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -5608,6 +5609,8 @@ async def broadcast_menu(message: types.Message):
         "Сўнгра уни бир вақтнинг ўзида барча гуруҳ ва каналларга узатишингиз мумкин."
     )
     await message.answer(text, parse_mode="Markdown")
+
+ad_broadcast_menu = broadcast_menu
 
 @dp.message(F.text.in_({"🌐 Тилни ўзгартириш", "Тилни ўзгартириш"}))
 async def change_lang_menu(message: types.Message):
