@@ -568,32 +568,33 @@ def remove_connected_chat(chat_id: int):
         del pending[cid_str]
         save_json_file(PENDING_CHATS_FILE, pending)
 
-OFFICIAL_CHANNEL_ID = -1001261575171
-OFFICIAL_GROUP_ID = -1001275726275
+OFFICIAL_CHANNEL_ID = -1002360538600
+OFFICIAL_GROUP_ID = -1002377038139
 
 def normalize_destination_id(cid_val: Any) -> Any:
-    """ID va yuzerneymlarni bitta standart butun songa keltiradi (Dublikatni 100% oldini oladi)"""
+    """ID va yuzerneymlarni bitta standart ko'rinishga keltiradi"""
     s = str(cid_val).strip()
-    if s in ["@uz_asalarichilik", "uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)]:
-        return OFFICIAL_CHANNEL_ID
-    if s in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)]:
-        return OFFICIAL_GROUP_ID
+    if s in ["@uz_asalarichilik", "uz_asalarichilik", "-1002360538600", "-1001261575171", str(OFFICIAL_CHANNEL_ID)]:
+        return "@uz_asalarichilik"
+    if s in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", "-1002377038139", "-1001275726275", str(OFFICIAL_GROUP_ID)]:
+        return "@asalarichilik_uzbekistan"
     try:
         return int(s)
     except Exception:
         return s
 
 def get_destinations_for_target(target_mode: str) -> list:
-    """Манзилга кўра (Канал, Гуруҳ, ёки Иккаласи) жўнатиладиган барча чат ID лари (ТАКРОРЛАНМАСДАН)"""
+    """Манзилга кўра (Канал, Гуруҳ, ёки Иккаласи) жўнатиладиган барча чатлар (ТАКРОРЛАНМАСДАН)"""
     chats = load_allowed_chats()
     conn = load_connected_chats()
 
     channel_targets = set()
     group_targets = set()
 
-    # Faqat bitta normallashtirilgan ID qo'shiladi
-    channel_targets.add(OFFICIAL_CHANNEL_ID)
-    group_targets.add(OFFICIAL_GROUP_ID)
+    off_channel = get_official_channel()
+    off_group = get_official_group()
+    channel_targets.add(off_channel)
+    group_targets.add(off_group)
 
     merged = {}
     merged.update(chats)
@@ -604,7 +605,6 @@ def get_destinations_for_target(target_mode: str) -> list:
             continue
         c_type = info.get("type", "")
         norm_cid = normalize_destination_id(cid_str)
-
         if c_type in ["channel", "Kanal"]:
             channel_targets.add(norm_cid)
         elif c_type in ["group", "supergroup", "Guruh"]:
@@ -614,8 +614,36 @@ def get_destinations_for_target(target_mode: str) -> list:
         return list(channel_targets)
     elif target_mode == "group":
         return list(group_targets)
-    else:  # "both"
+    else:  # "both" or default
         return list(channel_targets | group_targets)
+
+async def safe_send_to_destination(bot_inst: Bot, destination: Any, text: str, reply_markup: Any = None, parse_mode: Any = "Markdown", is_poll: bool = False, poll_kwargs: Optional[dict] = None) -> Any:
+    """Xabarni manzilga 100% ishonchli yetkazish: yuzerneym va raqamli ID o'rtasida avtomatik zaxira urinishlar qiladi"""
+    dest_str = str(destination).strip()
+    candidates = [destination]
+
+    if dest_str in ["@uz_asalarichilik", "uz_asalarichilik", "-1002360538600", "-1001261575171", str(OFFICIAL_CHANNEL_ID)]:
+        for alt in ["@uz_asalarichilik", -1002360538600, OFFICIAL_CHANNEL_ID]:
+            if alt not in candidates:
+                candidates.append(alt)
+    elif dest_str in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", "-1002377038139", "-1001275726275", str(OFFICIAL_GROUP_ID)]:
+        for alt in ["@asalarichilik_uzbekistan", -1002377038139, OFFICIAL_GROUP_ID]:
+            if alt not in candidates:
+                candidates.append(alt)
+
+    last_exc = None
+    for cand in candidates:
+        try:
+            if is_poll and poll_kwargs:
+                return await bot_inst.send_poll(chat_id=cand, **poll_kwargs)
+            else:
+                return await bot_inst.send_message(chat_id=cand, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception as e:
+            last_exc = e
+            logging.warning(f"Destination {cand} send failed: {e}")
+            continue
+
+    raise last_exc or Exception(f"Failed to deliver message to {destination}")
 
 # 4. VIKTORINA BAZASI (QUIZ DATABASE) - YOSH VA SPETS ASALARICHILAR UCHUN
 # ==============================================================================
@@ -2061,8 +2089,8 @@ async def on_my_chat_member_updated(event: types.ChatMemberUpdated):
 async def on_reaction_click(call: types.CallbackQuery):
     try:
         parts = call.data.split(":")
-        chat_id = int(parts[1])
-        message_id = int(parts[2])
+        cb_chat_id = int(parts[1])
+        cb_msg_id = int(parts[2])
         idx = int(parts[3])
     except Exception:
         await call.answer("Хатолик юз берди.")
@@ -2077,21 +2105,52 @@ async def on_reaction_click(call: types.CallbackQuery):
     chosen_emoji = reactions[idx]
     user_id = call.from_user.id
 
-    votes = vote_reaction(chat_id, message_id, user_id, chosen_emoji)
+    real_chat_id = call.message.chat.id if (call.message and call.message.chat) else cb_chat_id
+    real_msg_id = call.message.message_id if call.message else cb_msg_id
+    if real_chat_id == 0:
+        real_chat_id = cb_chat_id
+    if real_msg_id == 0:
+        real_msg_id = cb_msg_id
+
+    votes = vote_reaction(real_chat_id, real_msg_id, user_id, chosen_emoji)
     user_vote = votes.get(str(user_id))
 
-    channel_username = call.message.chat.username if call.message and call.message.chat else None
-    new_markup = build_post_markup(chat_id, message_id, reactions_list=reactions, channel_username=channel_username)
-
-    try:
-        await call.message.edit_reply_markup(reply_markup=new_markup)
-    except Exception:
-        pass
-
+    # Tugma qotib qolmasligi uchun DARHOL Telegramga javob qaytarish
     if user_vote == chosen_emoji:
-        await call.answer(f"Сизнинг овойингиз: {chosen_emoji} ✅")
+        await call.answer(f"Сизнинг овозингиз қабул қилинди: {chosen_emoji} ✅", show_alert=False)
     else:
-        await call.answer(f"Овозингиз қайтариб олинди ✖️")
+        await call.answer(f"Овозингиз қайтариб олинди: {chosen_emoji} ✖️", show_alert=False)
+
+    # Postdagi boshqa tugmalarni (Kanal, Guruh, Ulashish, YouTube) saqlagan holda FAQAT reaksiya qatorini yangilash
+    if call.message and call.message.reply_markup and call.message.reply_markup.inline_keyboard:
+        counts = {emo: 0 for emo in reactions}
+        for uid, emo in votes.items():
+            if emo in counts:
+                counts[emo] += 1
+
+        new_ikb = []
+        for row in call.message.reply_markup.inline_keyboard:
+            new_row = []
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("r:"):
+                    try:
+                        b_parts = btn.callback_data.split(":")
+                        b_idx = int(b_parts[3])
+                        b_emo = reactions[b_idx] if 0 <= b_idx < len(reactions) else ""
+                        c = counts.get(b_emo, 0)
+                        new_text = f"{b_emo} {c}" if c > 0 else b_emo
+                        new_cb = f"r:{real_chat_id}:{real_msg_id}:{b_idx}"
+                        new_row.append(InlineKeyboardButton(text=new_text, callback_data=new_cb))
+                    except Exception:
+                        new_row.append(btn)
+                else:
+                    new_row.append(btn)
+            new_ikb.append(new_row)
+
+        try:
+            await call.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_ikb))
+        except Exception:
+            pass
 
 # ==============================================================================
 # 13. KANAL VA GURUHLARDA POSTLARGA AVTOMATIK TUGMALAR QO'YISH
@@ -2108,12 +2167,17 @@ async def on_channel_post(message: types.Message):
 
     save_allowed_chat(chat_id, message.chat.title or "Kanal", "channel")
 
+    raw_text = message.text or message.caption or ""
+    first_line = raw_text.strip().split("\n")[0][:60] if raw_text else "Asalarichilik.Uz 🇺🇿"
     try:
         markup = build_post_markup(
             chat_id=chat_id,
             message_id=message_id,
             reactions_list=settings.get("reactions"),
-            channel_username=channel_username
+            channel_username=channel_username,
+            is_channel_post=True,
+            share_title=first_line,
+            share_text=raw_text[:700]
         )
         await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
         logging.info(f"✅ Kanal postiga avto-reaksiyalar qo'yildi: {chat_id}/{message_id}")
@@ -2123,6 +2187,20 @@ async def on_channel_post(message: types.Message):
 # ==============================================================================
 # 14. /start VA ASOSIY MENYU
 # ==============================================================================
+@dp.message(F.text.in_({
+    "🔙 Орқага", "Орқага", "🔙 Ортга", "Ортга", "◀️ Орқага",
+    "🔙 Орқага (Бўлимга қайтиш)", "🔙 Орқага (Асосийга қайтиш)",
+    "Ortga", "Orqaga"
+}))
+async def generic_back_btn_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    await message.answer(
+        "🔙 Сиз олдинги бўлимга (Асосий Менюга) қайтдингиз.\nКеракли хизматни танланг:",
+        reply_markup=get_main_reply_keyboard(),
+        parse_mode="Markdown"
+    )
+
 @dp.message(Command("start"))
 @dp.message(F.text.in_({"🚀 Старт", "Старт", "🏠 Асосий Меню"}))
 async def start_cmd(message: types.Message, state: FSMContext = None):
@@ -2427,6 +2505,7 @@ def build_quiz_preview_keyboard(idx: int, total: int, script: str = "cyrillic") 
             InlineKeyboardButton(text="⚙️ Созламалар", callback_data="quiz_settings")
         ],
         [
+            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
             InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ]
@@ -2966,7 +3045,7 @@ def build_news_viewer_keyboard(idx: int, total: int, script: str = "cyrillic") -
         ],
         # 7-qator: Orqaga va Asosiy menyu
         [
-            InlineKeyboardButton(text="« Реклама ва постлар менюсига қайтиш", callback_data="news_back_menu"),
+            InlineKeyboardButton(text="🔙 Орқага (Олдинги бўлимга)", callback_data="news_back_menu"),
             InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ]
@@ -5078,6 +5157,7 @@ def build_apitherapy_viewer_keyboard(idx: int, total: int, script: str = "cyrill
             InlineKeyboardButton(text=txt_set, callback_data="api_settings")
         ],
         [
+            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
             InlineKeyboardButton(text=txt_home, callback_data="api_home")
         ]
     ]
@@ -5890,6 +5970,7 @@ def build_group_settings_dashboard() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="grp_nav:refresh")
         ],
         [
+            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
             InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ]
@@ -5920,7 +6001,7 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     group_list = [
         f"• 👑 **Asalarichilik.Uz Расмий Супергуруҳи**\n"
         f"  ├ Юзернейм: `{off_group}`\n"
-        f"  ├ ID: `-1001275726275`\n"
+        f"  ├ ID: `-1002377038139`\n"
         f"  └ Ҳолати: 🟢 ФАОЛ (Бот ва Админ тўлиқ уланган)"
     ]
 
@@ -5953,6 +6034,7 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="groups_ctrl:refresh")
         ],
         [
+            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
             InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ])
@@ -5990,7 +6072,7 @@ def build_channel_mgmt_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     chan_list = [
         f"• 📢 **{chan_title}**\n"
         f"  ├ Юзернейм: `{off_channel}`\n"
-        f"  ├ ID: `-1001261575171`\n"
+        f"  ├ ID: `-1002360538600`\n"
         f"  └ Ҳолати: 🟢 ФАОЛ (Асосий расмий тарқатиш канали)"
     ]
 
@@ -6026,6 +6108,7 @@ def build_channel_mgmt_dashboard() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="channel_ctrl:refresh")
         ],
         [
+            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
             InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ])
@@ -6240,7 +6323,8 @@ def build_scientific_preview_keyboard(idx: int, total: int, cat: str, script: st
             InlineKeyboardButton(text="🚀 Тўлиқ тестни бошлаш", callback_data="sci_act:launch_now")
         ],
         [
-            InlineKeyboardButton(text="🔙 Тест марказига қайтиш", callback_data="sci_act:dashboard")
+            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -6388,7 +6472,8 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=f"🔤 {scr_str}", callback_data="sci_set:script:toggle")
         ],
         [
-            InlineKeyboardButton(text="🔙 Тест марказига қайтиш", callback_data="sci_act:dashboard")
+            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -6435,7 +6520,7 @@ async def dispatch_scientific_pre_notice(bot_instance: Bot) -> int:
                 share_title="⏰ Илмий тест бошланишига 1 соат қолди!",
                 share_text="Билимингизни синаб кўринг ва олтин медал соҳиби бўлинг!"
             )
-            sent_msg = await bot_instance.send_message(chat_id=cid, text=notice_text, reply_markup=markup, parse_mode=None)
+            sent_msg = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=notice_text, reply_markup=markup, parse_mode=None)
             try:
                 await bot_instance.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
             except Exception:
@@ -6478,7 +6563,10 @@ def get_dtm_agreement_text_and_kb(set_id: int = 1, user_id: int = None):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Ҳа, розиман! Тестни бошлаш 🚀", callback_data=f"dtm_start:{set_id}")],
         [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5)", callback_data="dtm_rank:view")],
-        [InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="dtm_cancel:main")]
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
     ])
     return text, kb
 
@@ -6584,7 +6672,10 @@ def build_dtm_results_card(exam: dict):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏆 Онлайн рейтинг (1-2-3-4-5-ўринлар)", callback_data="dtm_rank:view")],
         [InlineKeyboardButton(text="🔄 Янги тест сериясини ечиш", callback_data="dtm_agree:1")],
-        [InlineKeyboardButton(text="🏠 Асосий меню", callback_data="dtm_cancel:main")]
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
     ])
     return chr(10).join(lines), kb
 
@@ -6626,12 +6717,16 @@ def build_dtm_leaderboard_view():
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Рейтингни янгилаш", callback_data="dtm_rank:view")],
         [InlineKeyboardButton(text="🚀 Тестда қатнашиш", callback_data="dtm_agree:1")],
-        [InlineKeyboardButton(text="🔙 Ортга", callback_data="dtm_cancel:main")]
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
     ])
     return chr(10).join(lines), kb
 
 async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]:
     import time
+    import urllib.parse
     session_id = f"sci_{int(time.time())}"
     settings = get_sci_settings()
     script = settings.get("script_mode", "cyrillic")
@@ -6655,25 +6750,17 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
         set_questions = questions[:10]
 
     test_set = set_questions[:10]
-    global_target = get_settings().get("post_target_mode", "both")
-    eff_target = global_target if global_target in ["channel", "group", "both"] else settings.get("target", "both")
-    raw_targets = get_destinations_for_target(eff_target)
 
-    official_channel_id = -1001261575171
-    official_group_id = -1001275726275
-    targets = []
-    for t in raw_targets:
-        norm = normalize_destination_id(t)
-        if norm not in targets:
-            targets.append(norm)
-
+    # Admin sozlamalardan belgilangan manzil (Kanal, Guruh yoki Ikkala)
+    eff_target = settings.get("target", "both")
+    targets = get_destinations_for_target(eff_target)
     if not targets:
         if eff_target == "channel":
-            targets = [official_channel_id]
+            targets = [get_official_channel()]
         elif eff_target == "group":
-            targets = [official_group_id]
+            targets = [get_official_group()]
         else:
-            targets = [official_channel_id, official_group_id]
+            targets = [get_official_channel(), get_official_group()]
 
     session = {
         "is_active": True,
@@ -6713,7 +6800,17 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     banner_text = chr(10).join(banner_lines)
 
     bot_username = "Asalarichilikuz_bot"
-    share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}?start=sci_test_{active_set}&text=🏛 «Асаларичилик мутахассислиги бўйича ўз билимингизни синаб кўринг!» 10 та саволга жавоб бериб Олтин медални қўлга киритинг! 🐝"
+    sci_share_body = (
+        f"🏛 «АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ЎЗ БИЛИМИНГИЗНИ СИНАБ КЎРИНГ!» 🚀\n\n"
+        f"🔬 Йўналиш: {cat_title}\n"
+        f"📑 Серия: #{active_set}-серия (10 та Давлат синов тести)\n"
+        f"⏰ Синов вақти: {start_time} дан то {end_time} гача\n"
+        f"⏱ Ҳар бир савол учун: {dur} сония\n"
+        f"🏆 1-2-3-ўринларга Олтин, Кумуш ва Бронза фахрий медаллар! 🥇🥈🥉\n\n"
+        f"👉 Ҳозироқ синовда қатнашиш: https://t.me/{bot_username}?start=sci_test_{active_set}\n\n"
+        f"{get_official_footer('cyrillic')}"
+    )
+    share_url = f"https://t.me/share/url?url={urllib.parse.quote(f'https://t.me/{bot_username}?start=sci_test_{active_set}')}&text={urllib.parse.quote(sci_share_body)}"
 
     post_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👉 Ҳа, розиман! Шахсий тестни бошлаш 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
@@ -6726,15 +6823,23 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
 
     for cid in targets:
         try:
-            sent_msg = await bot_instance.send_message(chat_id=cid, text=banner_text, reply_markup=post_markup, parse_mode="Markdown")
+            sent_msg = await safe_send_to_destination(
+                bot_inst=bot_instance,
+                destination=cid,
+                text=banner_text,
+                reply_markup=post_markup,
+                parse_mode="Markdown"
+            )
             sent_cnt += 1
+            real_chat_id = sent_msg.chat.id
             try:
-                await bot_instance.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
+                await bot_instance.pin_chat_message(chat_id=real_chat_id, message_id=sent_msg.message_id, both_silent=True)
             except Exception:
                 pass
 
             # Агар гуруҳ бўлса, фойдаланувчилар ботга ўтмасдан гуруҳнинг ўзида ечишлари учун 10 та савол сўровнома сифатида ҳам ташланади
-            if cid == official_group_id or eff_target in ["group", "both"]:
+            is_group_chat = (str(cid) in ["@asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)]) or (eff_target in ["group", "both"] and sent_msg.chat.type in ["group", "supergroup"])
+            if is_group_chat:
                 for q_idx, q_item in enumerate(test_set, start=1):
                     try:
                         q_raw = q_item.get("question", "")
@@ -6757,7 +6862,7 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                             expl = expl[:197] + "..."
 
                         poll_msg = await bot_instance.send_poll(
-                            chat_id=cid,
+                            chat_id=real_chat_id,
                             question=q_text,
                             options=poll_opts,
                             type="quiz",
@@ -6902,7 +7007,7 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
                 share_title="🏆 Илмий тест ғолиблари ва медал соҳиблари эълон қилинди!",
                 share_text="Билимни синовдан ўтказган барча асаларичиларни табриклаймиз!"
             )
-            sent = await bot_instance.send_message(chat_id=cid, text=results_text, reply_markup=markup, parse_mode=None)
+            sent = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=results_text, reply_markup=markup, parse_mode=None)
             try:
                 await bot_instance.pin_chat_message(chat_id=cid, message_id=sent.message_id, both_silent=True)
             except Exception:
@@ -6950,7 +7055,8 @@ def build_video_admin_card_and_kb(idx: int, target_mode: str) -> tuple[str, Inli
         ],
         [
             InlineKeyboardButton(text="▶️ YouTube да томоша қилиш", url=v.get("url", "https://youtube.com/@asalarichilikuztv")),
-            InlineKeyboardButton(text="🔙 Менюга қайтиш", callback_data="vid_act:close")
+            InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ])
     return text, kb
@@ -7092,8 +7198,11 @@ async def on_sci_launch_menu_cb(call: types.CallbackQuery):
             InlineKeyboardButton(text="✏️ Дақиқани қўлда ёзиш (сон киритиш)", callback_data="sci_launch_dur:custom")
         ],
         [
-            InlineKeyboardButton(text="🚀 Ҳозирги созлама билан бошлаш", callback_data="sci_act:launch_now"),
-            InlineKeyboardButton(text="🔙 Ортга қайтиш", callback_data="sci_act:dashboard")
+            InlineKeyboardButton(text="🚀 Ҳозирги созлама билан бошлаш", callback_data="sci_act:launch_now")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ])
     try:
@@ -7130,9 +7239,11 @@ async def on_sci_launch_dur_cb(call: types.CallbackQuery):
     await call.answer(f"🚀 Тест {dur_min} дақиқага мўлжалланиб бошланмоқда...", show_alert=False)
     t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
 
+    dest_rep = f"📍 Расмий эълон юборилган манзиллар: {t_cnt} та" if t_cnt > 0 else "⚠️ Эълон етказишда огоҳлантириш: 0 та манзилга юборилди. Бот канал/гуруҳда админлигини текширинг!"
     rep = [
         "🚀 **АСАЛАРИЧИЛИК СИНОВ ТЕСТИ ҲОЗИРОҚ БОШЛАНДИ!**",
         "",
+        dest_rep,
         f"⏱ **Белгиланган умумий вақт:** {dur_min} дақиқа",
         f"⏰ **Синов вақти:** {start_str} дан то {end_str} гача",
         f"🏆 **Тақдирлаш:** Соат **{end_str}** да тест якунланиб, барча қатнашчилар автоматик тақдирланади!",
@@ -7172,7 +7283,10 @@ async def on_sci_time_picker(call: types.CallbackQuery):
             [InlineKeyboardButton(text=f"⏰ {t}", callback_data=f"sci_time_pick:{mode}:set:{t}") for t in times_row2],
             [InlineKeyboardButton(text=f"⏰ {t}", callback_data=f"sci_time_pick:{mode}:set:{t}") for t in times_row3],
             [InlineKeyboardButton(text="✏️ Исталган вақтни қўлда ёзиш (чч:мм)", callback_data=f"sci_time_pick:{mode}:custom")],
-            [InlineKeyboardButton(text="🔙 Созламаларга қайтиш", callback_data="sci_act:settings")]
+            [
+                InlineKeyboardButton(text="🔙 Орқага (Созламаларга)", callback_data="sci_act:settings"),
+                InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            ]
         ]
         try:
             await call.message.edit_text(title, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
@@ -7373,10 +7487,14 @@ async def on_sci_launch_now_cb(call: types.CallbackQuery):
     await call.answer("🚀 ДТМ тести бошланмоқда! Канал ва Гуруҳга расмий эълон юборилмоқда...", show_alert=False)
     try:
         t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
+        if t_cnt > 0:
+            dest_rep = f"📍 Расмий эълон юборилган манзиллар: {t_cnt} та (Канал ва Гуруҳга муваффақиятли етказилди ва қотирилди)"
+        else:
+            dest_rep = "⚠️ Эълон етказишда огоҳлантириш: 0 та манзилга юборилди. Бот @uz_asalarichilik канали ёки @asalarichilik_uzbekistan гуруҳида админ бўлиб хабар ёзиш ҳуқуқига эгалигини текширинг!"
         report_lines = [
             "🚀 **АСАЛАРИЧИЛИК ДАВЛАТ СТАНДАРТ ТЕСТИ МУВАФФАҚИЯТЛИ БОШЛАНДИ!**",
             "",
-            f"📍 Расмий эълон юборилган манзиллар: {t_cnt} та (Канал ва Гуруҳга қотирилди)",
+            dest_rep,
             f"📊 Тест саволлари: {p_cnt} та ДТМ саволи (A, B, C, D, E вариантлар)",
             f"🔑 Сессия ID: `{s_id}`",
             "",
@@ -7592,7 +7710,10 @@ async def on_sci_participants_cb(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Янгилаш", callback_data="sci_act:participants")],
         [InlineKeyboardButton(text="🏆 Натижаларни эълон қилиш", callback_data="sci_act:results")],
-        [InlineKeyboardButton(text="🔙 Ортга", callback_data="sci_act:dashboard")]
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
     ])
     try:
         await call.message.edit_text(chr(10).join(lines), reply_markup=kb, parse_mode="Markdown")
@@ -7641,6 +7762,7 @@ async def on_sci_settings_action(call: types.CallbackQuery):
 
     if param == "target":
         update_sci_setting("target", val)
+        update_setting("post_target_mode", val)
         await call.answer(f"Манзил танланди: {val}")
     elif param == "time":
         update_sci_setting("duration_limit_sec", int(val))
@@ -7926,6 +8048,8 @@ async def private_chat_handler(message: types.Message):
 
             await message.answer(f"🚀 **Тест {dur_min} дақиқага мўлжалланиб бошланмоқда...**\n⏰ Вақти: {start_str} дан {end_str} гача\n🏆 Соат {end_str} да автоматик тақдирлаш бўлади!", parse_mode="Markdown")
             t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
+            dest_rep = f"📍 Расмий эълон юборилган манзиллар: {t_cnt} та" if t_cnt > 0 else "⚠️ Эълон етказишда огоҳлантириш: 0 та манзилга юборилди. Бот канал/гуруҳда админлигини текширинг!"
+            await message.answer(f"🚀 **Тест муваффақиятли бошланди!**\n{dest_rep}\n📊 Саволлар: {p_cnt} та ДТМ тести\n🏆 Соат **{end_str}** да автоматик тақдирлаш бўлади!", parse_mode="Markdown")
             return
         else:
             return await message.answer("⚠️ Илтимос, дақиқани фақат сон билан ёзинг (масалан: `35` ёки `60`).", parse_mode="Markdown")
