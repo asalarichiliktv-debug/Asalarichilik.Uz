@@ -6314,8 +6314,10 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
             InlineKeyboardButton(text=f"🔄 Серия: {active_set}/{total_sets}", callback_data="sci_act:choose_set"),
             InlineKeyboardButton(text=f"👁 {active_set}-серияни кўриш (10 та)", callback_data=f"sci_prev_page:{start_preview_page}")
         ],
+        # Агар тест фаол бўлса, шошилинч тўхтатиш ва ҳозироқ тақдирлаш тугмаси чиқади
+        *([[InlineKeyboardButton(text="🛑 ТЕСТНИ ҲОЗИРОҚ ТЎХТАТИШ ВА ТАҚДИРЛАШ! 🏆", callback_data="sci_act:force_award")]] if is_active else []),
         [
-            InlineKeyboardButton(text=f"🚀 {active_set}-серияни бошлаш (10 талик)", callback_data="sci_act:launch_now"),
+            InlineKeyboardButton(text=f"🚀 {active_set}-серияни ҳозироқ бошлаш (Вақт белгилаш)", callback_data="sci_act:launch_menu"),
             InlineKeyboardButton(text="⏰ 1 соат олдин эълон", callback_data="sci_act:pre_notice")
         ],
         [
@@ -6360,8 +6362,8 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
 
     rows = [
         [
-            InlineKeyboardButton(text=f"⏰ Бошланиш: {start_t}", callback_data="sci_set:start_time:cycle"),
-            InlineKeyboardButton(text=f"🏁 Тақдирлаш: {end_t}", callback_data="sci_set:end_time:cycle")
+            InlineKeyboardButton(text=f"⏰ Бошланиш: {start_t}", callback_data="sci_time_pick:start:menu"),
+            InlineKeyboardButton(text=f"🏁 Тақдирлаш: {end_t}", callback_data="sci_time_pick:end:menu")
         ],
         [
             InlineKeyboardButton(text="📍 Манзил:", callback_data="noop"),
@@ -6446,6 +6448,9 @@ async def dispatch_scientific_pre_notice(bot_instance: Bot) -> int:
 # ==============================================================================
 # DTM TEST INTERACTIVE ENGINE (Foydalanuvchilar uchun bosqichma-bosqich test tizimi)
 # ==============================================================================
+# Admin custom input holati
+ADMIN_WAITING_INPUT: dict = {}
+
 USER_DTM_EXAMS: Dict[int, dict] = {}
 
 def get_dtm_agreement_text_and_kb(set_id: int = 1, user_id: int = None):
@@ -6487,12 +6492,24 @@ def build_dtm_question_card(exam: dict):
     options = q_item.get("options", [])
     opt_labels = ["A", "B", "C", "D", "E"]
 
-    lines = [
+    lines = []
+
+    # Тўғри ечилганда САЛЮТЛАР ва мотивация
+    last_fb = exam.get("last_feedback")
+    if last_fb == "correct":
+        lines.append("🎆 🎇 ✨ **БАРАКАЛЛА! ТЎҒРИ ЖАВОБ!** ✨ 🎇 🎆")
+        lines.append("Салютлар отилмоқда! 🎆 Сиз ҳақиқий асаларичилик билимдони экансиз! 🐝🍯")
+        lines.append("──────────────────────────────")
+    elif last_fb == "wrong":
+        lines.append("💡 *Афсус, олдинги саволда хато қилинди. Таслим бўлманг, кейинги саволда омад! 💪*")
+        lines.append("──────────────────────────────")
+
+    lines.extend([
         f"⏱ **Вақт чеклови: {time_limit} сония** | 📑 **{q_idx + 1}-савол / {total}**",
         "",
         f"❓ **{q_text}**",
         ""
-    ]
+    ])
 
     clean_options = []
     for idx, opt in enumerate(options[:5]):
@@ -6793,57 +6810,71 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     total_participants = len(leaderboard)
 
     lines = [
-        "🏆 " + apply_script("АСАЛАРИЧИЛИК ИЛМИЙ ТАДҚИҚОТ ТЕСТЛАРИ НАТИЖАЛАРИ", script) + " 🏆",
+        "🎆 🎇 ✨ 🏆 🎉 🍯 🐝 👑 🥇 🥈 🥉 ✨ 🎇 🎆",
+        "══════════════════════════════════════",
+        "🎉 **«АСАЛАРИЧИЛИК ТАНТАНАЛИ ТАҚДИРЛАШ МАРОСИМИ»** 🎉",
+        "══════════════════════════════════════",
         "",
-        "🏛 " + apply_script("Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот институтлари синовлари муваффақиятли якунланди!", script),
-        f"🔬 {apply_script('Йўналиш', script)}: **{cat_title}**",
-        f"👥 {apply_script('Жами қатнашчилар', script)}: **{total_participants} нафар**",
+        "🏛 **Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот марказлари Давлат стандарти синов тести муваффақиятли якунланди!**",
         "",
-        "══════════════════════════════",
-        "🎉 " + apply_script("ҒОЛИБЛАРНИ ЧИН ДИЛДАН ТАБРИКЛАЙМИЗ!", script) + " 🎉",
-        "══════════════════════════════"
+        f"🔬 **Йўналиш:** {cat_title}",
+        f"👥 **Жами синовдан ўтган асаларичилар:** **{total_participants} нафар**",
+        "",
+        "Бугунги синовда барча қатнашчиларимиз юксак фаоллик ва асаларичилик бўйича пухта билимларини намоён этдилар!",
+        "",
+        "══════════════════════════════════════",
+        "🎆 🎇 **ҒОЛИБЛАР ВА ФАХРИЙ МЕДАЛ СОҲИБЛАРИ:** 🎇 🎆",
+        "══════════════════════════════════════"
     ]
 
     if not leaderboard:
         lines.append("")
-        lines.append(apply_script("Ҳозирча қатнашчилар жавоблари қайд этилмаган. Тест ҳали давом этмоқда ёки якунланди.", script))
+        lines.append("Ҳозирча қатнашчилар жавоблари қайд этилмаган. Тест якунланди.")
     else:
         w1 = leaderboard[0]
         u1_str = f"(@{w1['username']})" if w1['username'] else ""
         t1_str = f"{int(w1['time_taken'])} сония" if w1['time_taken'] < 9000 else ""
-        lines.append("🥇 **1-ЎРИН (ОЛТИН МЕДАЛ) 🥇**")
+        lines.append("")
+        lines.append("🥇 **1-ЎРИН — ОЛТИН МЕДАЛ ВА «ОЛИЙ ДАРАЖАЛИ АСАЛАРИЧИ» НОМИ:** 🥇")
         lines.append(f"👤 **{w1['name']}** {u1_str}")
-        lines.append(f"🎯 {apply_script('Натижа', script)}: **{w1['score']} / 10 та тўғри** ({t1_str})")
+        lines.append(f"🎯 **Натижа:** **{w1['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t1_str})")
+        lines.append("🎆 Салютлар, гулдурос олқишлар ва юксак эҳтиром сиз учун! 🎇✨👏🐝🍯")
         lines.append("")
 
         if len(leaderboard) > 1:
             w2 = leaderboard[1]
             u2_str = f"(@{w2['username']})" if w2['username'] else ""
             t2_str = f"{int(w2['time_taken'])} сония" if w2['time_taken'] < 9000 else ""
-            lines.append("🥈 **2-ЎРИН (КУМУШ МЕДАЛ) 🥈**")
+            lines.append("🥈 **2-ЎРИН — КУМУШ МЕДАЛ ВА «ТАЖРИБАЛИ МУТАХАССИС» НОМИ:** 🥈")
             lines.append(f"👤 **{w2['name']}** {u2_str}")
-            lines.append(f"🎯 {apply_script('Натижа', script)}: **{w2['score']} / 10 та тўғри** ({t2_str})")
+            lines.append(f"🎯 **Натижа:** **{w2['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t2_str})")
+            lines.append("👏 Чин кўнгилдан муборакбод этамиз! Сизга омад ва зафарлар тилаймиз! 🥈🎉")
             lines.append("")
 
         if len(leaderboard) > 2:
             w3 = leaderboard[2]
             u3_str = f"(@{w3['username']})" if w3['username'] else ""
             t3_str = f"{int(w3['time_taken'])} сония" if w3['time_taken'] < 9000 else ""
-            lines.append("🥉 **3-ЎРИН (БРОНЗА МЕДАЛ) 🥉**")
+            lines.append("🥉 **3-ЎРИН — БРОНЗА МЕДАЛ ВА «ИЛМИЙ БИЛИМДОН» НОМИ:** 🥉")
             lines.append(f"👤 **{w3['name']}** {u3_str}")
-            lines.append(f"🎯 {apply_script('Натижа', script)}: **{w3['score']} / 10 та тўғри** ({t3_str})")
+            lines.append(f"🎯 **Натижа:** **{w3['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t3_str})")
+            lines.append("🎉 Фахрий натижа ва медал муборак бўлсин! 🥉✨")
             lines.append("")
 
         if len(leaderboard) > 3:
-            lines.append("🎖 **Бошқа фаол иштирокчилар:**")
+            lines.append("══════════════════════════════════════")
+            lines.append("🎖 **ТОП-10 ТАЛИККА КИРГАН ФАОЛ АСАЛАРИЧИЛАР:**")
             for rank_idx, p in enumerate(leaderboard[3:10], start=4):
                 p_user = f"(@{p['username']})" if p['username'] else ""
-                lines.append(f"{rank_idx}. {p['name']} {p_user} — {p['score']}/10 та тўғри")
+                lines.append(f"🏅 {rank_idx}-ўрин: **{p['name']}** {p_user} — {p['score']}/10 та тўғри")
 
     lines.append("")
-    lines.append(apply_script("Барча иштирокчи асаларичиларимизга катта раҳмат! Билимингиз янада зиёда, асалингиз мўл ва баракали бўлсин! 🐝🇺🇿", script))
+    lines.append("══════════════════════════════════════")
+    lines.append("🍯 «Асалингиз доимо мўл, оилаларингиз бақувват ва баракали бўлсин!» 🐝🇺🇿")
+    lines.append("Барча иштирокчи асаларичиларимизга чуқур миннатдорчилик билдирамиз!")
+    lines.append("══════════════════════════════════════")
     lines.append("")
-    lines.append(get_official_footer())
+    lines.append(get_official_footer(script))
 
     results_text = chr(10).join(lines)
 
@@ -7019,6 +7050,162 @@ async def on_video_action_cb(call: types.CallbackQuery):
     "🎓 Илмий тадқиқот тестлари", "🎓 Илмий тестлар", "Илмий тадқиқот тестлари",
     "Илмий тестлар", "Тестлар", "🎓 Асаларичилик илмий тестлари", "илмий тестлар"
 }))
+
+# ==============================================================================
+# ТЕСТНИ ҲОЗИРОҚ БОШЛАШ, ВАҚТ БЕЛГИЛАШ ВА ШОШИЛИНЧ ТАҚДИРЛАШ
+# ==============================================================================
+@dp.callback_query(F.data == "sci_act:launch_menu")
+async def on_sci_launch_menu_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    settings = get_sci_settings()
+    active_set = settings.get("selected_set_id", 1)
+    cat = settings.get("current_category", "young_beekeepers")
+    cat_title = get_sci_category_title(cat)
+
+    lines = [
+        "🚀 **АСАЛАРИЧИЛИК ТЕСТИНИ ҲОЗИРОҚ БОШЛАШ ВА ВАҚТ БЕЛГИЛАШ**",
+        "",
+        f"🔬 **Йўналиш:** {cat_title}",
+        f"📑 **Серия:** #{active_set}-серия (10 та ДТМ саволи)",
+        "",
+        "⏱ **Барча иштирокчилар учун тест қанча вақт давом этсин?**",
+        "Белгиланган вақт (соат ёки дақиқа) тугаши билан бот барча қатнашчиларни **АВТОМАТИК ТАҚДИРЛАЙДИ**!",
+        "",
+        "💡 *Шунингдек, тест вақти тугамаган тақдирда ҳам исталган пайт «Тестни тўхтатиш ва тақдирлаш» тугмаси орқали маросимни дарҳол бошлашингиз мумкин.*",
+        "",
+        "Керакли вақтни танланг ёки дақиқани қўлда ёзинг:"
+    ]
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⏱ 15 дақиқа", callback_data="sci_launch_dur:15"),
+            InlineKeyboardButton(text="⏱ 30 дақиқа", callback_data="sci_launch_dur:30"),
+            InlineKeyboardButton(text="⏱ 45 дақиқа", callback_data="sci_launch_dur:45")
+        ],
+        [
+            InlineKeyboardButton(text="⏱ 1 соат (60 дақ)", callback_data="sci_launch_dur:60"),
+            InlineKeyboardButton(text="⏱ 1.5 соат (90 дақ)", callback_data="sci_launch_dur:90"),
+            InlineKeyboardButton(text="⏱ 2 соат (120 дақ)", callback_data="sci_launch_dur:120")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Дақиқани қўлда ёзиш (сон киритиш)", callback_data="sci_launch_dur:custom")
+        ],
+        [
+            InlineKeyboardButton(text="🚀 Ҳозирги созлама билан бошлаш", callback_data="sci_act:launch_now"),
+            InlineKeyboardButton(text="🔙 Ортга қайтиш", callback_data="sci_act:dashboard")
+        ]
+    ])
+    try:
+        await call.message.edit_text(chr(10).join(lines), reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await call.message.answer(chr(10).join(lines), reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("sci_launch_dur:"))
+async def on_sci_launch_dur_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    val = call.data.split(":")[1]
+    if val == "custom":
+        ADMIN_WAITING_INPUT[call.from_user.id] = "sci_duration_custom"
+        text = (
+            "✏️ **Тест давомийлигини дақиқада сон билан ёзинг** (масалан: `20`, `40`, `75` ёки `180`):\n\n"
+            "Хабар юборганингиздан сўнг тест автоматик ўша дақиқага мўлжалланиб дарҳол бошланади!"
+        )
+        await call.message.answer(text, parse_mode="Markdown")
+        await call.answer()
+        return
+
+    dur_min = int(val)
+    start_dt = get_uzb_now()
+    end_dt = start_dt + timedelta(minutes=dur_min)
+    start_str = start_dt.strftime("%H:%M")
+    end_str = end_dt.strftime("%H:%M")
+
+    update_sci_setting("start_time", start_str)
+    update_sci_setting("end_time", end_str)
+    update_sci_setting("total_test_duration_min", dur_min)
+
+    await call.answer(f"🚀 Тест {dur_min} дақиқага мўлжалланиб бошланмоқда...", show_alert=False)
+    t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
+
+    rep = [
+        "🚀 **АСАЛАРИЧИЛИК СИНОВ ТЕСТИ ҲОЗИРОҚ БОШЛАНДИ!**",
+        "",
+        f"⏱ **Белгиланган умумий вақт:** {dur_min} дақиқа",
+        f"⏰ **Синов вақти:** {start_str} дан то {end_str} гача",
+        f"🏆 **Тақдирлаш:** Соат **{end_str}** да тест якунланиб, барча қатнашчилар автоматик тақдирланади!",
+        "",
+        "💡 *Эслатма: Агар вақт тугамасдан туриб олдинроқ тақдирлашни истасангиз, Тест марказидан «🛑 ТЕСТНИ ТЎХТАТИШ ВА ТАҚДИРЛАШ» тугмасини босишингиз кифоя.*"
+    ]
+    await call.message.answer(chr(10).join(rep), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "sci_act:force_award")
+async def on_sci_force_award_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("🏆 Тест муддатидан олдин якунланмоқда ва ТАНТАНАЛИ ТАҚДИРЛАШ бошланмоқда...", show_alert=False)
+    res_text, ok = await broadcast_scientific_results(bot)
+    done_msg = (
+        "🏆 **ТЕСТ ТЎХТАТИЛДИ ВА ТАНТАНАЛИ ТАҚДИРЛАШ ЎТКАЗИЛДИ!** 🎆🎇\n\n"
+        "Барча қатнашчилар натижаси эълон қилиниб, ғолиблар 🥇 Олтин, 🥈 Кумуш ва 🥉 Бронза медаллар билан тақдирланди ҳамда Канал ва Гуруҳга қадалди!"
+    )
+    await call.message.answer(done_msg, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("sci_time_pick:"))
+async def on_sci_time_picker(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    parts = call.data.split(":")
+    mode = parts[1]  # 'start' or 'end'
+    action = parts[2]  # 'menu', 'set', 'custom'
+
+    if action == "menu":
+        title = "⏰ **ТЕСТ БОШЛАНИШ ВАҚТИНИ ТАНЛАНГ:**" if mode == "start" else "🏁 **ТЕСТ ТУГАШ ВА ТАҚДИРЛАШ ВАҚТИНИ ТАНЛАНГ:**"
+        times_row1 = ["08:00", "10:00", "12:00", "14:00"]
+        times_row2 = ["16:00", "17:00", "18:00", "19:00"]
+        times_row3 = ["20:00", "21:00", "22:00", "23:00"]
+
+        rows = [
+            [InlineKeyboardButton(text=f"⏰ {t}", callback_data=f"sci_time_pick:{mode}:set:{t}") for t in times_row1],
+            [InlineKeyboardButton(text=f"⏰ {t}", callback_data=f"sci_time_pick:{mode}:set:{t}") for t in times_row2],
+            [InlineKeyboardButton(text=f"⏰ {t}", callback_data=f"sci_time_pick:{mode}:set:{t}") for t in times_row3],
+            [InlineKeyboardButton(text="✏️ Исталган вақтни қўлда ёзиш (чч:мм)", callback_data=f"sci_time_pick:{mode}:custom")],
+            [InlineKeyboardButton(text="🔙 Созламаларга қайтиш", callback_data="sci_act:settings")]
+        ]
+        try:
+            await call.message.edit_text(title, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+        except Exception:
+            await call.message.answer(title, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+        await call.answer()
+
+    elif action == "set":
+        chosen_time = parts[3]
+        if mode == "start":
+            update_sci_setting("start_time", chosen_time)
+            await call.answer(f"Бошланиш вақти: {chosen_time}")
+        else:
+            update_sci_setting("end_time", chosen_time)
+            await call.answer(f"Тақдирлаш вақти: {chosen_time}")
+
+        # Sozlamalar oynasiga qaytish
+        kb = build_scientific_settings_keyboard()
+        try:
+            await call.message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+
+    elif action == "custom":
+        state_key = "sci_start_time" if mode == "start" else "sci_end_time"
+        ADMIN_WAITING_INPUT[call.from_user.id] = state_key
+        prompt_txt = (
+            f"✏️ **Тест {'бошланиш' if mode == 'start' else 'тугаш ва тақдирлаш'} вақтини соат ва дақиқада ёзинг** (масалан: `18:30`, `19:15` ёки `21:45`):\n\n"
+            f"*Ҳозирги Тошкент вақти: {get_uzb_now().strftime('%H:%M')}*"
+        )
+        await call.message.answer(prompt_txt, parse_mode="Markdown")
+        await call.answer()
+
 async def scientific_tests_menu_cmd(message: types.Message):
     if message.chat.type != "private":
         return
@@ -7317,6 +7504,11 @@ async def on_dtm_ans_cb(call: types.CallbackQuery):
 
     if is_correct:
         exam["score"] += 1
+        exam["last_feedback"] = "correct"
+        salut_msg = "🎆 🎇 ✨ БАРАКАЛЛА! Тўғри жавоб! Салютлар отилмоқда! 🐝🎉"
+    else:
+        exam["last_feedback"] = "wrong"
+        salut_msg = "💡 Нотўғри вариант. Кейинги саволда кучлироқ ҳаракат қилинг! 💪"
 
     # Keyingi savol yoki yakuniy natija
     if exam["q_idx"] + 1 < len(exam["questions"]):
@@ -7327,7 +7519,7 @@ async def on_dtm_ans_cb(call: types.CallbackQuery):
             await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
         except Exception:
             await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
-        await call.answer()
+        await call.answer(salut_msg, show_alert=False)
     else:
         # 10-savol yakunlandi! Natijalarni global sessiyaga yozamiz
         total_time = max(1.0, time.time() - exam["started_at"])
@@ -7689,6 +7881,55 @@ async def private_chat_handler(message: types.Message):
         return
 
     clean_text = message.text.strip().lower()
+
+    # 0. Админ махсус вақт ва дақиқа киритиш текшируви
+    state = ADMIN_WAITING_INPUT.get(message.from_user.id)
+    if state == "sci_start_time":
+        match = re.search(r"(\d{1,2})[:\.\-\s](\d{2})", clean_text)
+        if match:
+            h = int(match.group(1)) % 24
+            m = int(match.group(2)) % 60
+            new_t = f"{h:02d}:{m:02d}"
+            update_sci_setting("start_time", new_t)
+            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
+            return await message.answer(f"✅ **Тест бошланиш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
+        else:
+            return await message.answer("⚠️ Илтимос, вақтни `18:30` ёки `19:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
+
+    elif state == "sci_end_time":
+        match = re.search(r"(\d{1,2})[:\.\-\s](\d{2})", clean_text)
+        if match:
+            h = int(match.group(1)) % 24
+            m = int(match.group(2)) % 60
+            new_t = f"{h:02d}:{m:02d}"
+            update_sci_setting("end_time", new_t)
+            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
+            return await message.answer(f"✅ **Тест тугаш ва тақдирлаш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
+        else:
+            return await message.answer("⚠️ Илтимос, вақтни `19:30` ёки `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
+
+    elif state == "sci_duration_custom":
+        match = re.search(r"\d+", clean_text)
+        if match:
+            dur_min = max(1, int(match.group(0)))
+            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+            start_dt = get_uzb_now()
+            end_dt = start_dt + timedelta(minutes=dur_min)
+            start_str = start_dt.strftime("%H:%M")
+            end_str = end_dt.strftime("%H:%M")
+
+            update_sci_setting("start_time", start_str)
+            update_sci_setting("end_time", end_str)
+            update_sci_setting("total_test_duration_min", dur_min)
+
+            await message.answer(f"🚀 **Тест {dur_min} дақиқага мўлжалланиб бошланмоқда...**\n⏰ Вақти: {start_str} дан {end_str} гача\n🏆 Соат {end_str} да автоматик тақдирлаш бўлади!", parse_mode="Markdown")
+            t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
+            return
+        else:
+            return await message.answer("⚠️ Илтимос, дақиқани фақат сон билан ёзинг (масалан: `35` ёки `60`).", parse_mode="Markdown")
+
 
     # 1. Каналлар бошқаруви ва каналга қўшиш
     if any(k in clean_text for k in ["каналга қўшиш", "каналга", "kanalga"]):

@@ -1,1 +1,1 @@
-web: python bee_bot.py
+web: python run_both.py
