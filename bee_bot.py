@@ -36,7 +36,15 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# O'zbekiston Toshkent vaqti (UTC+5)
+UZB_TZ = timezone(timedelta(hours=5))
+
+def get_uzb_now() -> datetime:
+    """O'zbekiston (Toshkent, UTC+5) mahalliy vaqtini qaytaradi"""
+    return datetime.now(UZB_TZ)
+
 from typing import Dict, List, Optional, Any, Union
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -45,6 +53,18 @@ if hasattr(sys.stdout, "reconfigure"):
         sys.stderr.reconfigure(line_buffering=True)
     except Exception:
         pass
+
+# Render avto-kutubxona tekshiruvi (aiogram yo'q bo'lsa darhol avtomatik o'rnatiladi)
+try:
+    import aiogram
+except ImportError:
+    print("📦 [RENDER AUTO-INSTALL] aiogram kutubxonasi o'rnatilmoqda...", flush=True)
+    try:
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "aiogram==3.12.0", "aiohttp>=3.9.0", "certifi", "requests"])
+        import aiogram
+    except Exception as ie:
+        print(f"⚠️ Kutubxona o'rnatishda xatolik: {ie}", flush=True)
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -360,6 +380,97 @@ def mark_item_as_sent(category: str, item_id: Any, title_or_q: Optional[str] = N
         hist[key].append(title_or_q)
     save_sent_history(hist)
 
+
+# ==============================================================================
+# KETMA-KET TAKRORLANMAS MA'LUMOTLAR TIZIMI (HECH QACHON TAKRORLANMAYDI)
+# ==============================================================================
+def get_next_sequential_news() -> dict:
+    news_list = get_news_db()
+    if not news_list:
+        return INITIAL_NEWS[0]
+    settings = get_settings()
+    idx = int(settings.get("news_seq_index", 0))
+    item = news_list[idx % len(news_list)]
+    update_setting("news_seq_index", (idx + 1) % len(news_list))
+    mark_item_as_sent("news", item.get("id"), item.get("title"))
+    return item
+
+def get_next_sequential_quiz(poll_type: str = "quiz") -> dict:
+    if poll_type == "regular":
+        polls = get_polls_db()
+        if not polls:
+            return INITIAL_POLLS[0]
+        settings = get_settings()
+        idx = int(settings.get("poll_seq_index", 0))
+        item = polls[idx % len(polls)]
+        update_setting("poll_seq_index", (idx + 1) % len(polls))
+        mark_item_as_sent("poll", item.get("id"), item.get("question"))
+        return item
+    else:
+        quizzes = get_quizzes_db()
+        if not quizzes:
+            return INITIAL_QUIZZES[0]
+        settings = get_settings()
+        idx = int(settings.get("quiz_seq_index", 0))
+        item = quizzes[idx % len(quizzes)]
+        update_setting("quiz_seq_index", (idx + 1) % len(quizzes))
+        mark_item_as_sent("quiz", item.get("id"), item.get("question"))
+        return item
+
+def get_next_sequential_apitherapy() -> Optional[dict]:
+    db = load_apitherapy_db()
+    if not db:
+        return None
+    settings = get_settings()
+    idx = int(settings.get("apitherapy_seq_index", 0))
+    item = db[idx % len(db)]
+    update_setting("apitherapy_seq_index", (idx + 1) % len(db))
+    mark_item_as_sent("apitherapy", item.get("id"), item.get("title"))
+    return item
+
+VIDEO_DB_FILE = "video_database.json"
+
+def load_video_db() -> list:
+    return load_json_file(VIDEO_DB_FILE, [])
+
+def get_next_sequential_video() -> Optional[dict]:
+    db = load_video_db()
+    if not db:
+        return None
+    settings = get_settings()
+    idx = int(settings.get("video_seq_index", 0))
+    item = db[idx % len(db)]
+    update_setting("video_seq_index", (idx + 1) % len(db))
+    mark_item_as_sent("video", item.get("id"), item.get("title"))
+    return item
+
+def format_video_card_text(v: dict, script: str = "cyrillic") -> str:
+    title = apply_script(v.get("title", ""), script)
+    channel = apply_script(v.get("channel", "Asalarichilik.Uz TV"), script)
+    dur = apply_script(v.get("duration", "15 дақиқа"), script)
+    desc = apply_script(v.get("description", ""), script)
+    url = v.get("url", "https://youtube.com/@asalarichilikuztv?feature=shared")
+    tags = v.get("tags", "#Асаларичилик #ВидеоДарс")
+
+    lines = [
+        "🎬 **АСАЛАРИЧИЛИК АМАЛИЙ ВИДЕО ДАРСЛИГИ** 🐝",
+        "",
+        f"📌 **Мавзу:** {title}",
+        f"⏱ **Давомийлиги:** {dur}",
+        f"👨‍🏫 **Мутахассис / Канал:** {channel}",
+        "",
+        "📝 **Қисқача мазмуни:**",
+        desc,
+        "",
+        f"▶️ **Видео кўриш учун ҳавола:**",
+        url,
+        "",
+        f"{tags} #AsalarichilikUz",
+        "",
+        get_official_footer(script)
+    ]
+    return chr(10).join(lines)
+
 def get_unsent_news() -> dict:
     """Аввал жўнатилмаган навбатдаги асаларичилик янгилигини олиш"""
     news_list = get_news_db()
@@ -457,21 +568,32 @@ def remove_connected_chat(chat_id: int):
         del pending[cid_str]
         save_json_file(PENDING_CHATS_FILE, pending)
 
+OFFICIAL_CHANNEL_ID = -1001261575171
+OFFICIAL_GROUP_ID = -1001275726275
+
+def normalize_destination_id(cid_val: Any) -> Any:
+    """ID va yuzerneymlarni bitta standart butun songa keltiradi (Dublikatni 100% oldini oladi)"""
+    s = str(cid_val).strip()
+    if s in ["@uz_asalarichilik", "uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)]:
+        return OFFICIAL_CHANNEL_ID
+    if s in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)]:
+        return OFFICIAL_GROUP_ID
+    try:
+        return int(s)
+    except Exception:
+        return s
+
 def get_destinations_for_target(target_mode: str) -> list:
-    """Манзилга кўра (Канал, Гуруҳ, ёки Иккаласи) жўнатиладиган барча чат ID ва юзернеймлари"""
+    """Манзилга кўра (Канал, Гуруҳ, ёки Иккаласи) жўнатиладиган барча чат ID лари (ТАКРОРЛАНМАСДАН)"""
     chats = load_allowed_chats()
     conn = load_connected_chats()
-
-    official_channel = get_official_channel()
-    official_group = get_official_group()
 
     channel_targets = set()
     group_targets = set()
 
-    if official_channel:
-        channel_targets.add(official_channel)
-    if official_group:
-        group_targets.add(official_group)
+    # Faqat bitta normallashtirilgan ID qo'shiladi
+    channel_targets.add(OFFICIAL_CHANNEL_ID)
+    group_targets.add(OFFICIAL_GROUP_ID)
 
     merged = {}
     merged.update(chats)
@@ -481,15 +603,12 @@ def get_destinations_for_target(target_mode: str) -> list:
         if info.get("status") not in [None, "approved", "active"]:
             continue
         c_type = info.get("type", "")
-        try:
-            cid = int(cid_str)
-        except ValueError:
-            cid = cid_str
+        norm_cid = normalize_destination_id(cid_str)
 
         if c_type in ["channel", "Kanal"]:
-            channel_targets.add(cid)
+            channel_targets.add(norm_cid)
         elif c_type in ["group", "supergroup", "Guruh"]:
-            group_targets.add(cid)
+            group_targets.add(norm_cid)
 
     if target_mode == "channel":
         return list(channel_targets)
@@ -1804,8 +1923,9 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="⚙️ Гуруҳ созламалари"), KeyboardButton(text="📢 Каналлар бошқаруви")],
         [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🌿 Апитерапия янгиликлари")],
         [KeyboardButton(text="🎓 Илмий тадқиқот тестлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
-        [KeyboardButton(text="📢 Реклама тарқатиш"), KeyboardButton(text="👑 Гуруҳлар назорати")],
-        [KeyboardButton(text="👑 Бот эгаси"), KeyboardButton(text="📖 Бот қўлланмаси")]
+        [KeyboardButton(text="🎬 Асаларичилик видеолари"), KeyboardButton(text="📢 Реклама тарқатиш")],
+        [KeyboardButton(text="👑 Гуруҳлар назорати"), KeyboardButton(text="👑 Бот эгаси")],
+        [KeyboardButton(text="📖 Бот қўлланмаси")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -3688,7 +3808,7 @@ async def on_autopost_fire(call: types.CallbackQuery):
         mark_item_as_sent("quiz" if poll_type == "quiz" else "poll", item.get("id"), item.get("question"))
 
     elif cat == "api":
-        item = get_unsent_apitherapy()
+        item = get_next_sequential_apitherapy()
         if item:
             script = settings.get("script_mode", "cyrillic")
             text = format_apitherapy_post_text(item, 0, 1000, script=script)
@@ -3723,7 +3843,7 @@ async def on_autopost_test_all(call: types.CallbackQuery):
 
     # 1. News
     n_targets = get_destinations_for_target(settings.get("news_auto_target", "both"))
-    news = get_unsent_news()
+    news = get_next_sequential_news()
     script = settings.get("script_mode", "cyrillic")
     for c in n_targets:
         try:
@@ -4687,7 +4807,7 @@ async def daily_scheduler_loop():
     """
     while True:
         try:
-            now = datetime.now()
+            now = get_uzb_now()
             today_str = now.strftime("%Y-%m-%d")
             cur_hhmm = now.strftime("%H:%M")
 
@@ -4736,7 +4856,7 @@ async def daily_scheduler_loop():
                 logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {quiz_target}")
                 targets = get_destinations_for_target(quiz_target)
                 poll_type = settings.get("poll_type", "quiz")
-                quiz = get_unsent_quiz(level=settings.get("quiz_level", "mixed"), poll_type=poll_type)
+                quiz = get_next_sequential_quiz(poll_type=poll_type)
                 for cid in targets:
                     try:
                         await send_quiz_poll_to_chat(cid, quiz, poll_mode=poll_type)
@@ -4776,18 +4896,20 @@ async def daily_scheduler_loop():
                 log[key_a] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # 5. Avtomatik Asalarichilik Ilmiy Testlari (10 talik A, B, C, D, E)
+            # 5. Avtomatik Asalarichilik Ilmiy Testlari (10 talik A, B, C, D, E) ва ТАҚДИРЛАШ
             sci_settings = get_sci_settings() if 'get_sci_settings' in globals() else {}
-            sci_enabled = sci_settings.get("auto_enabled", False)
-            sci_time = sci_settings.get("auto_time", "19:00")
-            key_sci = f"sci_test_{today_str}_{sci_time}"
-            key_sci_pre = f"sci_pre_{today_str}_{sci_time}"
+            sci_enabled = sci_settings.get("auto_enabled", True)
+            sci_start_time = sci_settings.get("start_time", sci_settings.get("auto_time", "18:00"))
+            sci_end_time = sci_settings.get("end_time", "19:00")
+            key_sci_pre = f"sci_pre_{today_str}_{sci_start_time}"
+            key_sci_start = f"sci_start_{today_str}_{sci_start_time}"
+            key_sci_award = f"sci_award_{today_str}_{sci_end_time}"
 
-            # 1 soat oldin xabarnoma tarqatish
+            # 1 soat oldin xabarnoma tarqatish (masalan 17:00 da)
             if sci_enabled and sci_settings.get("pre_notice_1h", True):
                 try:
-                    target_hour = int(sci_time.split(":")[0])
-                    target_min = int(sci_time.split(":")[1])
+                    target_hour = int(sci_start_time.split(":")[0])
+                    target_min = int(sci_start_time.split(":")[1])
                     pre_hour = (target_hour - 1) % 24
                     pre_time_str = f"{pre_hour:02d}:{target_min:02d}"
                     if cur_hhmm == pre_time_str and not log.get(key_sci_pre):
@@ -4798,12 +4920,21 @@ async def daily_scheduler_loop():
                 except Exception as pe:
                     logging.error(f"Sci pre-notice error: {pe}")
 
-            # Testni boshlash vaqti
-            if sci_enabled and cur_hhmm == sci_time and not log.get(key_sci):
+            # Testni boshlash vaqti (masalan 18:00 da)
+            if sci_enabled and cur_hhmm == sci_start_time and not log.get(key_sci_start):
                 logging.info(f"🚀 Avto Ilmiy Test boshlanish vaqti keldi ({cur_hhmm})!")
                 await launch_full_scientific_test(bot)
-                log[key_sci] = True
+                log[key_sci_start] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
+
+            # Test yakuni va AVTOMATIK TAQDIRLASH (masalan 19:00 da)
+            sci_sess = get_sci_session() if 'get_sci_session' in globals() else {}
+            if (cur_hhmm == sci_end_time or cur_hhmm == sci_sess.get("end_time")) and not log.get(key_sci_award):
+                if sci_sess.get("is_active"):
+                    logging.info(f"🏆 Test vaqti tugadi ({cur_hhmm})! G'oliblarni avtomatik taqdirlash boshlandi...")
+                    await broadcast_scientific_results(bot)
+                    log[key_sci_award] = True
+                    save_json_file(SCHEDULER_LOG_FILE, log)
 
             # 4. Kunlik yangi ilmiy yangilik zaxirasini tekshirish
             key_curate = f"auto_news_curate_{today_str}"
@@ -6049,10 +6180,11 @@ def save_sci_session(session: dict):
     save_json_file(SCIENTIFIC_SESSION_FILE, session)
 
 def get_sci_category_title(cat: str, script: str = "cyrillic") -> str:
+    """Бошқа сўзлардан яққол ажралиб турувчи қалин ва чиройли йўналиш номлари"""
     if cat == "master_beekeepers":
-        raw = "🎓 Устоз аричилар (Илмий-амалий ва тадқиқотлар)"
+        raw = "🎓 «УСТОЗ АРИЧИЛАР»"
     else:
-        raw = "👶 Ёш асаларичилар (Янги бошловчилар учун тестлар)"
+        raw = "👶 «ЁШ АСАЛАРИЧИЛАР»"
     return apply_script(raw, script)
 
 def format_scientific_preview_text(item: dict, idx: int, total: int, cat: str, script: str = "cyrillic") -> str:
@@ -6210,6 +6342,8 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
     dur = s.get("duration_limit_sec", 60)
     notic = s.get("pre_notice_1h", True)
     scr = s.get("script_mode", "cyrillic")
+    start_t = s.get("start_time", "18:00")
+    end_t = s.get("end_time", "19:00")
 
     tgt_chan = "✅ Канал" if tgt == "channel" else "Канал"
     tgt_grp = "✅ Гуруҳ" if tgt == "group" else "Гуруҳ"
@@ -6225,6 +6359,10 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
     scr_str = "🟢 Кирилл алифбоси" if scr == "cyrillic" else "🟢 Lotin alifbosi"
 
     rows = [
+        [
+            InlineKeyboardButton(text=f"⏰ Бошланиш: {start_t}", callback_data="sci_set:start_time:cycle"),
+            InlineKeyboardButton(text=f"🏁 Тақдирлаш: {end_t}", callback_data="sci_set:end_time:cycle")
+        ],
         [
             InlineKeyboardButton(text="📍 Манзил:", callback_data="noop"),
             InlineKeyboardButton(text=tgt_chan, callback_data="sci_set:target:channel"),
@@ -6483,6 +6621,8 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     cat = settings.get("current_category", "young_beekeepers")
     cat_title = get_sci_category_title(cat, script)
     dur = settings.get("duration_limit_sec", 60)
+    start_time = settings.get("start_time", settings.get("auto_time", "18:00"))
+    end_time = settings.get("end_time", "19:00")
 
     db = load_scientific_tests_db()
     questions = db.get(cat, [])
@@ -6506,17 +6646,9 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     official_group_id = -1001275726275
     targets = []
     for t in raw_targets:
-        if str(t) in ["@uz_asalarichilik", "uz_asalarichilik", str(official_channel_id)]:
-            if official_channel_id not in targets:
-                targets.append(official_channel_id)
-        elif str(t) in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", str(official_group_id)]:
-            if official_group_id not in targets:
-                targets.append(official_group_id)
-        else:
-            try:
-                targets.append(int(t))
-            except Exception:
-                targets.append(t)
+        norm = normalize_destination_id(t)
+        if norm not in targets:
+            targets.append(norm)
 
     if not targets:
         if eff_target == "channel":
@@ -6532,40 +6664,49 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
         "category": cat,
         "target": eff_target,
         "started_at": time.time(),
+        "start_time": start_time,
+        "end_time": end_time,
         "duration_sec": dur,
         "set_id": active_set,
         "questions_count": len(test_set),
         "participants": {},
+        "poll_map": {},
         "pre_notice_sent": True
     }
 
     banner_lines = [
-        "🏛 **ДИҚҚАТ! АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ДАВЛАТ СТАНДАРТ ТЕСТИ БОШЛАНДИ!** 🚀",
+        "🏛 **«АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ЎЗ БИЛИМИНГИЗНИ СИНАБ КЎРИНГ!»** 🚀",
         "",
-        "Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот институтлари расмий синов тести.",
+        "Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот марказлари расмий Давлат стандарти синов тести.",
+        "",
         f"🔬 **Йўналиш:** {cat_title}",
-        f"📑 **Серия рақами:** #{active_set}-серия (10 та расмий ДТМ саволи)",
+        f"📑 **Серия рақами:** #{active_set}-серия (10 та расмий тест саволи)",
+        f"⏰ **Синов вақти:** {start_time} дан то {end_time} гача",
         f"⏱ **Вақт чеклови:** Ҳар бир савол учун {dur} сония",
-        "📊 **Формат:** Давлат тест маркази стандарти (5 та вариант: A, B, C, D, E)",
+        "📊 **Формат:** 5 та вариант (A, B, C, D, E)",
         "🏆 **Мукофотлар:** 1-2-3-ўрин эгаларига Олтин, Кумуш ва Бронза фахрий медаллар!",
         "",
-        "📋 **СИНОВ ТАРТИБИ:**",
-        "• Саволлар кетма-кет, битта-биттадан тақдим этилади.",
-        "• Тўғри жавоблар олдиндан кўрсатилмайди.",
-        "• 1-саволга жавоб белгилангандан сўнг дарҳол 2-саволга ўтилади.",
-        "• Охирида тўлиқ натижа ва хато қилинган саволларнинг аниқ илмий таҳлили чиқарилади!",
+        "📋 **СИНОВДА ҚАТНАШИШ ТАРТИБИ:**",
+        "1️⃣ **Гуруҳда бевосита ечиш:** Гуруҳга жойланган 10 та саволга шу ернинг ўзида жавоб белгиланг (ботга ўтиш шарт эмас).",
+        "2️⃣ **Шахсий ДТМ тест (Ботда):** Саволларни бирма-бир вақт чеклови ва онлайн саноқ билан ечиш учун пастдаги тугмани босинг.",
+        f"3️⃣ **Автоматик тақдирлаш:** Соат {end_time} да тест тўхтатилади ва барча қатнашган асаларичилар натижаси эълон қилиниб, ғолиблар тақдирланади!",
         "",
-        "👇 **Тестни бошлаш ва республика рейтингида қатнашиш учун пастдаги тугмани босинг:**"
+        "👇 **Қатнашиш учун қуйидаги тугмалардан бирини танланг:**"
     ]
     banner_text = chr(10).join(banner_lines)
 
     bot_username = "Asalarichilikuz_bot"
+    share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}?start=sci_test_{active_set}&text=🏛 «Асаларичилик мутахассислиги бўйича ўз билимингизни синаб кўринг!» 10 та саволга жавоб бериб Олтин медални қўлга киритинг! 🐝"
+
     post_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👉 Ҳа, розиман! Тестни бошлаш 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
-        [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5-ўринлар)", url=f"https://t.me/{bot_username}?start=sci_rank")]
+        [InlineKeyboardButton(text="👉 Ҳа, розиман! Шахсий тестни бошлаш 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
+        [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5-ўринлар)", url=f"https://t.me/{bot_username}?start=sci_rank")],
+        [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
     ])
 
     sent_cnt = 0
+    poll_map = {}
+
     for cid in targets:
         try:
             sent_msg = await bot_instance.send_message(chat_id=cid, text=banner_text, reply_markup=post_markup, parse_mode="Markdown")
@@ -6574,9 +6715,51 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                 await bot_instance.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
             except Exception:
                 pass
+
+            # Агар гуруҳ бўлса, фойдаланувчилар ботга ўтмасдан гуруҳнинг ўзида ечишлари учун 10 та савол сўровнома сифатида ҳам ташланади
+            if cid == official_group_id or eff_target in ["group", "both"]:
+                for q_idx, q_item in enumerate(test_set, start=1):
+                    try:
+                        q_raw = q_item.get("question", "")
+                        q_text = f"[{q_idx}/10] {apply_script(q_raw, script)}"
+                        if len(q_text) > 300:
+                            q_text = q_text[:297] + "..."
+
+                        raw_opts = q_item.get("options", [])
+                        poll_opts = []
+                        for opt in raw_opts[:5]:
+                            opt_c = apply_script(opt, script)
+                            if len(opt_c) > 100:
+                                opt_c = opt_c[:97] + "..."
+                            poll_opts.append(opt_c)
+
+                        correct_id = q_item.get("correct_option_id", 0)
+                        raw_expl = q_item.get("explanation", "")
+                        expl = apply_script(raw_expl, script)
+                        if len(expl) > 200:
+                            expl = expl[:197] + "..."
+
+                        poll_msg = await bot_instance.send_poll(
+                            chat_id=cid,
+                            question=q_text,
+                            options=poll_opts,
+                            type="quiz",
+                            correct_option_id=correct_id,
+                            explanation=expl,
+                            is_anonymous=False
+                        )
+                        poll_map[poll_msg.poll.id] = {
+                            "q_idx": q_idx - 1,
+                            "correct_id": correct_id,
+                            "set_id": active_set
+                        }
+                    except Exception as pe:
+                        logging.warning(f"Group poll send error (q {q_idx}): {pe}")
+
         except Exception as e:
             logging.error(f"Test launch broadcast error ({cid}): {e}")
 
+    session["poll_map"] = poll_map
     save_sci_session(session)
     return sent_cnt, len(test_set), session_id
 
@@ -6697,6 +6880,140 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
             logging.error(f"Results broadcast error ({cid}): {e}")
 
     return results_text, True
+
+# ==============================================================================
+# АСАЛАРИЧИЛИК АМАЛИЙ ВИДЕО ДАРСЛИКЛАР БЎЛИМИ
+# ==============================================================================
+CURRENT_ADMIN_VIDEO_IDX: int = 0
+CURRENT_VIDEO_TARGET: str = "both"
+
+def get_current_video(idx: int) -> dict:
+    vids = load_video_db()
+    if not vids:
+        return {
+            "id": 1,
+            "title": "Асаларичиликда баҳорги парвариш ва оилаларни ривожлантириш",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "18 дақиқа",
+            "description": "Баҳор фаслида асалари оилаларини тўғри кўрикдан ўтказиш ва кучайтириш сирлари.",
+            "url": "https://youtube.com/@asalarichilikuztv?feature=shared",
+            "tags": "#БаҳоргиПарвариш #Асаларичилик"
+        }
+    return vids[idx % len(vids)]
+
+def build_video_admin_card_and_kb(idx: int, target_mode: str) -> tuple[str, InlineKeyboardMarkup]:
+    v = get_current_video(idx)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_video_card_text(v, script)
+
+    tgt_str = "Иккаласи (Канал + Гуруҳ) 📢👥" if target_mode == "both" else ("Расмий Канал 📢" if target_mode == "channel" else "Расмий Гуруҳ 👥")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🚀 Тасдиқлаш ва юбориш (Канал/Гуруҳга)", callback_data=f"vid_act:publish:{idx}")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Кейинги видеони кўриш ⏩", callback_data=f"vid_act:next:{idx}"),
+            InlineKeyboardButton(text=f"🎯 Манзил: {tgt_str}", callback_data=f"vid_act:toggle_target:{idx}")
+        ],
+        [
+            InlineKeyboardButton(text="▶️ YouTube да томоша қилиш", url=v.get("url", "https://youtube.com/@asalarichilikuztv")),
+            InlineKeyboardButton(text="🔙 Менюга қайтиш", callback_data="vid_act:close")
+        ]
+    ])
+    return text, kb
+
+@dp.message(F.text.in_({
+    "🎬 Асаларичилик видеолари", "Асаларичилик видеолари", "Видеолар", "Видео дарсликлар",
+    "🎬 Asalarichilik videolari", "Asalarichilik videolari", "Videolar"
+}))
+async def beekeeping_video_menu_cmd(message: types.Message):
+    global CURRENT_ADMIN_VIDEO_IDX, CURRENT_VIDEO_TARGET
+    if message.chat.type != "private":
+        return
+    if message.from_user.id != OWNER_ID:
+        # Oddiy foydalanuvchi uchun so'nggi tavsiya etilgan video
+        v = get_current_video(CURRENT_ADMIN_VIDEO_IDX)
+        settings = get_settings()
+        script = settings.get("script_mode", "cyrillic")
+        text = format_video_card_text(v, script)
+        share_url = f"https://t.me/share/url?url={v.get('url')}&text=🎬 Асаларичилик бўйича фойдали видео қўлланмани томоша қилинг!"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="▶️ Видеони кўриш (YouTube)", url=v.get("url"))],
+            [InlineKeyboardButton(text="↗️ Дўстларга улашиш", url=share_url)]
+        ])
+        return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+    text, kb = build_video_admin_card_and_kb(CURRENT_ADMIN_VIDEO_IDX, CURRENT_VIDEO_TARGET)
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("vid_act:"))
+async def on_video_action_cb(call: types.CallbackQuery):
+    global CURRENT_ADMIN_VIDEO_IDX, CURRENT_VIDEO_TARGET
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат фақат админ учун!", show_alert=True)
+        return
+
+    parts = call.data.split(":")
+    action = parts[1]
+
+    if action == "close":
+        await call.message.delete()
+        await call.answer()
+        return
+
+    idx = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else CURRENT_ADMIN_VIDEO_IDX
+
+    if action == "next":
+        CURRENT_ADMIN_VIDEO_IDX = (idx + 1)
+        text, kb = build_video_admin_card_and_kb(CURRENT_ADMIN_VIDEO_IDX, CURRENT_VIDEO_TARGET)
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await call.answer("Кейинги видео юкланди!")
+
+    elif action == "toggle_target":
+        order = ["both", "channel", "group"]
+        cur_pos = order.index(CURRENT_VIDEO_TARGET) if CURRENT_VIDEO_TARGET in order else 0
+        CURRENT_VIDEO_TARGET = order[(cur_pos + 1) % len(order)]
+        text, kb = build_video_admin_card_and_kb(idx, CURRENT_VIDEO_TARGET)
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            pass
+        await call.answer(f"Манзил: {CURRENT_VIDEO_TARGET}")
+
+    elif action == "publish":
+        v = get_current_video(idx)
+        settings = get_settings()
+        script = settings.get("script_mode", "cyrillic")
+        text = format_video_card_text(v, script)
+        targets = get_destinations_for_target(CURRENT_VIDEO_TARGET)
+
+        sent_cnt = 0
+        share_url = f"https://t.me/share/url?url={v.get('url')}&text=🎬 Асаларичилик бўйича янги амалий видео қўлланма: {v.get('title')}"
+        for cid in targets:
+            try:
+                markup = build_post_markup(
+                    chat_id=int(cid) if str(cid).replace("-", "").isdigit() else 0,
+                    message_id=0,
+                    reactions_list=["👍", "🔥", "🐝", "❤️", "👏"],
+                    share_title=f"🎬 {v.get('title')[:60]}",
+                    share_text=v.get('description', '')[:250]
+                )
+                sent_msg = await bot.send_message(chat_id=cid, text=text, reply_markup=markup, parse_mode="Markdown")
+                try:
+                    await bot.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
+                except Exception:
+                    pass
+                sent_cnt += 1
+            except Exception as e:
+                logging.error(f"Video publish error ({cid}): {e}")
+
+        mark_item_as_sent("video", v.get("id"), v.get("title"))
+        await call.answer(f"✅ Видео {sent_cnt} та манзилга юборилди!", show_alert=True)
 
 @dp.message(F.text.in_({
     "🎓 Илмий тадқиқот тестлари", "🎓 Илмий тестлар", "Илмий тадқиқот тестлари",
@@ -7145,6 +7462,18 @@ async def on_sci_settings_action(call: types.CallbackQuery):
         new_mode = "latin" if cur == "cyrillic" else "cyrillic"
         update_sci_setting("script_mode", new_mode)
         await call.answer(f"Ёзув тури: {'Лотинча' if new_mode == 'latin' else 'Крилча'}")
+    elif param == "start_time":
+        options = ["16:00", "17:00", "18:00", "19:00", "20:00"]
+        cur = get_sci_settings().get("start_time", "18:00")
+        nxt = options[(options.index(cur) + 1) % len(options)] if cur in options else "18:00"
+        update_sci_setting("start_time", nxt)
+        await call.answer(f"Тест бошланиш вақти: {nxt}")
+    elif param == "end_time":
+        options = ["18:00", "19:00", "20:00", "21:00", "22:00"]
+        cur = get_sci_settings().get("end_time", "19:00")
+        nxt = options[(options.index(cur) + 1) % len(options)] if cur in options else "19:00"
+        update_sci_setting("end_time", nxt)
+        await call.answer(f"Тест тугаш ва тақдирлаш вақти: {nxt}")
 
     kb = build_scientific_settings_keyboard()
     try:
@@ -7368,14 +7697,18 @@ async def private_chat_handler(message: types.Message):
         return await channel_mgmt_cmd(message)
 
     # 2. Гуруҳлар бошқаруви, созламалари ва гуруҳга қўшиш
-    if any(k in clean_text for k in ["гуруҳга қўшиш", "груҳга қўшиш", "гуруҳга", "груҳга", "guruhga", "gruhga"]):
+    if any(k in clean_text for k in ["гуруҳга қўшиш", "груҳга қўшиш", "группага қўшиш", "гуруҳга", "груҳга", "группага", "guruhga", "gruhga", "gruppaga"]):
         return await add_to_group_guide(message)
     if any(k in clean_text for k in ["гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар", "гуруҳ созлама", "груҳ созлама", "созламалари", "созламалар", "созлама", "sozlama"]):
         return await group_settings_btn_cmd(message)
     if any(k in clean_text for k in ["гуруҳлар назорати", "груҳлар назорати", "гуруҳ назорати", "груҳ назорати", "гуруҳлар", "груҳлар", "гуруҳ", "груҳ", "guruhlar", "gruhlar"]):
         return await groups_control_cmd(message)
 
-    # 3. Илмий тестлар ва саволлар
+    # 3. Видеолар
+    if any(k in clean_text for k in ["видео", "видеолар", "видеоролик", "video", "videolar"]):
+        return await beekeeping_video_menu_cmd(message)
+
+    # 4. Илмий тестлар ва саволлар
     if any(k in clean_text for k in ["илмий тадқиқот", "илмий тест", "тестлар", "тест", "test", "саволлар", "savol"]):
         return await scientific_tests_menu_cmd(message)
 
