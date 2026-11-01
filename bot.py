@@ -9372,8 +9372,14 @@ def is_whitelisted_entity_or_url(val):
         "uz_asalarichilik",
         "asalarichilik_uzbekistan",
         "asalarichiliktv_bot",
+        "asalarichilikuz_bot",
+        "asalarichilik_bot",
+        "asalarichilik",
         "asalarichilikuztv",
-        "telegram"
+        "youtube.com",
+        "youtu.be",
+        "telegram",
+        "koc_pz93gauxyjuy"
     ]
     for w in whitelisted_words:
         if w in v:
@@ -9397,35 +9403,70 @@ def group_protection_filter(message):
     raw_txt = (message.text or message.caption or "").strip()
     title = message.chat.title or "Гуруҳ"
 
-    u_obj = message.from_user
-    u_name = html.escape(u_obj.first_name if u_obj and u_obj.first_name else "Фойдаланувчи")
-    u_tag = f"@{u_obj.username}" if (u_obj and u_obj.username) else f"<a href='tg://user?id={user_id}'>{u_name}</a>"
-
-    # ==================== 0. TELEGRAM ХИЗМАТ ҲИСОБЛАРИ ВА КАНАЛ ПОСТЛАРИНИ БЕХАТО ЎТКАЗИШ ====================
-    # 1. Хабар канал ёки гуруҳ номидан (sender_chat) юборилган бўлса
-    if getattr(message, 'sender_chat', None):
-        # Фақат гуруҳнинг ўз аноним админи (sender_chat.id == chat_id) бўлса ўтказиш
-        if message.sender_chat.id == chat_id:
-            return
-        # Агар ташқаридан канал номи билан пост қўйилса, унга ҳам қулфлар ва медиа лимит тўлиқ қўлланади:
-        user_id = message.sender_chat.id
-        u_name = html.escape(message.sender_chat.title or "Канал")
-        u_tag = f"<b>{u_name}</b>"
-
-    # 2. Telegram томонидан уланган каналдан автоматик келган барча хабарлар (муҳокама гуруҳига)
-    elif getattr(message, 'is_automatic_forward', False):
+    # ==================== 0. TELEGRAM ТИЗИМ ҲИСОБЛАРИ ВА УЛАНГАН КАНАЛ (ОБСУЖДЕНИЕ) ПОСТЛАРИНИ БЕХАТО ЎТКАЗИШ ====================
+    # 1. Telegram томонидан уланган каналдан автоматик келган барча хабарлар (обсуждение/муҳокама гуруҳига):
+    if getattr(message, 'is_automatic_forward', False):
         return
 
-    # 3. Telegram расмий тизим ҳисоблари (777000) ва аноним админ (1087968824)
-    elif user_id in [777000, 1087968824]:
+    # 2. Telegram расмий тизим ҳисоблари:
+    # 777000 (Telegram / Channel Bot - уланган канал хабарлари), 1087968824 (GroupAnonymousBot), 136817688 (Channel Bot)
+    from_u_id = message.from_user.id if message.from_user else 0
+    if from_u_id in [777000, 1087968824, 136817688]:
         return
 
-    # 4. Ботнинг ўз хабарлари
+    # 3. Ботнинг ўз хабарлари:
     try:
-        if user_id == bot.get_me().id:
+        if from_u_id == bot.get_me().id or user_id == bot.get_me().id:
             return
     except Exception:
         pass
+
+    # 4. Хабар канал ёки гуруҳ номидан (sender_chat) юборилган бўлса:
+    s_chat = getattr(message, 'sender_chat', None)
+    if s_chat:
+        s_id = s_chat.id
+        # А) Гуруҳнинг ўз аноним админи (sender_chat.id == chat_id)
+        if s_id == chat_id:
+            return
+
+        # Б) Ушбу гуруҳга уланган расмий канал (-1001261575171 ва @Uz_Asalarichilik)
+        if s_id in [-1001261575171, -1001849204910]:
+            return
+
+        s_user = (s_chat.username or "").lower().replace("@", "")
+        if s_user in ["uz_asalarichilik", "asalarichilik_uzbekistan"]:
+            return
+
+        try:
+            c_chan_clean = get_official_channel().lower().replace("@", "")
+            if c_chan_clean and s_user == c_chan_clean:
+                return
+        except Exception:
+            pass
+
+        # В) Базадаги расмий каналлар рўйхатида борми?
+        try:
+            cursor.execute("SELECT 1 FROM channels WHERE chat_id = ?", (s_id,))
+            if cursor.fetchone():
+                return
+        except Exception:
+            pass
+
+        # Г) Гуруҳнинг Telegram Linked Channel (обсуждение) каналими?
+        try:
+            if getattr(message.chat, 'linked_chat_id', None) and s_id == message.chat.linked_chat_id:
+                return
+        except Exception:
+            pass
+
+        # Агар БЕГОНА канал номидан гуруҳга реклама ёки спам юборилаётган бўлса (уларга барча қулфлар қўлланади):
+        user_id = s_id
+        u_name = html.escape(s_chat.title or "Бегона Канал")
+        u_tag = f"<b>{u_name}</b>"
+    else:
+        u_obj = message.from_user
+        u_name = html.escape(u_obj.first_name if u_obj and u_obj.first_name else "Фойдаланувчи")
+        u_tag = f"@{u_obj.username}" if (u_obj and u_obj.username) else f"<a href='tg://user?id={user_id}'>{u_name}</a>"
 
     register_group(chat_id, title, added_by=OWNER_ID)
 
@@ -9868,9 +9909,16 @@ def group_protection_filter(message):
         getattr(message, 'forward_date', None)
     )
     if not is_user_admin and g.get("lock_forwards", 1) == 1 and is_fwd:
-        delete_msg_safe(chat_id, message.message_id)
-        send_lock_violation_warning(chat_id, message.from_user, "қайта юборилган (forward) хабар", "пересланных сообщений (forward)", g_lang)
-        return
+        # Агар форвард расмий каналдан бўлса (-1001261575171 ёки @uz_asalarichilik), унга рухсат:
+        fwd_c = getattr(message, 'forward_from_chat', None)
+        fwd_cid = getattr(fwd_c, 'id', None)
+        fwd_user = (getattr(fwd_c, 'username', '') or '').lower().replace("@", "")
+        if fwd_cid in [-1001261575171, -1001849204910] or fwd_user in ["uz_asalarichilik", "asalarichilik_uzbekistan"]:
+            pass
+        else:
+            delete_msg_safe(chat_id, message.message_id)
+            send_lock_violation_warning(chat_id, message.from_user, "қайта юборилган (forward) хабар", "пересланных сообщений (forward)", g_lang)
+            return
 
     # 3. СТИКЕРЛАР ВА АНИМАЦИОН СТИКЕРЛАР ҚУЛФИ (lock_stickers)
     is_sticker = (content_type == 'sticker' or getattr(message, 'sticker', None) is not None)
