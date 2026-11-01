@@ -1,0 +1,13 @@
+services:
+  - type: worker
+    name: asalarichilik-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 bot.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 8906652795:AAEfFATlQ2GAliDAjNW0kSFLGVTAElbY-W8
+      - key: GEMINI_API_KEY
+        value: AQ.Ab8RN6LDgd1ss1N0NxYV4-TngnM_cGtpHsN0IASkFbJttCXvsg
+      - key: ADMIN_ID
+        value: "2047501151"
