@@ -431,6 +431,7 @@ CREATE TABLE IF NOT EXISTS groups (
     autolock_prewarn_msg TEXT DEFAULT '',
     autolock_start_msg TEXT DEFAULT '',
     autolock_end_msg TEXT DEFAULT '',
+    autolock_warn_msg TEXT DEFAULT '',
     timezone_offset INTEGER DEFAULT 5,
     timezone_city TEXT DEFAULT 'Тошкент (UTC+5)',
     weather_enabled INTEGER DEFAULT 1,
@@ -678,6 +679,7 @@ try:
         "autolock_prewarn_msg": "TEXT DEFAULT ''",
         "autolock_start_msg": "TEXT DEFAULT ''",
         "autolock_end_msg": "TEXT DEFAULT ''",
+        "autolock_warn_msg": "TEXT DEFAULT ''",
         "timezone_offset": "INTEGER DEFAULT 5",
         "timezone_city": "TEXT DEFAULT 'Тошкент (UTC+5)'",
         "weather_enabled": "INTEGER DEFAULT 1",
@@ -5376,14 +5378,22 @@ def show_autolock_panel(chat_id, group_id, message_id, lang="uz_kr"):
     al_en = g.get("autolock_enabled", 0) if g else 0
     s_time = g.get("autolock_start_time", "23:00") if g else "23:00"
     e_time = g.get("autolock_end_time", "06:30") if g else "06:30"
+    custom_msg = g.get("autolock_warn_msg", "") if g else ""
 
     st_lbl = ("🟢 Включено" if lang == "ru" else ("🟢 Enabled" if lang == "en" else "🟢 Ёқилган")) if al_en else ("⚪️ Выключено" if lang == "ru" else ("⚪️ Disabled" if lang == "en" else "⚪️ Ўчирилган"))
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton(f"Ҳолати / Status: {st_lbl}", callback_data=f"toggle_autolock_en_{group_id}"))
     markup.row(
-        InlineKeyboardButton(f"🔒 {s_time}", callback_data=f"cycle_autolock_start_{group_id}"),
-        InlineKeyboardButton(f"🔓 {e_time}", callback_data=f"cycle_autolock_end_{group_id}")
+        InlineKeyboardButton(f"🔒 Бошланиш: {s_time}", callback_data=f"cycle_autolock_start_{group_id}"),
+        InlineKeyboardButton(f"🔓 Тугаш: {e_time}", callback_data=f"cycle_autolock_end_{group_id}")
     )
+    markup.row(
+        InlineKeyboardButton("✏️ Огоҳлантириш матнини ўзгартириш", callback_data=f"edit_autolock_msg_{group_id}")
+    )
+    if custom_msg and custom_msg.strip():
+        markup.row(
+            InlineKeyboardButton("🔄 Стандарт матнга қайтариш", callback_data=f"reset_autolock_msg_{group_id}")
+        )
     grp_lbl = "◀️ Настройки группы" if lang == "ru" else ("◀️ Group Settings" if lang == "en" else "◀️ Гуруҳ Созламалари")
     main_lbl = "🏠 Главное меню" if lang == "ru" else ("◀️ Main Menu" if lang == "en" else "◀️ Асосий Меню")
     markup.row(
@@ -5391,13 +5401,17 @@ def show_autolock_panel(chat_id, group_id, message_id, lang="uz_kr"):
         InlineKeyboardButton(main_lbl, callback_data="back_main")
     )
 
+    sample_preview = format_autolock_warning(g, 0, "Фойдаланувчи")
+
     if lang == "ru":
         txt = (
             f"🌙 <b>{title} — НОЧНОЙ АВТО-ЗАМОК</b>\n\n"
             f"• Статус: {st_lbl}\n"
-            f"• Время закрытия чата: <b>{s_time}</b>\n"
-            f"• Время открытия чата: <b>{e_time}</b>\n\n"
-            f"<i>В ночные часы чат блокируется, чтобы участники группы могли спокойно отдыхать.</i>"
+            f"• Время закрытия: <b>{s_time}</b>\n"
+            f"• Время открытия: <b>{e_time}</b>\n\n"
+            f"<i>В ночные часы сообщения автоматически удаляются, а пользователю отправляется настраиваемое предупреждение на 30 секунд.</i>\n\n"
+            f"💬 <b>Текст предупреждения:</b>\n"
+            f"<blockquote>{sample_preview}</blockquote>"
         )
     elif lang == "en":
         txt = (
@@ -5405,15 +5419,19 @@ def show_autolock_panel(chat_id, group_id, message_id, lang="uz_kr"):
             f"• Status: {st_lbl}\n"
             f"• Mute start time: <b>{s_time}</b>\n"
             f"• Unmute time: <b>{e_time}</b>\n\n"
-            f"<i>During night hours, group messages are muted automatically to prevent disturbance.</i>"
+            f"<i>During night hours, messages are automatically deleted and a customizable 30s warning is sent.</i>\n\n"
+            f"💬 <b>Warning Message Preview:</b>\n"
+            f"<blockquote>{sample_preview}</blockquote>"
         )
     else:
         txt = (
             f"🌙 <b>{title} — ТУНГИ АВТО-ҚУЛФЛАШ</b>\n\n"
             f"• Ҳолати: {st_lbl}\n"
-            f"• Ёзишни тўхтатиш вақти: <b>{s_time}</b>\n"
-            f"• Қайта очиш вақти: <b>{e_time}</b>\n\n"
-            f"<i>Тунги вақтда гуруҳ аъзолари безовта бўлмаслиги учун гуруҳ автоматик қулфланади ва эрталаб очилади.</i>"
+            f"• Бошланиш вақти: <b>{s_time}</b>\n"
+            f"• Тугаш вақти: <b>{e_time}</b>\n\n"
+            f"<i>Тунги вақтда юборилган барча хабарлар бот томонидан автоматик ўчирилади ва фойдаланувчига созланадиган огоҳлантириш берилади (30 сониядан сўнг ўчирилади).</i>\n\n"
+            f"💬 <b>Ҳозирги огоҳлантириш матни:</b>\n"
+            f"<blockquote>{sample_preview}</blockquote>"
         )
     safe_edit_or_send(chat_id, message_id, txt, markup)
 
@@ -6366,6 +6384,21 @@ def handle_all_private_messages(message):
             USER_STATES.pop(user_id, None)
             bot.send_message(message.chat.id, "✅ <b>Медиа лимит огоҳлантириш матни муваффақиятли сақланди!</b>", parse_mode="HTML")
             show_limits_panel(message.chat.id, gid, lang=u_lang)
+            return
+
+        # 2.91 Тунги авто-қулф огоҳлантириш матнини киритиш
+        if action == "wait_autolock_custom_msg":
+            gid = state.get("group_id")
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                raw_custom = message.text or message.caption or ""
+                cursor.execute("UPDATE groups SET autolock_warn_msg = ? WHERE chat_id = ?", (raw_custom, gid))
+                conn.commit()
+                backup_settings_to_file()
+                USER_STATES.pop(user_id, None)
+                bot.send_message(message.chat.id, "✅ <b>Тунги авто-қулф огоҳлантириш матни муваффақиятли сақланди!</b>", parse_mode="HTML")
+            else:
+                USER_STATES.pop(user_id, None)
+            show_autolock_panel(message.chat.id, gid, message_id=None, lang=u_lang)
             return
 
         # 3. Мажбурий канални киритиш
@@ -8788,18 +8821,14 @@ def handle_all_callbacks(call):
         r_al = cursor.fetchone()
         is_now_enabled = bool(r_al and ("autolock_enabled" in r_al) and r_al["autolock_enabled"] == 1)
         if is_now_enabled:
-            bot.answer_callback_query(call.id, "🌙 Тунги авто-қулф ёқилди! ✅")
-            if is_autolock_active_now(r_al):
-                try:
-                    bot.set_chat_permissions(gid, types.ChatPermissions(can_send_messages=False))
-                except Exception as pe:
-                    logging.warning(f"Error locking permissions: {pe}")
+            bot.answer_callback_query(call.id, "🌙 Авто-қулф ёқилди (белгиланган вақтда хабарлар автоматик ўчирилади) ✅")
         else:
-            bot.answer_callback_query(call.id, "☀️ Тунги авто-қулф ўчирилди! 🔓")
-            try:
-                bot.set_chat_permissions(gid, get_full_chat_permissions())
-            except Exception as pe:
-                logging.warning(f"Error restoring permissions: {pe}")
+            bot.answer_callback_query(call.id, "☀️ Авто-қулф ўчирилди! 🔓")
+        # Гуруҳ Telegram созламаларига асло тегмаймиз (ностройкалар ўзгармайди, рухсатлар тўлиқ қолади):
+        try:
+            bot.set_chat_permissions(gid, get_full_chat_permissions())
+        except Exception as pe:
+            logging.warning(f"Error ensuring permissions: {pe}")
         show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
@@ -8828,6 +8857,36 @@ def handle_all_callbacks(call):
         conn.commit()
         backup_settings_to_file()
         bot.answer_callback_query(call.id, f"🔓 Очилиш вақти: {next_t}")
+        show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
+        return
+
+    elif data.startswith("edit_autolock_msg_"):
+        gid = int(data.replace("edit_autolock_msg_", ""))
+        USER_STATES[user_id] = {"action": "wait_autolock_custom_msg", "group_id": gid}
+        m_cancel = InlineKeyboardMarkup()
+        m_cancel.row(InlineKeyboardButton("◀️ Бекор қилиш", callback_data=f"panel_autolock_{gid}"))
+        bot.send_message(
+            chat_id,
+            "✏️ <b>Тунги авто-қулф огоҳлантириш матнини киритинг:</b>\n\n"
+            "Сиз матнга қуйидаги махсус калит сўзларни киритишингиз мумкин:\n"
+            "• <code>{user}</code> — Фойдаланувчи исми ва ҳаволаси\n"
+            "• <code>{start_time}</code> — Қулф бошланиш соати (масалан: 23:00)\n"
+            "• <code>{end_time}</code> — Қулф тугаш соати (масалан: 06:30)\n"
+            "• <code>{group}</code> — Гуруҳ номи\n\n"
+            "<i>Масалан:</i>\n"
+            "<code>Ҳурматли {user}!\nҲозирда ушбу гуруҳ автоматик қулфланган (соат {start_time} дан {end_time} гача).\nСиз соат {end_time} дан кейин гуруҳга ёзишингиз ёки бирор маълумот жўнатишингиз мумкин. Ҳозирда ушбу гуруҳ автоматик қулфланганлиги сабабли юборилган хабарингиз ўчирилди.</code>\n\n"
+            "Янги огоҳлантириш матнини ёзиб юборинг:",
+            reply_markup=m_cancel,
+            parse_mode="HTML"
+        )
+        return
+
+    elif data.startswith("reset_autolock_msg_"):
+        gid = int(data.replace("reset_autolock_msg_", ""))
+        cursor.execute("UPDATE groups SET autolock_warn_msg = '' WHERE chat_id = ?", (gid,))
+        conn.commit()
+        backup_settings_to_file()
+        bot.answer_callback_query(call.id, "✅ Огоҳлантириш матни дастлабки ҳолатга қайтарилди!", show_alert=True)
         show_autolock_panel(chat_id, gid, call.message.message_id, lang=u_lang)
         return
 
@@ -9311,6 +9370,31 @@ def normalize_hm(t_str, default="00:00"):
     except Exception:
         return default
 
+def format_autolock_warning(grp, user_id, u_name):
+    s_time = grp.get("autolock_start_time", "23:00") if grp else "23:00"
+    e_time = grp.get("autolock_end_time", "06:30") if grp else "06:30"
+    g_title = grp.get("title", "Гуруҳ") if grp else "Гуруҳ"
+    u_mention = f"<a href='tg://user?id={user_id}'>{u_name}</a>" if user_id else u_name
+
+    custom_tmpl = grp.get("autolock_warn_msg") if grp else ""
+    if custom_tmpl and custom_tmpl.strip():
+        tmpl = custom_tmpl.strip()
+    else:
+        tmpl = (
+            "🌙 <b>Ҳурматли {user}!</b>\n\n"
+            "Ҳозирда ушбу гуруҳ автоматик қулфланган (соат <b>{start_time}</b> дан <b>{end_time}</b> гача).\n\n"
+            "Сиз соат <b>{end_time}</b> дан кейин гуруҳга ёзишингиз ёки бирор маълумот жўнатишингиз мумкин. "
+            "Ҳозирда ушбу гуруҳ автоматик қулфланганлиги сабабли юборилган хабарингиз ўчирилди.\n\n"
+            "⏳ <i>Ушбу огоҳлантириш 30 сониядан сўнг автоматик ўчириб ташланади.</i>"
+        )
+
+    res = tmpl
+    res = res.replace("{user}", u_mention).replace("{name}", u_mention).replace("{username}", u_mention)
+    res = res.replace("{start_time}", s_time).replace("{start}", s_time)
+    res = res.replace("{end_time}", e_time).replace("{end}", e_time)
+    res = res.replace("{group}", g_title).replace("{title}", g_title)
+    return res
+
 def is_autolock_active_now(g):
     if not g or g.get("autolock_enabled", 0) != 1:
         return False
@@ -9764,28 +9848,24 @@ def group_protection_filter(message):
 
     g_lang = g.get("lang", "uz_kr")
 
-    # ==================== ТУНГИ АВТО-ҚУЛФ ТЕКШИРУВИ (2-РАСМДАГИДЕК ОЧИҚ ҲОЛАТДА ЎЧИРИШ) ====================
+    # ==================== ТУНГИ АВТО-ҚУЛФ ТЕКШИРУВИ (ГУРУҲ СОЗЛАМАЛАРИ ЎЗГАРМАГАН ҲОЛДА ХАБАРЛАРНИ АВТОМАТИК ЎЧИРИШ) ====================
     if not is_user_admin and is_autolock_active_now(g):
         delete_msg_safe(chat_id, message.message_id)
         now_ts = time.time()
         last_warn = _last_autolock_user_warn.get(user_id, 0)
-        if now_ts - last_warn > 120:
+        if now_ts - last_warn > 15:
             _last_autolock_user_warn[user_id] = now_ts
-            s_time = g.get("autolock_start_time", "23:00")
-            e_time = g.get("autolock_end_time", "06:30")
             u_name = html.escape(str(message.from_user.first_name if message.from_user else "Фойдаланувчи"))
+            warn_text = format_autolock_warning(g, user_id, u_name)
             try:
                 warn_msg = bot.send_message(
                     chat_id,
-                    f"🌙 <b>Ҳурматли {u_name}!</b>\n\n"
-                    f"Гуруҳда тунги чеклов вақти (соат <b>{s_time}</b> дан то <b>{e_time}</b> гача).\n"
-                    f"Ушбу вақт оралиғида барча юборилган хабар ва ёзишмалар автоматик тарзда ўчирилади.\n"
-                    f"<i>Илтимос, эрталаб соат {e_time} гача кутинг.</i>",
+                    warn_text,
                     parse_mode="HTML"
                 )
-                threading.Timer(6, lambda: delete_msg_safe(chat_id, warn_msg.message_id)).start()
-            except Exception:
-                pass
+                threading.Timer(30, lambda: delete_msg_safe(chat_id, warn_msg.message_id)).start()
+            except Exception as we:
+                logging.warning(f"Autolock warn error: {we}")
         return
 
     # ==================== МАЖБУРИЙ ОБУНА ТЕКШИРУВИ ====================
@@ -10153,19 +10233,19 @@ def autolock_and_weather_worker():
                         if key_l not in _last_autolock_state:
                             _last_autolock_state[key_l] = True
                             try:
-                                # Гуруҳда ёзишни қулфлаймиз (can_send_messages=False)
-                                bot.set_chat_permissions(gid, types.ChatPermissions(can_send_messages=False))
+                                # Telegram гуруҳ созламаларига асло тегмаймиз (ностройкалар ўзгармайди)
                                 start_custom = grp.get("autolock_start_msg")
                                 if start_custom and start_custom.strip():
                                     start_text = start_custom.replace("{group}", grp.get("title", "")).replace("{start_time}", s_time).replace("{end_time}", e_time)
                                 else:
                                     start_text = (
                                         f"🌙 <b>Гуруҳда тунги чеклов бошланди!</b>\n\n"
-                                        f"Соат <b>{s_time}</b> дан то <b>{e_time}</b> гача гуруҳда ёзиш вақтинча тўхтатилди. "
-                                        f"Эрталаб соат {e_time} да гуруҳ автоматик очилади.\n\n"
+                                        f"Соат <b>{s_time}</b> дан то <b>{e_time}</b> гача гуруҳга юборилган барча хабар ва маълумотлар автоматик тарзда ўчириб ташланади. "
+                                        f"Сиз соат <b>{e_time}</b> дан кейин гуруҳга ёзишингиз мумкин.\n\n"
                                         f"Ҳурмат билан админ 👨‍💼"
                                     )
-                                bot.send_message(gid, start_text, parse_mode="HTML")
+                                m_st = bot.send_message(gid, start_text, parse_mode="HTML")
+                                threading.Timer(3600, lambda: delete_msg_safe(gid, m_st.message_id)).start()
                             except Exception as e:
                                 logging.error(f"Autolock start announcement error: {e}")
                                 
@@ -10175,17 +10255,17 @@ def autolock_and_weather_worker():
                         if key_u not in _last_autolock_state:
                             _last_autolock_state[key_u] = True
                             try:
-                                # Гуруҳни тўлиқ очамиз!
-                                bot.set_chat_permissions(gid, get_full_chat_permissions())
+                                # Telegram созламаларига тегилмайди
                                 end_custom = grp.get("autolock_end_msg")
                                 if end_custom and end_custom.strip():
                                     end_text = end_custom.replace("{group}", grp.get("title", "")).replace("{end_time}", e_time)
                                 else:
                                     end_text = (
                                         f"☀️ <b>Кунингиз хайрли ва баракали бўлсин!</b>\n\n"
-                                        f"Гуруҳда тунги чеклов якунланди. Гуруҳ мулоқот ва савол-жавоб учун тўлиқ очилди! ✅"
+                                        f"Гуруҳда тунги чеклов якунланди. Гуруҳ мулоқот ва савол-жавоб учун очиқ! ✅"
                                     )
-                                bot.send_message(gid, end_text, parse_mode="HTML")
+                                m_end = bot.send_message(gid, end_text, parse_mode="HTML")
+                                threading.Timer(3600, lambda: delete_msg_safe(gid, m_end.message_id)).start()
                             except Exception as e:
                                 logging.error(f"Autolock end announcement error: {e}")
         except Exception as e:
