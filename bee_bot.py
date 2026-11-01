@@ -68,7 +68,7 @@ except ImportError:
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import (
     ChatPermissions,
     InlineKeyboardButton,
@@ -445,10 +445,16 @@ def get_next_sequential_video() -> Optional[dict]:
     return item
 
 def format_video_card_text(v: dict, script: str = "cyrillic") -> str:
-    title = apply_script(v.get("title", ""), script)
-    channel = apply_script(v.get("channel", "Asalarichilik.Uz TV"), script)
-    dur = apply_script(v.get("duration", "15 дақиқа"), script)
-    desc = apply_script(v.get("description", ""), script)
+    if script == "latin":
+        title = v.get("title_lat") or apply_script(v.get("title", ""), script)
+        channel = v.get("channel_lat") or apply_script(v.get("channel", "Asalarichilik.Uz TV"), script)
+        dur = v.get("duration_lat") or apply_script(v.get("duration", "15 daqiqa"), script)
+        desc = v.get("description_lat") or apply_script(v.get("description", ""), script)
+    else:
+        title = v.get("title", "")
+        channel = v.get("channel", "Asalarichilik.Uz TV")
+        dur = v.get("duration", "15 дақиқа")
+        desc = v.get("description", "")
     url = v.get("url", "https://youtube.com/@asalarichilikuztv?feature=shared")
     tags = v.get("tags", "#Асаларичилик #ВидеоДарс")
 
@@ -2191,21 +2197,23 @@ async def on_channel_post(message: types.Message):
     "🔙 Орқага", "Орқага", "🔙 Ортга", "Ортга", "◀️ Орқага",
     "🔙 Орқага (Бўлимга қайтиш)", "🔙 Орқага (Асосийга қайтиш)",
     "Ortga", "Orqaga"
-}))
+}), StateFilter("*"))
 async def generic_back_btn_cmd(message: types.Message, state: FSMContext = None):
     if state:
         await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     await message.answer(
         "🔙 Сиз олдинги бўлимга (Асосий Менюга) қайтдингиз.\nКеракли хизматни танланг:",
         reply_markup=get_main_reply_keyboard(),
         parse_mode="Markdown"
     )
 
-@dp.message(Command("start"))
-@dp.message(F.text.in_({"🚀 Старт", "Старт", "🏠 Асосий Меню"}))
+@dp.message(Command("start"), StateFilter("*"))
+@dp.message(F.text.in_({"🚀 Старт", "Старт", "🏠 Асосий Меню", "Асосий Меню"}), StateFilter("*"))
 async def start_cmd(message: types.Message, state: FSMContext = None):
     if state:
         await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     user_id = message.from_user.id
     chat_type = message.chat.type
 
@@ -3709,8 +3717,20 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-@dp.message(F.text == "⚙️ Созламалар")
-@dp.message(Command("settings"))
+@dp.message(F.text.in_({"⚙️ Созламалар", "Созламалар", "⚙️ Sozlamalar", "Sozlamalar"}), StateFilter("*"))
+@dp.message(Command("settings"), StateFilter("*"))
+async def open_settings_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+        return
+    text = (
+        "⚙️ **БОТ ВА АВТО-ПОСТИНГ СОЗЛАМАЛАРИ:**\n\n"
+        "Қуйидаги бўлимлар орқали автоматик юбориш вақти, расмий канал ва гуруҳ манзиллари ҳамда реакцияларни ўзгартиришингиз мумкин:"
+    )
+    kb = build_settings_inline()
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
 # ==============================================================================
 # 18.2. AVTO-POSTING VA JADVAL CALLBACK HANDLERLARI
@@ -5777,9 +5797,14 @@ async def on_chan_test_post(call: types.CallbackQuery):
 @dp.message(F.text.in_({
     "➕ Гуруҳга қўшиш", "Гуруҳга қўшиш", "➕ Груҳга қўшиш", "Груҳга қўшиш",
     "гуруҳга қўшиш", "груҳга қўшиш", "гуруҳга", "груҳга",
+    "➕ Гуҳга қўшиш", "Гуҳга қўшиш", "гуҳга қўшиш", "гуҳга",
+    "группага қўшиш", "группага", "группа",
     "➕ Guruhga qo'shish", "Guruhga qo'shish", "Guruhga qoshish"
-}))
-async def add_to_group_guide(message: types.Message):
+}), StateFilter("*"))
+async def add_to_group_guide(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     text = (
         "➕ **БОТНИ ГУРУҲГА ҚЎШИШ ЙЎРИҚНОМАСИ:**\n\n"
         "Ботни ўз асаларичилик гуруҳингизга улаш учун қуйидаги «Гуруҳга қўшиш» тугмасини босинг ёки:\n\n"
@@ -5794,15 +5819,19 @@ async def add_to_group_guide(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Ҳозироқ гуруҳга қўшиш", url="https://t.me/Asalarichilikuz_bot?startgroup=true")],
         [InlineKeyboardButton(text="👥 Расмий гуруҳимиз: @asalarichilik_uzbekistan", url="https://t.me/asalarichilik_uzbekistan")],
-        [InlineKeyboardButton(text="👑 Гуруҳлар назорати", callback_data="groups_ctrl:refresh")]
+        [InlineKeyboardButton(text="👑 Гуруҳлар назорати", callback_data="groups_ctrl:refresh")],
+        [InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"), InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")]
     ])
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.message(F.text.in_({
     "➕ Каналга қўшиш", "Каналга қўшиш", "каналга қўшиш", "каналга",
     "➕ Kanalga qo'shish", "Kanalga qo'shish", "Kanalga qoshish"
-}))
-async def add_to_channel_guide(message: types.Message):
+}), StateFilter("*"))
+async def add_to_channel_guide(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     text = (
         "➕ **БОТНИ КАНАЛГА ҚЎШИШ ЙЎРИҚНОМАСИ:**\n\n"
         "Ботни асаларичилик каналингизга улаш учун қуйидаги «Каналга қўшиш» тугмасини босинг ёки:\n\n"
@@ -5814,7 +5843,8 @@ async def add_to_channel_guide(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Ҳозироқ каналга қўшиш", url="https://t.me/Asalarichilikuz_bot?startchannel=true")],
         [InlineKeyboardButton(text="📢 Расмий каналимиз: @uz_asalarichilik", url="https://t.me/uz_asalarichilik")],
-        [InlineKeyboardButton(text="📢 Каналлар бошқаруви", callback_data="channel_ctrl:refresh")]
+        [InlineKeyboardButton(text="📢 Каналлар бошқаруви", callback_data="channel_ctrl:refresh")],
+        [InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"), InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")]
     ])
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
@@ -5982,11 +6012,17 @@ def build_group_settings_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     "⚙️ Гуруҳ созламалар", "Гуруҳ созламалар",
     "⚙️ Груҳ созламалар", "Груҳ созламалар",
     "гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар",
-    "созламалари", "созламалар", "созлама", "Guruh sozlamalari", "Gruh sozlamalari"
-}))
-async def group_settings_btn_cmd(message: types.Message):
-    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+    "созламалари", "созламалар", "созлама", "Guruh sozlamalari", "Gruh sozlamalari",
+    "⚙️ Guruh sozlamalari"
+}), StateFilter("*"))
+async def group_settings_btn_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+    if message.chat.type != "private":
         return
+    if message.from_user.id != OWNER_ID:
+        return await message.answer("ℹ️ **Гуруҳ созламалари** бўлими фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
     text, kb = build_group_settings_dashboard()
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
@@ -6045,10 +6081,15 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     "Груҳлар назорати", "Груҳ назорати",
     "гуруҳлар назорати", "груҳлар назорати", "гуруҳ назорати", "груҳ назорати",
     "гуруҳлар", "груҳлар", "гуруҳ", "груҳ", "Guruhlar nazorati", "Gruh nazorati"
-}))
-async def groups_control_cmd(message: types.Message):
-    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+}), StateFilter("*"))
+async def groups_control_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+    if message.chat.type != "private":
         return
+    if message.from_user.id != OWNER_ID:
+        return await message.answer("ℹ️ **Гуруҳлар назорати** бўлими фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
     text, kb = build_groups_control_dashboard()
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
@@ -6119,10 +6160,15 @@ def build_channel_mgmt_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     "Каналлар назорати", "Канал назорати",
     "каналлар бошқаруви", "канал бошқаруви", "каналлар назорати", "канал назорати",
     "каналлар", "канал", "Kanallar boshqaruvi", "Kanal nazorati"
-}))
-async def channel_mgmt_cmd(message: types.Message):
-    if message.chat.type != "private" or message.from_user.id != OWNER_ID:
+}), StateFilter("*"))
+async def channel_mgmt_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+    if message.chat.type != "private":
         return
+    if message.from_user.id != OWNER_ID:
+        return await message.answer("ℹ️ **Каналлар бошқаруви** бўлими фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
     text, kb = build_channel_mgmt_dashboard()
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
@@ -7063,10 +7109,13 @@ def build_video_admin_card_and_kb(idx: int, target_mode: str) -> tuple[str, Inli
 
 @dp.message(F.text.in_({
     "🎬 Асаларичилик видеолари", "Асаларичилик видеолари", "Видеолар", "Видео дарсликлар",
-    "🎬 Asalarichilik videolari", "Asalarichilik videolari", "Videolar"
-}))
-async def beekeeping_video_menu_cmd(message: types.Message):
+    "🎬 Asalarichilik videolari", "Asalarichilik videolari", "Videolar", "video"
+}), StateFilter("*"))
+async def beekeeping_video_menu_cmd(message: types.Message, state: FSMContext = None):
     global CURRENT_ADMIN_VIDEO_IDX, CURRENT_VIDEO_TARGET
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     if message.chat.type != "private":
         return
     if message.from_user.id != OWNER_ID:
@@ -7151,11 +7200,6 @@ async def on_video_action_cb(call: types.CallbackQuery):
 
         mark_item_as_sent("video", v.get("id"), v.get("title"))
         await call.answer(f"✅ Видео {sent_cnt} та манзилга юборилди!", show_alert=True)
-
-@dp.message(F.text.in_({
-    "🎓 Илмий тадқиқот тестлари", "🎓 Илмий тестлар", "Илмий тадқиқот тестлари",
-    "Илмий тестлар", "Тестлар", "🎓 Асаларичилик илмий тестлари", "илмий тестлар"
-}))
 
 # ==============================================================================
 # ТЕСТНИ ҲОЗИРОҚ БОШЛАШ, ВАҚТ БЕЛГИЛАШ ВА ШОШИЛИНЧ ТАҚДИРЛАШ
@@ -7320,7 +7364,15 @@ async def on_sci_time_picker(call: types.CallbackQuery):
         await call.message.answer(prompt_txt, parse_mode="Markdown")
         await call.answer()
 
-async def scientific_tests_menu_cmd(message: types.Message):
+@dp.message(F.text.in_({
+    "🎓 Илмий тадқиқот тестлари", "🎓 Илмий тестлар", "Илмий тадқиқот тестлари",
+    "Илмий тестлар", "Тестлар", "🎓 Асаларичилик илмий тестлари", "илмий тестлар",
+    "🎓 Ilmiy tadqiqot testlari", "Ilmiy testlar", "Testlar"
+}), StateFilter("*"))
+async def scientific_tests_menu_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     if message.chat.type != "private":
         return
     if message.from_user.id != OWNER_ID:
@@ -8003,6 +8055,15 @@ async def private_chat_handler(message: types.Message):
         return
 
     clean_text = message.text.strip().lower()
+
+    # Агар фойдаланувчи меню тугмасини босган бўлса, кутиш ҳолатини бекор қилиш
+    is_menu_action = any(k in clean_text for k in [
+        "гуруҳ", "груҳ", "гуҳ", "группа", "созлама", "видео", "тест", "канал", "янгилик",
+        "апитерапия", "викторина", "сўровнома", "реклама", "қўлланма", "эгаси",
+        "меню", "орқага", "start", "старт", "guruh", "video", "test", "sozlama"
+    ])
+    if is_menu_action and message.from_user.id in ADMIN_WAITING_INPUT:
+        ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
 
     # 0. Админ махсус вақт ва дақиқа киритиш текшируви
     state = ADMIN_WAITING_INPUT.get(message.from_user.id)
