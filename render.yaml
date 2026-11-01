@@ -6,7 +6,7 @@ services:
     startCommand: python3 bot.py
     envVars:
       - key: BOT_TOKEN
-        value: 8906652795:AAEfFATlQ2GAliDAjNW0kSFLGVTAElbY-W8
+        value: 8643717970:AAE27V6dfb-w2q_mpiqgqVsmucGPdlqY2eU
       - key: GEMINI_API_KEY
         value: AQ.Ab8RN6LDgd1ss1N0NxYV4-TngnM_cGtpHsN0IASkFbJttCXvsg
       - key: ADMIN_ID

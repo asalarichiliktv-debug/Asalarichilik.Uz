@@ -154,10 +154,10 @@ logging.basicConfig(
 )
 
 # 1. Токен ва Эгаси маълумотлари
-TOKEN = os.getenv("BOT_TOKEN", "8906652795:AAEfFATlQ2GAliDAjNW0kSFLGVTAElbY-W8")
+TOKEN = os.getenv("BOT_TOKEN", "8643717970:AAE27V6dfb-w2q_mpiqgqVsmucGPdlqY2eU")
 OWNER_ID = int(os.getenv("ADMIN_ID", "2047501151"))  # Бот асосий эгаси ID рақами
 OWNER_USERNAME = "@JamshidjonDavronov"
-BOT_USERNAME = "Asalarichiliktv_bot"
+BOT_USERNAME = "Asalarichilikuztv_bot"
 BOT_NAME = "Asalarichilik.Uz"
 
 # API Timeouts

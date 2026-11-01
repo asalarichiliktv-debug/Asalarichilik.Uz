@@ -126,7 +126,6 @@ RAW_NEWS_TOPICS = [
      "Ақлли Арихоналар Маркази", "Инновациялар")
 ]
 
-# Generate remaining up to 100 with comprehensive topical coverage
 SUB_CATEGORIES = [
     ("Касалликлар ва Даволаш", "Kasalliklar va Davolash", "Ветеринария Илмий Текширув Маркази"),
     ("Асал берувчи ўсимликлар", "Asal beruvchi o'simliklar", "Ботаника ва Фитотерапия Институти"),
