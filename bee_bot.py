@@ -45,6 +45,36 @@ def get_uzb_now() -> datetime:
     """O'zbekiston (Toshkent, UTC+5) mahalliy vaqtini qaytaradi"""
     return datetime.now(UZB_TZ)
 
+def normalize_hhmm(t: Any, default: str = "18:00") -> str:
+    """Vaqt satrini (masalan '20', '20:00', '19:5', '8:30') standart 'HH:MM' formatga keltiradi"""
+    if not t:
+        return default
+    t = str(t).strip()
+    if ":" in t:
+        parts = t.split(":")
+        try:
+            h = int(parts[0]) % 24
+            m = int(parts[1]) % 60
+            return f"{h:02d}:{m:02d}"
+        except Exception:
+            return default
+    else:
+        try:
+            h = int(t) % 24
+            return f"{h:02d}:00"
+        except Exception:
+            return default
+
+def is_within_minutes(current_hhmm: str, target_hhmm: str, max_mins: int = 15) -> bool:
+    """Hozirgi vaqt belgilangan vaqtdan o'tib ketgan bo'lsa (0 dan max_mins daqiqagacha), o'tkazib yubormaslik uchun True qaytaradi"""
+    try:
+        ch, cm = map(int, current_hhmm.split(":"))
+        th, tm = map(int, target_hhmm.split(":"))
+        diff = (ch * 60 + cm) - (th * 60 + tm)
+        return 0 <= diff <= max_mins
+    except Exception:
+        return False
+
 from typing import Dict, List, Optional, Any, Union
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -2671,14 +2701,31 @@ async def on_quiz_action(call: types.CallbackQuery, state: FSMContext):
         await call.answer(text, show_alert=True)
 
     elif act == "sched_menu":
-        times = ["07:00", "08:00", "09:00", "12:00", "18:00", "20:00", "Ўчириш"]
-        rows = []
+        settings = get_settings()
+        is_en = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
+        cur_t = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "10:00")))
+        toggle_label = "🟢 Ҳолати: Ёқилган ✅" if is_en else "🔴 Ҳолати: Ўчирилган ❌"
+
+        times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
+        rows = [
+            [InlineKeyboardButton(text=toggle_label, callback_data="qsched_toggle")]
+        ]
+        time_row = []
         for t in times:
-            rows.append([InlineKeyboardButton(text=f"⏰ {t}", callback_data=f"qsched_set:{t}")])
+            mark = "🔹 " if t == cur_t and is_en else ""
+            time_row.append(InlineKeyboardButton(text=f"{mark}{t}", callback_data=f"qsched_set:{t}"))
+            if len(time_row) == 3:
+                rows.append(time_row)
+                time_row = []
+        if time_row:
+            rows.append(time_row)
         rows.append([InlineKeyboardButton(text="« Орқага", callback_data="qsched_back")])
         await call.message.edit_text(
-            "⏰ **Кунлик автоматик викторина юбориш вақтини танланг:**\n\n"
-            "Танланган соатда бот барча уланган канал ва гуруҳларга навбатдаги саволни эълон қилади.",
+            f"🐝 **АВТОМАТИК ВИКТОРИНА ВА СЎРОВНОМАЛАР ЖАДВАЛИ**\n\n"
+            f"• **Жорий ҳолати:** {'🟢 Ёқилган (Фаол)' if is_en else '🔴 Ўчирилган'}\n"
+            f"• **Юбориш вақти:** {cur_t}\n\n"
+            "Ҳар куни ушбу соатда бот барча уланган канал ва гуруҳларга навбатдаги янги саволни эълон қилади.\n"
+            "Функцияни ёқиш ёки ўчириш учун юқоридаги тугмани босинг:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
             parse_mode="Markdown"
         )
@@ -2781,15 +2828,51 @@ async def on_quiz_target_go(call: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("qsched_set:"))
 async def on_sched_time_set(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
     val = call.data.split(":")[1]
-    if val == "Ўчириш":
-        update_setting("quiz_schedule_enabled", False)
-        await call.answer("Авто-викторина ўчирилди!")
-    else:
-        update_setting("quiz_schedule_enabled", True)
-        update_setting("quiz_schedule_time", val)
-        await call.answer(f"Авто-викторина вақти соат {val} га созланди! ✅")
+    norm_val = normalize_hhmm(val, "10:00")
+    update_setting("quiz_schedule_enabled", True)
+    update_setting("quiz_auto_enabled", True)
+    update_setting("quiz_schedule_time", norm_val)
+    update_setting("quiz_auto_time", norm_val)
+    await call.answer(f"Авто-викторина вақти соат {norm_val} га созланди! ✅")
     await call.message.edit_text("🐝 **АСАЛАРИЧИЛИК ВИКТОРИНА ВА СЎРОВНОМАЛАР МАРКАЗИ**", reply_markup=build_quiz_menu_inline(), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "qsched_toggle")
+async def on_quiz_sched_toggle(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    settings = get_settings()
+    cur = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
+    new_state = not cur
+    update_setting("quiz_auto_enabled", new_state)
+    update_setting("quiz_schedule_enabled", new_state)
+    await call.answer(f"Авто-викторина {'ёқилди 🟢' if new_state else 'ўчирилди 🔴'}")
+    # Sched menyuni yangilash
+    cur_t = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "10:00")))
+    toggle_label = "🟢 Ҳолати: Ёқилган ✅" if new_state else "🔴 Ҳолати: Ўчирилган ❌"
+    times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
+    rows = [[InlineKeyboardButton(text=toggle_label, callback_data="qsched_toggle")]]
+    time_row = []
+    for t in times:
+        mark = "🔹 " if t == cur_t and new_state else ""
+        time_row.append(InlineKeyboardButton(text=f"{mark}{t}", callback_data=f"qsched_set:{t}"))
+        if len(time_row) == 3:
+            rows.append(time_row)
+            time_row = []
+    if time_row:
+        rows.append(time_row)
+    rows.append([InlineKeyboardButton(text="« Орқага", callback_data="qsched_back")])
+    await call.message.edit_text(
+        f"🐝 **АВТОМАТИК ВИКТОРИНА ВА СЎРОВНОМАЛАР ЖАДВАЛИ**\n\n"
+        f"• **Жорий ҳолати:** {'🟢 Ёқилган (Фаол)' if new_state else '🔴 Ўчирилган'}\n"
+        f"• **Юбориш вақти:** {cur_t}\n\n"
+        "Ҳар куни ушбу соатда бот барча уланган канал ва гуруҳларга навбатдаги янги саволни эълон қилади.\n"
+        "Функцияни ёқиш ёки ўчириш учун юқоридаги тугмани босинг:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(F.data == "qsched_back")
 async def on_sched_back(call: types.CallbackQuery):
@@ -3453,28 +3536,81 @@ async def on_news_action(call: types.CallbackQuery, state: FSMContext):
         return
 
     elif act == "sched_menu":
-        times = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "Ўчириш"]
-        rows = []
+        settings = get_settings()
+        is_en = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
+        cur_t = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "14:00")))
+        toggle_label = "🟢 Ҳолати: Ёқилган ✅" if is_en else "🔴 Ҳолати: Ўчирилган ❌"
+
+        times = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"]
+        rows = [
+            [InlineKeyboardButton(text=toggle_label, callback_data="nsched_toggle")]
+        ]
+        time_row = []
         for t in times:
-            rows.append([InlineKeyboardButton(text=f"⏰ {t}", callback_data=f"nsched_set:{t}")])
+            mark = "🔹 " if t == cur_t and is_en else ""
+            time_row.append(InlineKeyboardButton(text=f"{mark}{t}", callback_data=f"nsched_set:{t}"))
+            if len(time_row) == 3:
+                rows.append(time_row)
+                time_row = []
+        if time_row:
+            rows.append(time_row)
         rows.append([InlineKeyboardButton(text="« Орқага", callback_data="nsched_back")])
         await call.message.edit_text(
-            "⏰ **Кунлик автоматик янгиликлар юбориш вақтини танланг:**",
+            f"📰 **АВТОМАТИК ЯНГИЛИКЛАР ЖАДВАЛИ ВА СОЗЛАМАСИ**\n\n"
+            f"• **Жорий ҳолати:** {'🟢 Ёқилган (Фаол)' if is_en else '🔴 Ўчирилган'}\n"
+            f"• **Юбориш вақти:** {cur_t}\n\n"
+            "Ҳар куни ушбу соатда бот барча уланган канал ва гуруҳларга дунё асаларичилиги янгиликларидан энг муҳимини автоматик жойлайди.\n"
+            "Функцияни ёқиш ёки ўчириш учун юқоридаги тугмани босинг:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
             parse_mode="Markdown"
         )
 
 @dp.callback_query(F.data.startswith("nsched_set:"))
 async def on_news_sched_time_set(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
     val = call.data.split(":")[1]
-    if val == "Ўчириш":
-        update_setting("news_schedule_enabled", False)
-        await call.answer("Авто-янгилик ўчирилди!")
-    else:
-        update_setting("news_schedule_enabled", True)
-        update_setting("news_schedule_time", val)
-        await call.answer(f"Авто-янгилик вақти соат {val} га созланди! ✅")
+    norm_val = normalize_hhmm(val, "14:00")
+    update_setting("news_schedule_enabled", True)
+    update_setting("news_auto_enabled", True)
+    update_setting("news_schedule_time", norm_val)
+    update_setting("news_auto_time", norm_val)
+    await call.answer(f"Авто-янгилик вақти соат {norm_val} га созланди! ✅")
     await call.message.edit_text("📰 **АСАЛАРИЧИЛИК ЯНГИЛИКЛАРИ ВА МАВСУМИЙ ТАВСИЯЛАР**", reply_markup=build_news_menu_inline(), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "nsched_toggle")
+async def on_news_sched_toggle(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    settings = get_settings()
+    cur = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
+    new_state = not cur
+    update_setting("news_auto_enabled", new_state)
+    update_setting("news_schedule_enabled", new_state)
+    await call.answer(f"Авто-янгилик {'ёқилди 🟢' if new_state else 'ўчирилди 🔴'}")
+    cur_t = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "14:00")))
+    toggle_label = "🟢 Ҳолати: Ёқилган ✅" if new_state else "🔴 Ҳолати: Ўчирилган ❌"
+    times = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"]
+    rows = [[InlineKeyboardButton(text=toggle_label, callback_data="nsched_toggle")]]
+    time_row = []
+    for t in times:
+        mark = "🔹 " if t == cur_t and new_state else ""
+        time_row.append(InlineKeyboardButton(text=f"{mark}{t}", callback_data=f"nsched_set:{t}"))
+        if len(time_row) == 3:
+            rows.append(time_row)
+            time_row = []
+    if time_row:
+        rows.append(time_row)
+    rows.append([InlineKeyboardButton(text="« Орқага", callback_data="nsched_back")])
+    await call.message.edit_text(
+        f"📰 **АВТОМАТИК ЯНГИЛИКЛАР ЖАДВАЛИ ВА СОЗЛАМАСИ**\n\n"
+        f"• **Жорий ҳолати:** {'🟢 Ёқилган (Фаол)' if new_state else '🔴 Ўчирилган'}\n"
+        f"• **Юбориш вақти:** {cur_t}\n\n"
+        "Ҳар куни ушбу соатда бот барча уланган канал ва гуруҳларга дунё асаларичилиги янгиликларидан энг муҳимини автоматик жойлайди.\n"
+        "Функцияни ёқиш ёки ўчириш учун юқоридаги тугмани босинг:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(F.data == "nsched_back")
 async def on_news_sched_back(call: types.CallbackQuery):
@@ -3688,12 +3824,28 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
     auto_s = "✅ Ёқилган" if settings.get("auto_share", True) else "❌ Ўчирилган"
     auto_c = "✅ Ёқилган" if settings.get("auto_comment", True) else "❌ Ўчирилган"
     script = "Крил 🇺🇿" if settings.get("script_mode", "cyrillic") == "cyrillic" else "Lotin 🇺🇿"
-    q_time = settings.get("quiz_schedule_time", "09:00") if settings.get("quiz_schedule_enabled", True) else "Ўчирилган"
-    n_time = settings.get("news_schedule_time", "14:00") if settings.get("news_schedule_enabled", True) else "Ўчирилган"
     preset_str = " ".join(settings.get("reactions", []))
     off_channel = get_official_channel()
     off_group = get_official_group()
     chan_title = get_channel_title()
+
+    sci_s = get_sci_settings()
+    sci_en = sci_s.get("auto_enabled", True)
+    sci_st = normalize_hhmm(sci_s.get("start_time", "18:00"))
+    sci_et = normalize_hhmm(sci_s.get("end_time", "19:00"))
+    sci_status = f"🟢 {sci_st}-{sci_et} (Фаол)" if sci_en else "🔴 Ўчирилган"
+
+    q_en = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
+    q_time = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "10:00")))
+    q_status = f"🟢 {q_time} (Фаол)" if q_en else "🔴 Ўчирилган"
+
+    n_en = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
+    n_time = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "14:00")))
+    n_status = f"🟢 {n_time} (Фаол)" if n_en else "🔴 Ўчирилган"
+
+    a_en = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
+    a_time = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "16:00")))
+    a_status = f"🟢 {a_time} (Фаол)" if a_en else "🔴 Ўчирилган"
 
     t_mode = settings.get("post_target_mode", "ask")
     if t_mode == "channel":
@@ -3726,9 +3878,10 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
         [InlineKeyboardButton(text=f"👥 Расмий гуруҳ: {off_group}", callback_data="set_change_group")],
         [InlineKeyboardButton(text=f"🏷 Канал номи: {chan_title}", callback_data="set_change_channel_title")],
         [InlineKeyboardButton(text=f"🔤 Ёзув тури: {script}", callback_data=f"set_toggle_script:{src}")],
-        [InlineKeyboardButton(text=f"⏰ Авто-викторина: {q_time}", callback_data="quiz_act:sched_menu")],
-        [InlineKeyboardButton(text=f"📰 Авто-янгилик: {n_time}", callback_data="news_act:sched_menu")],
-        [InlineKeyboardButton(text=f"🌿 Авто-апитерапия: {settings.get('apitherapy_schedule_time', '16:00') if settings.get('apitherapy_schedule_enabled', True) else 'Ўчирилган'}", callback_data="api_act:sched_menu")],
+        [InlineKeyboardButton(text=f"🎓 Авто-илмий тест: {sci_status}", callback_data="sci_act:settings")],
+        [InlineKeyboardButton(text=f"⏰ Авто-викторина: {q_status}", callback_data="quiz_act:sched_menu")],
+        [InlineKeyboardButton(text=f"📰 Авто-янгилик: {n_status}", callback_data="news_act:sched_menu")],
+        [InlineKeyboardButton(text=f"🌿 Авто-апитерапия: {a_status}", callback_data="api_act:sched_menu")],
         [InlineKeyboardButton(text="📥 100 та савол ва янгиликни юклаш (bee_news_collection)", callback_data="sync_bee_news_collection")],
         [InlineKeyboardButton(text="📋 Уланган канал ва гуруҳлар", callback_data="set_menu:chats")]
     ]
@@ -3848,13 +4001,15 @@ async def on_autopost_toggle(call: types.CallbackQuery):
     settings = get_settings()
     cur = settings.get(key, True)
     update_setting(key, not cur)
-    # Also sync legacy keys if needed
     if cat == "news":
         update_setting("news_schedule_enabled", not cur)
+        update_setting("news_auto_enabled", not cur)
     elif cat == "quiz":
         update_setting("quiz_schedule_enabled", not cur)
+        update_setting("quiz_auto_enabled", not cur)
     elif cat == "api":
         update_setting("apitherapy_schedule_enabled", not cur)
+        update_setting("apitherapy_auto_enabled", not cur)
 
     await call.answer(f"Ҳолат: {'Ўчирилди ❌' if cur else 'Ёқилди ✅'}")
     await on_autopost_category_menu(call)
@@ -4942,11 +5097,11 @@ async def daily_scheduler_loop():
 
             # 1. Avtomatik Yangiliklar
             news_enabled = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
-            news_time = settings.get("news_auto_time", settings.get("news_schedule_time", "14:00"))
+            news_time = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "14:00")))
             news_target = settings.get("news_auto_target", "both")
             key_n = f"news_{today_str}_{news_time}"
 
-            if news_enabled and cur_hhmm == news_time and not log.get(key_n):
+            if news_enabled and (cur_hhmm == news_time or (cur_hhmm > news_time and is_within_minutes(cur_hhmm, news_time, 15))) and not log.get(key_n):
                 logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {news_target}")
                 targets = get_destinations_for_target(news_target)
                 news = get_unsent_news()
@@ -4974,11 +5129,11 @@ async def daily_scheduler_loop():
 
             # 2. Avtomatik Viktorina va So'rovnomalar
             quiz_enabled = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
-            quiz_time = settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "10:00"))
+            quiz_time = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "10:00")))
             quiz_target = settings.get("quiz_auto_target", "both")
             key_q = f"quiz_{today_str}_{quiz_time}"
 
-            if quiz_enabled and cur_hhmm == quiz_time and not log.get(key_q):
+            if quiz_enabled and (cur_hhmm == quiz_time or (cur_hhmm > quiz_time and is_within_minutes(cur_hhmm, quiz_time, 15))) and not log.get(key_q):
                 logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {quiz_target}")
                 targets = get_destinations_for_target(quiz_target)
                 poll_type = settings.get("poll_type", "quiz")
@@ -4994,11 +5149,11 @@ async def daily_scheduler_loop():
 
             # 3. Avtomatik Apiterapiya
             api_enabled = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
-            api_time = settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "16:00"))
+            api_time = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "16:00")))
             api_target = settings.get("apitherapy_auto_target", "both")
             key_a = f"apitherapy_{today_str}_{api_time}"
 
-            if api_enabled and cur_hhmm == api_time and not log.get(key_a):
+            if api_enabled and (cur_hhmm == api_time or (cur_hhmm > api_time and is_within_minutes(cur_hhmm, api_time, 15))) and not log.get(key_a):
                 logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {api_target}")
                 targets = get_destinations_for_target(api_target)
                 item = get_unsent_apitherapy()
@@ -5025,8 +5180,8 @@ async def daily_scheduler_loop():
             # 5. Avtomatik Asalarichilik Ilmiy Testlari (10 talik A, B, C, D, E) ва ТАҚДИРЛАШ
             sci_settings = get_sci_settings() if 'get_sci_settings' in globals() else {}
             sci_enabled = sci_settings.get("auto_enabled", True)
-            sci_start_time = sci_settings.get("start_time", sci_settings.get("auto_time", "18:00"))
-            sci_end_time = sci_settings.get("end_time", "19:00")
+            sci_start_time = normalize_hhmm(sci_settings.get("start_time", sci_settings.get("auto_time", "18:00")))
+            sci_end_time = normalize_hhmm(sci_settings.get("end_time", "19:00"))
             key_sci_pre = f"sci_pre_{today_str}_{sci_start_time}"
             key_sci_start = f"sci_start_{today_str}_{sci_start_time}"
             key_sci_award = f"sci_award_{today_str}_{sci_end_time}"
@@ -5038,7 +5193,7 @@ async def daily_scheduler_loop():
                     target_min = int(sci_start_time.split(":")[1])
                     pre_hour = (target_hour - 1) % 24
                     pre_time_str = f"{pre_hour:02d}:{target_min:02d}"
-                    if cur_hhmm == pre_time_str and not log.get(key_sci_pre):
+                    if (cur_hhmm == pre_time_str or (cur_hhmm > pre_time_str and is_within_minutes(cur_hhmm, pre_time_str, 15))) and not log.get(key_sci_pre):
                         logging.info(f"⏰ Ilmiy testdan 1 soat oldingi xabarnoma vaqti keldi ({cur_hhmm})!")
                         await dispatch_scientific_pre_notice(bot)
                         log[key_sci_pre] = True
@@ -5046,36 +5201,39 @@ async def daily_scheduler_loop():
                 except Exception as pe:
                     logging.error(f"Sci pre-notice error: {pe}")
 
-            # Testni boshlash vaqti (masalan 18:00 da)
-            if sci_enabled and cur_hhmm == sci_start_time and not log.get(key_sci_start):
+            # Testni boshlash vaqti (masalan 18:00 yoki 19:05 da)
+            if sci_enabled and (cur_hhmm == sci_start_time or (cur_hhmm > sci_start_time and is_within_minutes(cur_hhmm, sci_start_time, 15))) and not log.get(key_sci_start):
                 logging.info(f"🚀 Avto Ilmiy Test boshlanish vaqti keldi ({cur_hhmm})!")
                 await launch_full_scientific_test(bot)
                 log[key_sci_start] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # Test yakuni va AVTOMATIK TAQDIRLASH (masalan 19:00 da)
+            # Test yakuni va AVTOMATIK TAQDIRLASH (masalan 19:00 yoki 20:00 da)
             sci_sess = get_sci_session() if 'get_sci_session' in globals() else {}
-            if (cur_hhmm == sci_end_time or cur_hhmm == sci_sess.get("end_time")) and not log.get(key_sci_award):
+            sess_end_time = normalize_hhmm(sci_sess.get("end_time", sci_end_time))
+            if (cur_hhmm == sci_end_time or cur_hhmm == sess_end_time or (cur_hhmm > sci_end_time and is_within_minutes(cur_hhmm, sci_end_time, 15))) and not log.get(key_sci_award):
                 if sci_sess.get("is_active"):
                     logging.info(f"🏆 Test vaqti tugadi ({cur_hhmm})! G'oliblarni avtomatik taqdirlash boshlandi...")
                     await broadcast_scientific_results(bot)
                     log[key_sci_award] = True
                     save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # 4. Kunlik yangi ilmiy yangilik zaxirasini tekshirish
+            # 4. Kunlik yangi ilmiy yangilik zaxirasini tekshirish (asinxron fon rejimida)
             key_curate = f"auto_news_curate_{today_str}"
             if not log.get(key_curate):
-                try:
-                    await generate_news_with_ai()
-                    log[key_curate] = True
-                    save_json_file(SCHEDULER_LOG_FILE, log)
-                except Exception as ce:
-                    logging.warning(f"Auto-curate news error: {ce}")
+                log[key_curate] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
+                async def _bg_curate():
+                    try:
+                        await generate_news_with_ai()
+                    except Exception as ce:
+                        logging.warning(f"Auto-curate news error: {ce}")
+                asyncio.create_task(_bg_curate())
 
         except Exception as e:
             logging.error(f"Scheduler loop xatolik: {e}")
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
 
 # ==============================================================================
 # 25. MAIN ENTRY POINT
@@ -5508,8 +5666,10 @@ async def on_api_sched_time(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     t = call.data.split(":")[1]
-    update_setting("apitherapy_schedule_time", t)
-    await call.answer(f"Вақт белгиланди: {t}")
+    norm_t = normalize_hhmm(t, "16:00")
+    update_setting("apitherapy_schedule_time", norm_t)
+    update_setting("apitherapy_auto_time", norm_t)
+    await call.answer(f"Вақт белгиланди: {norm_t} ✅")
     await on_api_sched_menu(call)
 
 @dp.callback_query(F.data == "api_sched_toggle")
@@ -5517,9 +5677,11 @@ async def on_api_sched_toggle(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     settings = get_settings()
-    cur = settings.get("apitherapy_schedule_enabled", True)
-    update_setting("apitherapy_schedule_enabled", not cur)
-    await call.answer(f"Ҳолат ўзгарди: {'Ўчирилди ❌' if cur else 'Ёқилди ✅'}")
+    cur = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
+    new_state = not cur
+    update_setting("apitherapy_schedule_enabled", new_state)
+    update_setting("apitherapy_auto_enabled", new_state)
+    await call.answer(f"Ҳолат: {'Ўчирилди ❌' if not new_state else 'Ёқилди ✅'}")
     await on_api_sched_menu(call)
 
 # ==============================================================================
@@ -6419,6 +6581,11 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
     dur = settings.get("duration_limit_sec", 60)
     dur_lbl = "Чекловсиз" if dur == 0 else f"{dur} сония"
     
+    auto_en = settings.get("auto_enabled", True)
+    start_t = normalize_hhmm(settings.get("start_time", "18:00"))
+    end_t = normalize_hhmm(settings.get("end_time", "19:00"))
+    auto_status_str = f"🟢 Фаол ({start_t} дан {end_t} гача)" if auto_en else "🔴 Ўчирилган"
+
     notice_lbl = "Ёқилган ✅" if settings.get("pre_notice_1h", True) else "Ўчирилган ❌"
     script_lbl = "Крилча 🇺🇿" if script == "cyrillic" else "Lotincha 🇺🇿"
 
@@ -6444,6 +6611,7 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
         f"📡 **Ҳолати:** {active_lbl}",
         "",
         "⚙️ **Жорий созламалар:**",
+        f"• ⏰ Кунлик авто-тест: **{auto_status_str}**",
         f"• 📍 Юбориш манзили: **{tgt_lbl}**",
         f"• ⏱ Савол учун вақт чеклови: **{dur_lbl}**",
         f"• ⏰ 1 соат олдин эълон: **{notice_lbl}**",
@@ -6498,12 +6666,15 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
 
 def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
     s = get_sci_settings()
+    auto_en = s.get("auto_enabled", True)
     tgt = s.get("target", "both")
     dur = s.get("duration_limit_sec", 60)
     notic = s.get("pre_notice_1h", True)
     scr = s.get("script_mode", "cyrillic")
-    start_t = s.get("start_time", "18:00")
-    end_t = s.get("end_time", "19:00")
+    start_t = normalize_hhmm(s.get("start_time", "18:00"))
+    end_t = normalize_hhmm(s.get("end_time", "19:00"))
+
+    auto_btn = "🟢 Авто-тест режими: Ёқилган ✅" if auto_en else "🔴 Авто-тест режими: Ўчирилган ❌"
 
     tgt_chan = "✅ Канал" if tgt == "channel" else "Канал"
     tgt_grp = "✅ Гуруҳ" if tgt == "group" else "Гуруҳ"
@@ -6519,6 +6690,9 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
     scr_str = "🟢 Кирилл алифбоси" if scr == "cyrillic" else "🟢 Lotin alifbosi"
 
     rows = [
+        [
+            InlineKeyboardButton(text=auto_btn, callback_data="sci_set:auto_toggle:now")
+        ],
         [
             InlineKeyboardButton(text=f"⏰ Бошланиш: {start_t}", callback_data="sci_time_pick:start:menu"),
             InlineKeyboardButton(text=f"🏁 Тақдирлаш: {end_t}", callback_data="sci_time_pick:end:menu")
@@ -6911,46 +7085,52 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
             except Exception:
                 pass
 
-            # Агар гуруҳ бўлса, фойдаланувчилар ботга ўтмасдан гуруҳнинг ўзида ечишлари учун 10 та савол сўровнома сифатида ҳам ташланади
-            is_group_chat = (str(cid) in ["@asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)]) or (eff_target in ["group", "both"] and sent_msg.chat.type in ["group", "supergroup"])
-            if is_group_chat:
-                for q_idx, q_item in enumerate(test_set, start=1):
-                    try:
-                        q_raw = q_item.get("question", "")
-                        q_text = f"[{q_idx}/10] {apply_script(q_raw, script)}"
-                        if len(q_text) > 300:
-                            q_text = q_text[:297] + "..."
+            # Канал ва Гуруҳларга 10 та ДТМ синов тести саволларини сўровнома сифатида юбориш
+            # Telegram қоидаси: Каналларда сўровнома аноним (is_anonymous=True) бўлиши шарт.
+            # Гуруҳларда эса қатнашчиларни рўйхатга олиш ва ғолибларни аниқлаш учун очиқ (is_anonymous=False) юборилади.
+            chat_type = getattr(sent_msg.chat, "type", "")
+            is_channel_dest = (str(cid) in ["@uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)]) or (chat_type == "channel") or (eff_target == "channel" and str(cid) not in ["@asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)])
+            poll_anon = True if is_channel_dest else False
 
-                        raw_opts = q_item.get("options", [])
-                        poll_opts = []
-                        for opt in raw_opts[:5]:
-                            opt_c = apply_script(opt, script)
-                            if len(opt_c) > 100:
-                                opt_c = opt_c[:97] + "..."
-                            poll_opts.append(opt_c)
+            for q_idx, q_item in enumerate(test_set, start=1):
+                try:
+                    q_raw = q_item.get("question", "")
+                    q_text = f"[{q_idx}/10] {apply_script(q_raw, script)}"
+                    if len(q_text) > 300:
+                        q_text = q_text[:297] + "..."
 
-                        correct_id = q_item.get("correct_option_id", 0)
-                        raw_expl = q_item.get("explanation", "")
-                        expl = apply_script(raw_expl, script)
-                        if len(expl) > 200:
-                            expl = expl[:197] + "..."
+                    raw_opts = q_item.get("options", [])
+                    poll_opts = []
+                    for opt in raw_opts[:5]:
+                        opt_c = apply_script(opt, script)
+                        if len(opt_c) > 100:
+                            opt_c = opt_c[:97] + "..."
+                        poll_opts.append(opt_c)
 
-                        poll_msg = await bot_instance.send_poll(
-                            chat_id=real_chat_id,
-                            question=q_text,
-                            options=poll_opts,
-                            type="quiz",
-                            correct_option_id=correct_id,
-                            explanation=expl,
-                            is_anonymous=False
-                        )
+                    correct_id = q_item.get("correct_option_id", 0)
+                    raw_expl = q_item.get("explanation", "")
+                    expl = apply_script(raw_expl, script)
+                    if len(expl) > 200:
+                        expl = expl[:197] + "..."
+
+                    poll_msg = await bot_instance.send_poll(
+                        chat_id=real_chat_id,
+                        question=q_text,
+                        options=poll_opts,
+                        type="quiz",
+                        correct_option_id=correct_id,
+                        explanation=expl,
+                        is_anonymous=poll_anon
+                    )
+                    if not is_channel_dest:
                         poll_map[poll_msg.poll.id] = {
                             "q_idx": q_idx - 1,
                             "correct_id": correct_id,
                             "set_id": active_set
                         }
-                    except Exception as pe:
-                        logging.warning(f"Group poll send error (q {q_idx}): {pe}")
+                    await asyncio.sleep(0.4)
+                except Exception as pe:
+                    logging.warning(f"Scientific poll send error ({cid}, q {q_idx}): {pe}")
 
         except Exception as e:
             logging.error(f"Test launch broadcast error ({cid}): {e}")
@@ -7367,13 +7547,14 @@ async def on_sci_time_picker(call: types.CallbackQuery):
         await call.answer()
 
     elif action == "set":
-        chosen_time = parts[3]
+        chosen_time = normalize_hhmm(":".join(parts[3:]))
         if mode == "start":
             update_sci_setting("start_time", chosen_time)
-            await call.answer(f"Бошланиш вақти: {chosen_time}")
+            update_sci_setting("auto_time", chosen_time)
+            await call.answer(f"Бошланиш вақти: {chosen_time} га созланди! ✅")
         else:
             update_sci_setting("end_time", chosen_time)
-            await call.answer(f"Тақдирлаш вақти: {chosen_time}")
+            await call.answer(f"Тақдирлаш вақти: {chosen_time} га созланди! ✅")
 
         # Sozlamalar oynasiga qaytish
         kb = build_scientific_settings_keyboard()
@@ -7810,23 +7991,44 @@ async def on_sci_results_cb(call: types.CallbackQuery):
     )
     await call.message.answer(done_msg, parse_mode="Markdown")
 
+def get_scientific_settings_text() -> str:
+    s = get_sci_settings()
+    auto_en = s.get("auto_enabled", True)
+    start_t = normalize_hhmm(s.get("start_time", "18:00"))
+    end_t = normalize_hhmm(s.get("end_time", "19:00"))
+    tgt_name = {"channel": "📢 Фақат Канал", "group": "👥 Фақат Гуруҳ", "both": "🚀 Канал ва Гуруҳга (Иккаласига)"}.get(s.get("target", "both"), "🚀 Канал ва Гуруҳга (Иккаласига)")
+    status_str = f"🟢 ЁҚИЛГАН ({start_t} да бошланади, {end_t} да тақдирланади)" if auto_en else "🔴 ЎЧИРИЛГАН"
+    dur = s.get("duration_limit_sec", 60)
+    dur_lbl = "Чекловсиз" if dur == 0 else f"{dur} сония"
+
+    lines = [
+        "⚙️ **АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТЛАРИ СОЗЛАМАЛАРИ:**",
+        "",
+        f"• **Автоматик тест ҳолати:** {status_str}",
+        f"• **Жўнатиш манзили:** {tgt_name}",
+        f"• **Синов вақти:** {start_t} дан то {end_t} гача",
+        f"• **Ҳар бир савол вақти:** {dur_lbl}",
+        "",
+        "📋 **БЎЛИМЛАР ВА ВАЗИФАЛАРИ:**",
+        "• **Авто-тест режими:** Кунлик тестни канал ва гуруҳга автоматик юборишни ёқиш ёки ўчириш.",
+        "• **Бошланиш ва Тақдирлаш:** Тест қайси соатда бошланиши ва қачон автоматик якунланиб ғолиблар тақдирланиши.",
+        "• **Манзил:** Тест саволлари фақат Канал, фақат Гуруҳ ёки бир вақтнинг ўзида иккаласига юборилишини белгилаш.",
+        "• **Савол вақти:** Ҳар бир савол учун Telegram сўровнома вақти (30с, 60с, 2дақ, 5дақ ёки Чекловсиз).",
+        "• **1 соат олдин хабар:** Тест бошланишидан 1 соат аввал огоҳлантириш тарқатиш.",
+        "• **Ёзув тури:** Саволларни Ўзбекча Крил ёки Ўзбекча Лотин ёзувида юбориш."
+    ]
+    return chr(10).join(lines)
+
 @dp.callback_query(F.data == "sci_act:settings")
 async def on_sci_settings_cb(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     kb = build_scientific_settings_keyboard()
-    settings_lines = [
-        "⚙️ **АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТЛАРИ СОЗЛАМАЛАРИ:**",
-        "",
-        "• **Манзил:** Тест саволлари фақат Канал, фақат Гуруҳ ёки бир вақтнинг ўзида иккаласига юборилиши мумкин.",
-        "• **Савол вақти:** Ҳар бир савол учун Telegram аноним бўлмаган сўровнома вақти (30с, 60с, 2дақ, 5дақ ёки Чекловсиз).",
-        "• **1 соат олдин хабар:** Тест бошланишидан 1 соат аввал барча канал ва гуруҳларга расмий огоҳлантириш тарқатиш.",
-        "• **Ёзув тури:** Саволларни Ўзбекча Крил ёки Ўзбекча Лотин ёзувида юбориш."
-    ]
+    text = get_scientific_settings_text()
     try:
-        await call.message.edit_text(chr(10).join(settings_lines), reply_markup=kb, parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     except Exception:
-        await call.message.answer(chr(10).join(settings_lines), reply_markup=kb, parse_mode="Markdown")
+        await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
     await call.answer()
 
 @dp.callback_query(F.data.startswith("sci_set:"))
@@ -7835,9 +8037,15 @@ async def on_sci_settings_action(call: types.CallbackQuery):
         return
     parts = call.data.split(":")
     param = parts[1]
-    val = parts[2]
+    val = parts[2] if len(parts) > 2 else ""
 
-    if param == "target":
+    if param == "auto_toggle":
+        s = get_sci_settings()
+        cur = s.get("auto_enabled", True)
+        new_state = not cur
+        update_sci_setting("auto_enabled", new_state)
+        await call.answer(f"Авто-тест режими: {'Ўчирилди 🔴' if not new_state else 'Ёқилди 🟢'}")
+    elif param == "target":
         update_sci_setting("target", val)
         update_setting("post_target_mode", val)
         await call.answer(f"Манзил танланди: {val}")
@@ -7855,22 +8063,27 @@ async def on_sci_settings_action(call: types.CallbackQuery):
         await call.answer(f"Ёзув тури: {'Лотинча' if new_mode == 'latin' else 'Крилча'}")
     elif param == "start_time":
         options = ["16:00", "17:00", "18:00", "19:00", "20:00"]
-        cur = get_sci_settings().get("start_time", "18:00")
+        cur = normalize_hhmm(get_sci_settings().get("start_time", "18:00"))
         nxt = options[(options.index(cur) + 1) % len(options)] if cur in options else "18:00"
         update_sci_setting("start_time", nxt)
+        update_sci_setting("auto_time", nxt)
         await call.answer(f"Тест бошланиш вақти: {nxt}")
     elif param == "end_time":
         options = ["18:00", "19:00", "20:00", "21:00", "22:00"]
-        cur = get_sci_settings().get("end_time", "19:00")
+        cur = normalize_hhmm(get_sci_settings().get("end_time", "19:00"))
         nxt = options[(options.index(cur) + 1) % len(options)] if cur in options else "19:00"
         update_sci_setting("end_time", nxt)
         await call.answer(f"Тест тугаш ва тақдирлаш вақти: {nxt}")
 
     kb = build_scientific_settings_keyboard()
+    txt = get_scientific_settings_text()
     try:
-        await call.message.edit_reply_markup(reply_markup=kb)
+        await call.message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
     except Exception:
-        pass
+        try:
+            await call.message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
 
 @dp.poll_answer()
 async def on_scientific_poll_answer(poll_answer: types.PollAnswer):
@@ -8093,30 +8306,31 @@ async def private_chat_handler(message: types.Message):
     # 0. Админ махсус вақт ва дақиқа киритиш текшируви
     state = ADMIN_WAITING_INPUT.get(message.from_user.id)
     if state == "sci_start_time":
-        match = re.search(r"(\d{1,2})[:\.\-\s](\d{2})", clean_text)
-        if match:
+        match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
+        if match and match.group(1):
             h = int(match.group(1)) % 24
-            m = int(match.group(2)) % 60
+            m = int(match.group(2)) % 60 if match.group(2) else 0
             new_t = f"{h:02d}:{m:02d}"
             update_sci_setting("start_time", new_t)
+            update_sci_setting("auto_time", new_t)
             ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
             return await message.answer(f"✅ **Тест бошланиш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
         else:
-            return await message.answer("⚠️ Илтимос, вақтни `18:30` ёки `19:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
+            return await message.answer("⚠️ Илтимос, вақтни `18:30`, `19:05` ёки `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
 
     elif state == "sci_end_time":
-        match = re.search(r"(\d{1,2})[:\.\-\s](\d{2})", clean_text)
-        if match:
+        match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
+        if match and match.group(1):
             h = int(match.group(1)) % 24
-            m = int(match.group(2)) % 60
+            m = int(match.group(2)) % 60 if match.group(2) else 0
             new_t = f"{h:02d}:{m:02d}"
             update_sci_setting("end_time", new_t)
             ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
             return await message.answer(f"✅ **Тест тугаш ва тақдирлаш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
         else:
-            return await message.answer("⚠️ Илтимос, вақтни `19:30` ёки `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
+            return await message.answer("⚠️ Илтимос, вақтни `19:30`, `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
 
     elif state == "sci_duration_custom":
         match = re.search(r"\d+", clean_text)
