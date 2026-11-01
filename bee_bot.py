@@ -645,11 +645,38 @@ async def safe_send_to_destination(bot_inst: Bot, destination: Any, text: str, r
             else:
                 return await bot_inst.send_message(chat_id=cand, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
         except Exception as e:
-            last_exc = e
+            if "can't parse entities" in str(e).lower() and parse_mode:
+                try:
+                    return await bot_inst.send_message(chat_id=cand, text=text, reply_markup=reply_markup, parse_mode=None)
+                except Exception as e2:
+                    last_exc = e2
+            else:
+                last_exc = e
             logging.warning(f"Destination {cand} send failed: {e}")
             continue
 
     raise last_exc or Exception(f"Failed to deliver message to {destination}")
+
+async def safe_answer(msg_or_call: Any, text: str, reply_markup: Any = None, parse_mode: Any = "Markdown") -> Any:
+    target = msg_or_call.message if isinstance(msg_or_call, types.CallbackQuery) else msg_or_call
+    try:
+        return await target.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        if "can't parse entities" in str(e).lower() and parse_mode:
+            return await target.answer(text, reply_markup=reply_markup, parse_mode=None)
+        raise e
+
+async def safe_edit_text(msg_or_call: Any, text: str, reply_markup: Any = None, parse_mode: Any = "Markdown") -> Any:
+    target = msg_or_call.message if isinstance(msg_or_call, types.CallbackQuery) else msg_or_call
+    try:
+        return await target.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        if "can't parse entities" in str(e).lower() and parse_mode:
+            try:
+                return await target.edit_text(text, reply_markup=reply_markup, parse_mode=None)
+            except Exception:
+                return await target.answer(text, reply_markup=reply_markup, parse_mode=None)
+        raise e
 
 # 4. VIKTORINA BAZASI (QUIZ DATABASE) - YOSH VA SPETS ASALARICHILAR UCHUN
 # ==============================================================================
@@ -6024,7 +6051,7 @@ async def group_settings_btn_cmd(message: types.Message, state: FSMContext = Non
     if message.from_user.id != OWNER_ID:
         return await message.answer("ℹ️ **Гуруҳ созламалари** бўлими фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
     text, kb = build_group_settings_dashboard()
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_answer(message, text, reply_markup=kb)
 
 def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     off_group = get_official_group()
@@ -6091,7 +6118,7 @@ async def groups_control_cmd(message: types.Message, state: FSMContext = None):
     if message.from_user.id != OWNER_ID:
         return await message.answer("ℹ️ **Гуруҳлар назорати** бўлими фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
     text, kb = build_groups_control_dashboard()
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_answer(message, text, reply_markup=kb)
 
 @dp.callback_query(F.data == "groups_ctrl:refresh")
 async def on_groups_ctrl_refresh(call: types.CallbackQuery):
@@ -6099,7 +6126,7 @@ async def on_groups_ctrl_refresh(call: types.CallbackQuery):
         return
     await call.answer("🔄 Янгиланмоқда...", show_alert=False)
     text, kb = build_groups_control_dashboard()
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_edit_text(call, text, reply_markup=kb)
 
 def build_channel_mgmt_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     off_channel = get_official_channel()
@@ -6170,7 +6197,7 @@ async def channel_mgmt_cmd(message: types.Message, state: FSMContext = None):
     if message.from_user.id != OWNER_ID:
         return await message.answer("ℹ️ **Каналлар бошқаруви** бўлими фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
     text, kb = build_channel_mgmt_dashboard()
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_answer(message, text, reply_markup=kb)
 
 @dp.callback_query(F.data == "channel_ctrl:refresh")
 async def on_channel_ctrl_refresh(call: types.CallbackQuery):
@@ -6178,14 +6205,14 @@ async def on_channel_ctrl_refresh(call: types.CallbackQuery):
         return
     await call.answer("🔄 Янгиланмоқда...", show_alert=False)
     text, kb = build_channel_mgmt_dashboard()
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_edit_text(call, text, reply_markup=kb)
 
 @dp.callback_query(F.data == "grp_set_dest:open")
 async def on_grp_set_dest_open(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     text, kb = build_group_settings_dashboard()
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_edit_text(call, text, reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("grp_set_dest:"))
 async def on_grp_set_dest_select(call: types.CallbackQuery):
@@ -6396,7 +6423,8 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
     script_lbl = "Крилча 🇺🇿" if script == "cyrillic" else "Lotincha 🇺🇿"
 
     session = get_sci_session()
-    active_lbl = "🟢 ТЕСТ ДАВОМ ЭТМОҚДА" if session.get("is_active") else "⚪️ ТАЙЁР ТУРИБДИ"
+    is_active = bool(session.get("is_active"))
+    active_lbl = "🟢 ТЕСТ ДАВОМ ЭТМОҚДА" if is_active else "⚪️ ТАЙЁР ТУРИБДИ"
     participants_cnt = len(session.get("participants", {}))
 
     total_sets = max(1, len(questions) // 10)
@@ -7379,7 +7407,7 @@ async def scientific_tests_menu_cmd(message: types.Message, state: FSMContext = 
         text, kb = get_dtm_agreement_text_and_kb(1, message.from_user.id)
         return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
     text, markup = build_scientific_dashboard()
-    await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(message, text, reply_markup=markup)
 
 @dp.callback_query(F.data == "sci_act:dashboard")
 async def on_sci_dashboard_cb(call: types.CallbackQuery):
@@ -7387,10 +7415,7 @@ async def on_sci_dashboard_cb(call: types.CallbackQuery):
         await call.answer("Рухсат йўқ!", show_alert=True)
         return
     text, markup = build_scientific_dashboard()
-    try:
-        await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    except Exception:
-        await call.message.answer(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_edit_text(call, text, reply_markup=markup)
     await call.answer()
 
 @dp.callback_query(F.data.startswith("sci_cat:"))
