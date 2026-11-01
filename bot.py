@@ -10462,22 +10462,26 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"OK - Asalarichilik Bot is running!")
+        self.wfile.write(b"OK - Asalarichilik Bot is active and running 24/7!")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
     def log_message(self, format, *args):
         pass
 
 def run_health_server():
     try:
-        port = int(os.environ.get("PORT", 8080))
+        port = int(os.environ.get("PORT", 10000))
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        logging.info(f"Health check HTTP server {port}-портда ишга тушди.")
+        logging.info(f"🌐 Health check HTTP server {port}-портда муваффақиятли ишга тушди (UptimeRobot учун 24/7).")
         server.serve_forever()
     except Exception as e:
         logging.warning(f"Health server огоҳлантириши: {e}")
 
-if "PORT" in os.environ:
-    threading.Thread(target=run_health_server, daemon=True).start()
+# UptimeRobot доимо яшил (UP) туриши учун ҳар доим ишга туширилади:
+threading.Thread(target=run_health_server, daemon=True).start()
 
 if __name__ == "__main__":
     try:
