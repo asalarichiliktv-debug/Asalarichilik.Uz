@@ -1564,6 +1564,12 @@ def get_controller_reaction_counts(post_id):
 
 def build_controller_post_markup(post_id=0, reactions_list=None, url_buttons_rows=None, has_comments=False, comments_url=None, native_comments=False, share_text="Asalarichilik", post_link=None):
     markup = InlineKeyboardMarkup()
+    auto_react = get_system_setting("auto_reactions", "1")
+    share_btn = get_system_setting("share_button", "1")
+    expert_btn = get_system_setting("expert_button", "1")
+    default_react_set = get_system_setting("reactions_set", "👍 👎 ❤️ 👏")
+
+    # 1. Фойдаланувчи белгилаган махсус URL тугмалар
     if url_buttons_rows:
         for row in url_buttons_rows:
             btn_row = []
@@ -1572,10 +1578,15 @@ def build_controller_post_markup(post_id=0, reactions_list=None, url_buttons_row
             if btn_row:
                 markup.row(*btn_row)
 
-    if reactions_list:
+    # 2. Созламалар асосида Лайк ва Смайллар (Авто-реакциялар)
+    effective_reactions = reactions_list
+    if not effective_reactions and auto_react == "1":
+        effective_reactions = [e.strip() for e in default_react_set.split() if e.strip()] or ["👍", "👎", "❤️", "👏"]
+
+    if effective_reactions and auto_react == "1":
         counts = get_controller_reaction_counts(post_id) if post_id else {}
         react_row = []
-        for idx, em in enumerate(reactions_list):
+        for idx, em in enumerate(effective_reactions):
             cnt = counts.get(em, 0)
             lbl = f"{em} {cnt}" if cnt > 0 else em
             react_row.append(InlineKeyboardButton(lbl, callback_data=f"cb_react_{post_id}_{idx}"))
@@ -1583,7 +1594,30 @@ def build_controller_post_markup(post_id=0, reactions_list=None, url_buttons_row
             for i in range(0, len(react_row), 5):
                 markup.row(*react_row[i:i+5])
 
-    # 💬 Мукаммал изоҳлар (комментарии) бўлими
+    # 3. Расмий канал ва Гуруҳ қатори (агар URL тугмаларида бўлмаса)
+    chan = get_official_channel()
+    grp = get_official_group()
+    yt = get_official_youtube()
+    c_clean = chan.replace("@", "")
+    g_clean = grp.replace("@", "").replace("https://t.me/", "")
+    g_url = grp if grp.startswith("http") else f"https://t.me/{g_clean}"
+
+    has_chan_btn = False
+    if url_buttons_rows:
+        for r in url_buttons_rows:
+            for b in r:
+                if c_clean and c_clean.lower() in b.get("url", "").lower():
+                    has_chan_btn = True
+                    break
+    if not has_chan_btn:
+        markup.row(
+            InlineKeyboardButton("📢 Расмий Канал", url=f"https://t.me/{c_clean}"),
+            InlineKeyboardButton("👥 Расмий Гуруҳ", url=g_url)
+        )
+        if yt:
+            markup.row(InlineKeyboardButton("📺 YouTube Каналимиз", url=yt))
+
+    # 4. Мукаммал изоҳлар (комментарии) бўлими
     if has_comments or native_comments:
         c_count = 0
         if post_id:
@@ -1610,22 +1644,27 @@ def build_controller_post_markup(post_id=0, reactions_list=None, url_buttons_row
         
         markup.row(InlineKeyboardButton(c_lbl, url=c_link))
 
-    # ↗️ Мукаммал Улашиш (Share) тизими: Тўлиқ маълумотни узатиш, қисқартирмаслик!
-    raw_share = (share_text or "Asalarichilik.Uz").strip()
-    clean_share = re.sub(r'<[^>]+>', '', raw_share).strip()
-    if not clean_share:
-        clean_share = "Asalarichilik.Uz"
-    
-    # Telegram share URL лимитига мос равишда тўлиқ матн (850 белгигача сўзма-сўз) улашилади
-    if len(clean_share) > 850:
-        clean_share = clean_share[:850].rsplit(' ', 1)[0] + "..."
-    
-    share_content = f"🐝 {clean_share}\n\n👉 @{BOT_USERNAME}"
-    safe_share = urllib.parse.quote(share_content)
-    
-    target_url = post_link or f"https://t.me/{BOT_USERNAME}"
-    share_url = f"https://t.me/share/url?url={urllib.parse.quote(target_url)}&text={safe_share}"
-    markup.row(InlineKeyboardButton("↗️ Поделиться / Улашиш", url=share_url))
+    # 5. Созламалар асосида Улашиш (Share) ва Мутахассис тугмалари
+    extra_row = []
+    if share_btn == "1":
+        raw_share = (share_text or "Asalarichilik.Uz").strip()
+        clean_share = re.sub(r'<[^>]+>', '', raw_share).strip()
+        if not clean_share:
+            clean_share = "Asalarichilik.Uz"
+        if len(clean_share) > 850:
+            clean_share = clean_share[:850].rsplit(' ', 1)[0] + "..."
+        share_content = f"🐝 {clean_share}\n\n👉 https://t.me/{c_clean}"
+        safe_share = urllib.parse.quote(share_content)
+        target_url = post_link or f"https://t.me/{c_clean}"
+        share_url = f"https://t.me/share/url?url={urllib.parse.quote(target_url)}&text={safe_share}"
+        extra_row.append(InlineKeyboardButton("↗️ Улашиш", url=share_url))
+
+    if expert_btn == "1":
+        extra_row.append(InlineKeyboardButton("💬 Мутахассис", url=f"https://t.me/{OWNER_USERNAME.lstrip('@')}"))
+
+    if extra_row:
+        markup.row(*extra_row)
+
     return markup
 
 def show_comments_config_menu(chat_id, user_id, message_id=None, lang="uz_kr"):
@@ -2597,6 +2636,23 @@ def publish_quiz_poll(quiz_idx=None, admin_user_id=None, target_scope=None, auto
                     except Exception as pe:
                         logging.warning(f"Could not pin poll in channel {cid}: {pe}")
 
+                # Созламалар бўйича смайл ва улашиш тугмалари панелини викторина остига чиқариш
+                auto_react = get_system_setting("auto_reactions", "1")
+                share_btn = get_system_setting("share_button", "1")
+                if auto_react == "1" or share_btn == "1":
+                    try:
+                        btn_msg = bot.send_message(
+                            chat_id=cid,
+                            text=f"📊 <b>«{q_text}»</b> — фикр ва баҳоингизни қолдиринг:",
+                            parse_mode="HTML",
+                            reply_markup=quiz_markup
+                        )
+                        if del_hours > 0:
+                            del_sec = del_hours * 3600
+                            threading.Timer(del_sec, lambda c=cid, m=btn_msg.message_id: delete_msg_safe(c, m)).start()
+                    except Exception as be:
+                        logging.warning(f"Could not send quiz companion buttons in channel {cid}: {be}")
+
                 if del_hours > 0:
                     del_sec = del_hours * 3600
                     threading.Timer(del_sec, lambda c=cid, m=poll_msg.message_id: delete_msg_safe(c, m)).start()
@@ -2704,6 +2760,23 @@ def publish_quiz_poll(quiz_idx=None, admin_user_id=None, target_scope=None, auto
                         bot.pin_chat_message(gid, poll_msg.message_id, disable_notification=False)
                     except Exception as pe:
                         logging.warning(f"Could not pin poll in group {gid}: {pe}")
+
+                # Созламалар бўйича смайл ва улашиш тугмалари панелини гуруҳдаги викторина остига чиқариш
+                auto_react = get_system_setting("auto_reactions", "1")
+                share_btn = get_system_setting("share_button", "1")
+                if auto_react == "1" or share_btn == "1":
+                    try:
+                        btn_msg = bot.send_message(
+                            chat_id=gid,
+                            text=f"📊 <b>«{q_text}»</b> — фикр ва баҳоингизни қолдиринг:",
+                            parse_mode="HTML",
+                            reply_markup=quiz_markup
+                        )
+                        if del_hours > 0:
+                            del_sec = del_hours * 3600
+                            threading.Timer(del_sec, lambda c=gid, m=btn_msg.message_id: delete_msg_safe(c, m)).start()
+                    except Exception as be:
+                        logging.warning(f"Could not send quiz companion buttons in group {gid}: {be}")
 
                 if del_hours > 0:
                     del_sec = del_hours * 3600
@@ -2893,9 +2966,10 @@ def get_post_buttons_markup(content_type="news", content_id="0", share_text="Asa
         for idx, em in enumerate(emojis):
             cnt = counts.get(em, 0)
             lbl = f"{em} {cnt}" if cnt > 0 else em
-            react_row.append(InlineKeyboardButton(lbl, callback_data=f"fr_{content_type}_{content_id}_{idx}"))
+            react_row.append(InlineKeyboardButton(lbl, callback_data=f"fr:{content_type}:{content_id}:{idx}"))
         if react_row:
-            markup.row(*react_row)
+            for i in range(0, len(react_row), 5):
+                markup.row(*react_row[i:i+5])
             
     # 2. Расмий канал ва Гуруҳ қатори
     chan = get_official_channel()
@@ -2910,7 +2984,8 @@ def get_post_buttons_markup(content_type="news", content_id="0", share_text="Asa
         InlineKeyboardButton("👥 Расмий Гуруҳ", url=g_url)
     )
     # 3. YouTube канали қатори
-    markup.row(InlineKeyboardButton("📺 YouTube Каналимиз", url=yt))
+    if yt:
+        markup.row(InlineKeyboardButton("📺 YouTube Каналимиз", url=yt))
     
     # 4. Улашиш ва Мутахассис қатори
     extra_row = []
@@ -4397,8 +4472,9 @@ def send_weather_to_group(group_id, lang="uz_kr"):
     forecast_type = g.get("weather_forecast_type", "10_days")
 
     msg_text = generate_weather_report(city, forecast_type, repeat_days, del_h, del_m, lang)
+    w_markup = get_post_buttons_markup(content_type="weather", content_id=f"w_{group_id}_{int(time.time())}", share_text=msg_text)
     try:
-        sent = bot.send_message(group_id, msg_text, parse_mode="HTML")
+        sent = bot.send_message(group_id, msg_text, parse_mode="HTML", reply_markup=w_markup)
         try:
             bot.pin_chat_message(group_id, sent.message_id, disable_notification=True)
         except Exception as pe:
@@ -4414,10 +4490,11 @@ def send_weather_to_all_channels(del_h=0, del_m=0, lang="uz_kr"):
     channels = cursor.fetchall()
     sent_cnt = 0
     msg_text = generate_weather_report("Тошкент", "10_days", "1,2,3,4,5,6,7", del_h, del_m, lang)
+    w_markup = get_post_buttons_markup(content_type="weather", content_id=f"wch_{int(time.time())}", share_text=msg_text)
     for ch in channels:
         cid = ch["chat_id"]
         try:
-            sent = bot.send_message(cid, msg_text, parse_mode="HTML")
+            sent = bot.send_message(cid, msg_text, parse_mode="HTML", reply_markup=w_markup)
             try:
                 bot.pin_chat_message(cid, sent.message_id, disable_notification=False)
             except Exception:
@@ -10193,6 +10270,60 @@ def group_protection_filter(message):
         w_msg = bot.send_message(chat_id, warn_text, parse_mode="HTML")
         threading.Timer(45, lambda: delete_msg_safe(chat_id, w_msg.message_id)).start()
         return
+
+# ==================== 14.5 КАНАЛ ХАБАРЛАРИГА АВТОМАТИК ТУГМАЛАР ВА РЕАКЦИЯЛАРНИ ҚЎЙИШ ====================
+@bot.channel_post_handler(content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'poll'])
+@bot.edited_channel_post_handler(content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'poll'])
+def handle_channel_post_auto_buttons(message):
+    """
+    Каналга юбориладиган барча янги ва мавжуд маълумотлар, расм, видео ва постлар остига
+    Бот ва Пост созламалари асосида автоматик реакция смайллари ва улашиш тугмаларини қўйиш.
+    """
+    try:
+        auto_react = get_system_setting("auto_reactions", "1")
+        share_btn = get_system_setting("share_button", "1")
+        expert_btn = get_system_setting("expert_button", "1")
+
+        # Агар созламаларда ҳеч бир тугма ёқилмаган бўлса
+        if auto_react != "1" and share_btn != "1" and expert_btn != "1":
+            return
+
+        # Агар пост остида аллақачон тугмалар мавжуд бўлса, қайта ёзмаймиз
+        if message.reply_markup and getattr(message.reply_markup, 'inline_keyboard', None):
+            return
+
+        cid = message.chat.id
+        mid = message.message_id
+        post_text = (message.text or message.caption or "Asalarichilik.Uz").strip()
+
+        # Созламалар асосида тугмалар панели
+        markup = get_post_buttons_markup(
+            content_type="cp",
+            content_id=str(mid),
+            share_text=post_text
+        )
+
+        if message.content_type == 'poll':
+            # Telegram сўровноманинг ўзига тўғридан-тўғри inline keyboard қўйишни чеклайди,
+            # шунинг учун овоз беришдан сўнг реакция ва улашиш тугмалари хабарини юборамиз:
+            try:
+                bot.send_message(
+                    chat_id=cid,
+                    text="📊 <b>Овоз бериш ва фикр билдириш:</b>",
+                    parse_mode="HTML",
+                    reply_markup=markup
+                )
+            except Exception as pe:
+                logging.warning(f"Error sending poll buttons to channel {cid}: {pe}")
+        else:
+            bot.edit_message_reply_markup(
+                chat_id=cid,
+                message_id=mid,
+                reply_markup=markup
+            )
+            logging.info(f"✅ Каналдаги ({cid}) #{mid} постга реакция ва улашиш тугмалари муваффақиятли қўйилди!")
+    except Exception as e:
+        logging.warning(f"handle_channel_post_auto_buttons note: {e}")
 
 
 # 15. ФОН РЕЖИМИДАГИ ИШЛАР (ОБ-ҲАВО ВА ТУНГИ ҚУЛФЛАР)
