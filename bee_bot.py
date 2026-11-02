@@ -312,14 +312,14 @@ def get_official_footer(script: str = "cyrillic") -> str:
         bot_label = "@" + bot_label
     if script == "latin":
         return (
-            "__________________________________\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🐝 Rasmiy kanal: {chan}\n"
             f"👥 Asalarichilik guruhi: {grp}\n"
             f"📺 YouTube: {yt}\n"
             f"🤖 Bot: {bot_label}"
         )
     return (
-        "__________________________________\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🐝 Расмий канал: {chan}\n"
         f"👥 Асаларичилик гуруҳи: {grp}\n"
         f"📺 YouTube: {yt}\n"
@@ -489,16 +489,16 @@ def format_video_card_text(v: dict, script: str = "cyrillic") -> str:
     tags = v.get("tags", "#Асаларичилик #ВидеоДарс")
 
     lines = [
-        "🎬 **АСАЛАРИЧИЛИК АМАЛИЙ ВИДЕО ДАРСЛИГИ** 🐝",
+        "🎬 *АСАЛАРИЧИЛИК АМАЛИЙ ВИДЕО ДАРСЛИГИ* 🐝",
         "",
-        f"📌 **Мавзу:** {title}",
-        f"⏱ **Давомийлиги:** {dur}",
-        f"👨‍🏫 **Мутахассис / Канал:** {channel}",
+        f"📌 *Мавзу:* {title}",
+        f"⏱ *Давомийлиги:* {dur}",
+        f"👨‍🏫 *Мутахассис / Канал:* {channel}",
         "",
-        "📝 **Қисқача мазмуни:**",
+        "📝 *Қисқача мазмуни (Ўзбек тилида батафсил):*",
         desc,
         "",
-        f"▶️ **Видео кўриш учун ҳавола:**",
+        "▶️ *Видео кўриш учун ҳавола:*",
         url,
         "",
         f"{tags} #AsalarichilikUz",
@@ -2579,8 +2579,14 @@ def build_quiz_preview_keyboard(idx: int, total: int, script: str = "cyrillic") 
 def build_quiz_menu_inline() -> InlineKeyboardMarkup:
     return build_quiz_preview_keyboard(0, len(get_quizzes_db()))
 
-@dp.message(F.text == "🐝 Викторина & Сўровнома")
-async def quiz_cmd(message: types.Message):
+@dp.message(F.text.in_({
+    "🐝 Викторина & Сўровнома", "Викторина & Сўровнома", "Викторина", "Сўровнома",
+    "🐝 Viktorina & So'rovnoma", "Viktorina & So'rovnoma", "Viktorina", "So'rovnoma"
+}), StateFilter("*"))
+async def quiz_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
 
@@ -2595,7 +2601,7 @@ async def quiz_cmd(message: types.Message):
     script = settings.get("script_mode", "cyrillic")
     text = format_quiz_preview_text(quiz, idx, len(quizzes), script)
     markup = build_quiz_preview_keyboard(idx, len(quizzes), script)
-    await message.answer(text, reply_markup=markup, parse_mode=None)
+    await safe_answer(message, text, reply_markup=markup, parse_mode=None)
 
 @dp.callback_query(F.data.startswith("quiz_act:"))
 async def on_quiz_action(call: types.CallbackQuery, state: FSMContext):
@@ -3172,8 +3178,15 @@ def build_news_viewer_keyboard(idx: int, total: int, script: str = "cyrillic") -
 def build_news_menu_inline() -> InlineKeyboardMarkup:
     return build_news_viewer_keyboard(0, len(get_news_db()))
 
-@dp.message(F.text.in_({"📰 Асаларичилик янгиликлари", "📰 Асаларичилик Янгиликлари", "Асаларичилик янгиликлари", "Асаларичилик Янгиликлари"}))
-async def news_cmd(message: types.Message):
+@dp.message(F.text.in_({
+    "📰 Асаларичилик янгиликлари", "📰 Асаларичилик Янгиликлари", "Асаларичилик янгиликлари", "Асаларичилик Янгиликлари",
+    "📰 Asalarichilik yangiliklari", "📰 Asalarichilik Yangiliklari", "Asalarichilik yangiliklari", "Asalarichilik Yangiliklari",
+    "Янгиликлар", "Yangiliklar"
+}), StateFilter("*"))
+async def news_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
 
@@ -3188,7 +3201,7 @@ async def news_cmd(message: types.Message):
     script = settings.get("script_mode", "cyrillic")
     text = format_news_post_text(news, script, is_admin=False)
     markup = build_news_viewer_keyboard(idx, len(news_list), script)
-    await message.answer(text, reply_markup=markup, parse_mode=None)
+    await safe_answer(message, text, reply_markup=markup, parse_mode=None)
 
 @dp.callback_query(F.data.startswith("news_page:"))
 async def on_news_page(call: types.CallbackQuery):
@@ -5104,7 +5117,7 @@ async def daily_scheduler_loop():
             if news_enabled and (cur_hhmm == news_time or (cur_hhmm > news_time and is_within_minutes(cur_hhmm, news_time, 15))) and not log.get(key_n):
                 logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {news_target}")
                 targets = get_destinations_for_target(news_target)
-                news = get_unsent_news()
+                news = get_next_sequential_news()
                 script = settings.get("script_mode", "cyrillic")
                 text = format_news_post_text(news, script, is_admin=False)
                 for cid in targets:
@@ -5116,14 +5129,13 @@ async def daily_scheduler_loop():
                             share_title=f"📰 {news.get('title', '')[:60]}",
                             share_text=news.get('body', '')[:300]
                         )
-                        sent = await bot.send_message(chat_id=cid, text=text, reply_markup=markup, parse_mode="Markdown")
+                        sent = await safe_send_to_destination(bot_inst=bot, destination=cid, text=text, reply_markup=markup, parse_mode="Markdown")
                         try:
                             await bot.pin_chat_message(chat_id=cid, message_id=sent.message_id, both_silent=True)
                         except Exception:
                             pass
                     except Exception as e:
                         logging.error(f"Auto-news xatolik ({cid}): {e}")
-                mark_item_as_sent("news", news.get("id"), news.get("title"))
                 log[key_n] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
@@ -5143,7 +5155,6 @@ async def daily_scheduler_loop():
                         await send_quiz_poll_to_chat(cid, quiz, poll_mode=poll_type)
                     except Exception as e:
                         logging.error(f"Auto-quiz xatolik ({cid}): {e}")
-                mark_item_as_sent("quiz" if poll_type == "quiz" else "poll", quiz.get("id"), quiz.get("question"))
                 log[key_q] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
@@ -5156,7 +5167,7 @@ async def daily_scheduler_loop():
             if api_enabled and (cur_hhmm == api_time or (cur_hhmm > api_time and is_within_minutes(cur_hhmm, api_time, 15))) and not log.get(key_a):
                 logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {api_target}")
                 targets = get_destinations_for_target(api_target)
-                item = get_unsent_apitherapy()
+                item = get_next_sequential_apitherapy()
                 if item:
                     script = settings.get("script_mode", "cyrillic")
                     text = format_apitherapy_post_text(item, 0, 1000, script=script)
@@ -5170,10 +5181,9 @@ async def daily_scheduler_loop():
                                 share_title=f"🌿 Апитерапия: {item.get('title', '')[:60]}",
                                 share_text=item.get("body", "")[:300]
                             )
-                            await bot.send_message(chat_id=cid, text=text, reply_markup=markup, parse_mode=None)
+                            await safe_send_to_destination(bot_inst=bot, destination=cid, text=text, reply_markup=markup, parse_mode=None)
                         except Exception as e:
                             logging.error(f"Auto-apitherapy xatolik ({cid}): {e}")
-                    mark_item_as_sent("apitherapy", item.get("id"), item.get("title"))
                 log[key_a] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
@@ -5436,22 +5446,16 @@ async def post_scheduled_apitherapy() -> bool:
     db = load_apitherapy_db()
     if not db:
         return False
-    unposted = [item for item in db if not item.get("posted", False)]
-    item = unposted[0] if unposted else random.choice(db)
+    item = get_next_sequential_apitherapy()
+    if not item:
+        return False
     
     settings = get_settings()
     script = settings.get("script_mode", "cyrillic")
     target_mode = settings.get("post_target_mode", "channel")
     
     text = format_apitherapy_post_text(item, 0, len(db), script=script)
-    
-    targets = []
-    if target_mode in ["channel", "both"]:
-        targets.append(get_official_channel())
-    if target_mode in ["group", "both"]:
-        targets.append(get_official_group())
-    if not targets:
-        targets = [get_official_channel()]
+    targets = get_destinations_for_target(target_mode)
 
     success = False
     for t in targets:
@@ -5465,18 +5469,21 @@ async def post_scheduled_apitherapy() -> bool:
                 share_title=f"🌿 Апитерапия: {item.get('title', '')[:60]}",
                 share_text=item.get("body", "")[:300]
             )
-            msg = await bot.send_message(chat_id=t, text=text, reply_markup=markup, parse_mode=None)
+            msg = await safe_send_to_destination(bot_inst=bot, destination=t, text=text, reply_markup=markup, parse_mode=None)
             success = True
-            item["posted"] = True
-            save_apitherapy_db(db)
             logging.info(f"✅ Avto-apiterapiya muvaffaqiyatli yuborildi: {t}")
         except Exception as e:
             logging.error(f"post_scheduled_apitherapy xatolik ({t}): {e}")
     return success
 
-# Apiterapiya menyusi va buyruqlari
-@dp.message(F.text.in_({"🌿 Апитерапия янгиликлари", "🌿 Апитерапия", "Апитерапия янгиликлари"}))
-async def apitherapy_cmd(message: types.Message):
+@dp.message(F.text.in_({
+    "🌿 Апитерапия янгиликлари", "🌿 Апитерапия", "Апитерапия янгиликлари", "Апитерапия",
+    "🌿 Apiterapiya yangiliklari", "🌿 Apiterapiya", "Apiterapiya yangiliklari", "Apiterapiya"
+}), StateFilter("*"))
+async def apitherapy_cmd(message: types.Message, state: FSMContext = None):
+    if state:
+        await state.clear()
+    ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
     if message.chat.type != "private" or message.from_user.id != OWNER_ID:
         return
     item, idx, total = get_current_apitherapy_item(0)
@@ -5484,7 +5491,7 @@ async def apitherapy_cmd(message: types.Message):
     script = settings.get("script_mode", "cyrillic")
     text = format_apitherapy_post_text(item, idx, total, script=script)
     kb = build_apitherapy_viewer_keyboard(idx, total, script=script)
-    await message.answer(text, reply_markup=kb, parse_mode=None)
+    await safe_answer(message, text, reply_markup=kb, parse_mode=None)
 
 @dp.callback_query(F.data.startswith("api_nav:"))
 async def on_api_navigate(call: types.CallbackQuery):
@@ -7337,10 +7344,10 @@ async def beekeeping_video_menu_cmd(message: types.Message, state: FSMContext = 
             [InlineKeyboardButton(text="▶️ Видеони кўриш (YouTube)", url=v.get("url"))],
             [InlineKeyboardButton(text="↗️ Дўстларга улашиш", url=share_url)]
         ])
-        return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        return await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
 
     text, kb = build_video_admin_card_and_kb(CURRENT_ADMIN_VIDEO_IDX, CURRENT_VIDEO_TARGET)
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("vid_act:"))
 async def on_video_action_cb(call: types.CallbackQuery):
@@ -7362,10 +7369,7 @@ async def on_video_action_cb(call: types.CallbackQuery):
     if action == "next":
         CURRENT_ADMIN_VIDEO_IDX = (idx + 1)
         text, kb = build_video_admin_card_and_kb(CURRENT_ADMIN_VIDEO_IDX, CURRENT_VIDEO_TARGET)
-        try:
-            await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-        except Exception:
-            await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
         await call.answer("Кейинги видео юкланди!")
 
     elif action == "toggle_target":
@@ -7373,10 +7377,7 @@ async def on_video_action_cb(call: types.CallbackQuery):
         cur_pos = order.index(CURRENT_VIDEO_TARGET) if CURRENT_VIDEO_TARGET in order else 0
         CURRENT_VIDEO_TARGET = order[(cur_pos + 1) % len(order)]
         text, kb = build_video_admin_card_and_kb(idx, CURRENT_VIDEO_TARGET)
-        try:
-            await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-        except Exception:
-            pass
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
         await call.answer(f"Манзил: {CURRENT_VIDEO_TARGET}")
 
     elif action == "publish":
@@ -7397,7 +7398,7 @@ async def on_video_action_cb(call: types.CallbackQuery):
                     share_title=f"🎬 {v.get('title')[:60]}",
                     share_text=v.get('description', '')[:250]
                 )
-                sent_msg = await bot.send_message(chat_id=cid, text=text, reply_markup=markup, parse_mode="Markdown")
+                sent_msg = await safe_send_to_destination(bot_inst=bot, destination=cid, text=text, reply_markup=markup, parse_mode="Markdown")
                 try:
                     await bot.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
                 except Exception:
