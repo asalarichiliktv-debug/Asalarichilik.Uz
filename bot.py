@@ -1,9 +1,11 @@
 
 # Янги мукаммал медиа лимит ва альбом кэшлари (Барча расмларни ўчириш ва 24 соатлик мут учун)
 _user_all_media_history = {}      # (chat_id, user_id) -> list of message_ids
+_user_all_messages_history = {}   # (chat_id, user_id) -> list of message_ids (матн ва барча хабарлар тарихи)
 _album_all_messages = {}          # (chat_id, mg_id) -> list of message_ids
 _album_counts_dict = {}           # (chat_id, mg_id) -> int
 _user_daily_counts = {}           # (chat_id, user_id, date_str) -> int
+_user_warn_counts = {}            # (chat_id, user_id, date_str) -> int (0: огоҳлантиришсиз, 1: 2 соатлик мут, 2: 24 соатлик мут)
 _flagged_violation_albums = set() # (chat_id, mg_id) that exceeded media limit
 _flagged_violation_users = {}     # (chat_id, user_id) -> muted_until_ts
 _admin_cache = {}                 # (chat_id, user_id) -> (is_adm, timestamp)
@@ -9669,6 +9671,14 @@ def group_protection_filter(message):
 
     is_user_admin = (user_id == OWNER_ID or is_admin(chat_id, user_id))
 
+    # Гуруҳдаги оддий аъзоларнинг хабарлари тарихини сақлаш (2-қоидабузарликда барча хабарларини тозалаб ўчириш учун):
+    if not is_user_admin and user_id > 0:
+        with _media_lock:
+            u_msgs = _user_all_messages_history.setdefault((chat_id, user_id), [])
+            u_msgs.append(message.message_id)
+            if len(u_msgs) > 300:
+                _user_all_messages_history[(chat_id, user_id)] = u_msgs[-300:]
+
     # ==================== 0. ГУРУҲДА БУЙРУҚЛАРНИ БАЖАРИШ ====================
     if raw_txt.startswith('/'):
         delete_msg_safe(chat_id, message.message_id)
@@ -9954,7 +9964,7 @@ def group_protection_filter(message):
 
     g = get_group(chat_id)
     if not g:
-        return
+        g = {"chat_id": chat_id, "limit_enabled": 1, "lang": "uz_kr", "title": title}
 
     g_lang = g.get("lang", "uz_kr")
 
@@ -10188,7 +10198,7 @@ def group_protection_filter(message):
             mg_id = getattr(message, 'media_group_id', None)
 
             # 0. АГАР БУ АЛЬБОМ ЁКИ ФОЙДАЛАНУВЧИ БОТ ТОМОНИДАН ҚОИДАБУЗАР ДЕБ БЕЛГИЛАНГАН БЎЛСА
-            # (Масалан, 10 талик альбомнинг кейинги параллел расмлари ёки 24 соатлик мутдаги фойдаланувчи):
+            # (Масалан, 10 талик альбомнинг кейинги ортиқча расмлари ёки мутдаги фойдаланувчи):
             is_already_flagged = False
             with _media_lock:
                 if mg_id and (chat_id, str(mg_id)) in _flagged_violation_albums:
@@ -10214,19 +10224,59 @@ def group_protection_filter(message):
                 else:
                     curr_album_cnt = 1
 
-                # 2. Кунлик ҳисоблаш (базадан кэшга олиш ва ошириш)
+                # 2. Кунлик ҳисоблаш ва огоҳлантириш (қоидабузарлик) даражаси (0: йўқ, 1: 2 соатлик мут, 2: 24 соатлик мут)
                 if (chat_id, user_id, today_str) not in _user_daily_counts:
                     try:
-                        cursor.execute("SELECT count FROM user_bee_ad_limits WHERE chat_id = ? AND user_id = ? AND ad_date = ?", (chat_id, user_id, today_str))
+                        cursor.execute("SELECT count, warn_count, last_warn_ts FROM user_bee_ad_limits WHERE chat_id = ? AND user_id = ? AND ad_date = ?", (chat_id, user_id, today_str))
                         row_cnt = cursor.fetchone()
-                        _user_daily_counts[(chat_id, user_id, today_str)] = row_cnt["count"] if (row_cnt and "count" in row_cnt) else 0
+                        if row_cnt:
+                            _user_daily_counts[(chat_id, user_id, today_str)] = row_cnt["count"] if "count" in row_cnt else 0
+                            _user_warn_counts[(chat_id, user_id, today_str)] = row_cnt["warn_count"] if "warn_count" in row_cnt else 0
+                        else:
+                            _user_daily_counts[(chat_id, user_id, today_str)] = 0
+                            _user_warn_counts[(chat_id, user_id, today_str)] = 0
                     except Exception:
                         _user_daily_counts[(chat_id, user_id, today_str)] = 0
+                        _user_warn_counts[(chat_id, user_id, today_str)] = 0
 
                 curr_d_cnt = _user_daily_counts.get((chat_id, user_id, today_str), 0) + 1
                 _user_daily_counts[(chat_id, user_id, today_str)] = curr_d_cnt
+                curr_warn_lvl = _user_warn_counts.get((chat_id, user_id, today_str), 0)
 
-                # Базага ҳам синхрон ёзиш
+            # 3. АГАР 3 ТАДАН ОШСА (АЛЬБОМДА 4, 5, 10 ТА БЎЛСА ЁКИ КУНЛИК 3 ТАДАН ОШСА):
+            is_excess = (mg_id and curr_album_cnt > limit_max) or (curr_d_cnt > limit_max)
+
+            if not is_excess:
+                # 3 тагача бўлган расм ва видеолар рухсат этилади
+                try:
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO user_bee_ad_limits (chat_id, user_id, count, ad_date, warn_count, last_warn_ts) VALUES (?, ?, ?, ?, ?, ?)",
+                        (chat_id, user_id, curr_d_cnt, today_str, curr_warn_lvl, now_ts)
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+                return
+
+            # ========== ЛИМИТДАН ОШГАНДА ЧОРАЛАР (1-ҚОИДАБУЗАРЛИК vs 2-ҚОИДАБУЗАРЛИК) ==========
+            # 1-Қоидабузарлик: 3 тадан ортиқ расм/видео ташланса -> 2 соатлик мут + ортиқча расмлар ўчирилади
+            # 2-Қоидабузарлик: Қайта яна расм/видео ташланса -> 24 соатлик мут + барча ёзишма ва расмлари тозаланади
+
+            if curr_warn_lvl == 0:
+                # ----------------- 1-ҚОИДАБУЗАРЛИК (2 СОАТЛИК МУТ) -----------------
+                # А) 3 тадан ортиқ ортиқча расмларни дарҳол ўчириш
+                delete_msg_safe(chat_id, message.message_id)
+
+                with _media_lock:
+                    if mg_id:
+                        _flagged_violation_albums.add((chat_id, str(mg_id)))
+                    _flagged_violation_users[(chat_id, user_id)] = now_ts + 7200
+                    _user_warn_counts[(chat_id, user_id, today_str)] = 1
+
+                # Б) Фойдаланувчига 2 СОАТЛИК (7200 сония) МУТ ўрнатиш
+                apply_group_mute(chat_id, user_id, 7200)
+
+                # В) Базага қайд этиш
                 try:
                     cursor.execute(
                         "INSERT OR REPLACE INTO user_bee_ad_limits (chat_id, user_id, count, ad_date, warn_count, last_warn_ts) VALUES (?, ?, ?, ?, 1, ?)",
@@ -10236,63 +10286,90 @@ def group_protection_filter(message):
                 except Exception:
                     pass
 
-            # 3. АГАР 3 ТАДАН ОШСА (АЛЬБОМДА 4, 5, 10 ТА БЎЛСА ЁКИ КУНЛИК 3 ТАДАН ОШСА):
-            is_excess = (mg_id and curr_album_cnt > limit_max) or (curr_d_cnt > limit_max)
-            if is_excess:
+                # Г) Огоҳлантириш хабари (БотМастер скриншотидаги аниқ матн)
+                last_w = _last_media_warn.get((chat_id, user_id), 0)
+                if now_ts - last_w > 8:
+                    _last_media_warn[(chat_id, user_id)] = now_ts
+                    warn_txt = (
+                        "Огоҳлантириш ‼️\n"
+                        f"Ассалому алейкум {u_tag}\n"
+                        "Асаларичилик группага фақат бир кунда 3 та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️"
+                    )
+                    try:
+                        w_msg = bot.send_message(chat_id, warn_txt, parse_mode="HTML")
+                        # ⏱️ 1 дақиқада (60 сонияда) автоматик ўчирилади!
+                        threading.Timer(60, lambda: delete_msg_safe(chat_id, w_msg.message_id)).start()
+                    except Exception as we:
+                        logging.warning(f"Media warn send error: {we}")
+
+                return
+
+            else:
+                # ----------------- 2-ҚОИДАБУЗАРЛИК (ҚАЙТА ЮБОРГАНДА - 24 СОАТ МУТ ВА БАРЧА ХАБАРЛАРИНИ ТОЗАЛАШ) -----------------
+                # А) Жорий юборилган хабарни ўчириш
+                delete_msg_safe(chat_id, message.message_id)
+
                 with _media_lock:
                     if mg_id:
                         _flagged_violation_albums.add((chat_id, str(mg_id)))
                     _flagged_violation_users[(chat_id, user_id)] = now_ts + 86400
+                    _user_warn_counts[(chat_id, user_id, today_str)] = 2
 
-                # А) Жорий хабарни ўчириш
-                delete_msg_safe(chat_id, message.message_id)
-
-                # Б) ФОЙДАЛАНУВЧИ ТАШЛАГАН БАРЧА РАСМЛАРНИ ТЎЛИҚ ЎЧИРИШ (1, 2, 3, 4... 10-чиси ҳаммаси!)
-                all_to_purge = set()
-                all_to_purge.add(message.message_id)
-                with _media_lock:
-                    if mg_id:
-                        all_to_purge.update(_album_all_messages.get((chat_id, str(mg_id)), []))
-                    all_to_purge.update(_user_all_media_history.get((chat_id, user_id), []))
-
-                for mid in all_to_purge:
-                    delete_msg_safe(chat_id, mid)
-
-                # В) Параллел келаётган кечиккан барча 10 талик расмларни ҳам йўқ қилиш учун тезкор тозалашлар:
-                def delayed_purge(c_id, u_id, a_id):
-                    to_del = set()
-                    with _media_lock:
-                        if a_id:
-                            to_del.update(_album_all_messages.get((c_id, str(a_id)), []))
-                        to_del.update(_user_all_media_history.get((c_id, u_id), []))
-                    for m in to_del:
-                        delete_msg_safe(c_id, m)
-
-                threading.Timer(0.5, delayed_purge, args=[chat_id, user_id, mg_id]).start()
-                threading.Timer(1.2, delayed_purge, args=[chat_id, user_id, mg_id]).start()
-                threading.Timer(2.5, delayed_purge, args=[chat_id, user_id, mg_id]).start()
-                threading.Timer(4.5, delayed_purge, args=[chat_id, user_id, mg_id]).start()
-
-                # Г) ДАРҲОЛ БИР КУНГА (24 СОАТ = 86400 сония) МУТ ЎРНАТИШ!
+                # Б) Фойдаланувчига 24 СОАТЛИК (1 КУНЛИК = 86400 сония) МУТ ўрнатиш
                 apply_group_mute(chat_id, user_id, 86400)
 
-                # Д) ОГОҲЛАНТИРИШ ХАБАРИ
-                last_w = _last_media_warn.get(user_id, 0)
-                if now_ts - last_w > 8:
-                    _last_media_warn[user_id] = now_ts
-                    warn_txt = (
-                        "Ассалому алейкум. 🙋‍♂️\n\n"
-                        f"Ҳурматли гуруҳимиз иштирокчиси {u_tag}..\n"
-                        "Бир кунда <b>3 тадан кўп расм ёки видео ташламанг ‼️</b>\n"
-                        "Гуруҳ қоидаси бўйича умумий 3 та бўлиши шарт. ‼️\n\n"
-                        f"Сиз 3 тадан ортиқ ({max(curr_album_cnt, curr_d_cnt)} та) расм/видео ташлаганингиз сабабли, "
-                        "<b>ташлаган БАРЧА расмларингиз гуруҳдан автоматик ўчирилди!</b> ‼️\n\n"
-                        "⏳ <b>Сизга 24 СОАТ (1 КУН) МУТ (ёзиш чеклови) белгиланди.</b> ‼️\n\n"
-                        "Ҳурмат билан ASALARICHILIK.UZ🇺🇿 админи 👨‍💻"
+                # В) ГУРУҲДАГИ БАРЧА АВВАЛГИ ЁЗИШМАЛАРИ ВА ХАБАРЛАРИНИ АВТОМАТИК ТОЗАЛАБ ЎЧИРИШ!
+                all_user_msgs = set()
+                all_user_msgs.add(message.message_id)
+                with _media_lock:
+                    all_user_msgs.update(_user_all_media_history.get((chat_id, user_id), []))
+                    all_user_msgs.update(_user_all_messages_history.get((chat_id, user_id), []))
+                    if mg_id:
+                        all_user_msgs.update(_album_all_messages.get((chat_id, str(mg_id)), []))
+
+                for mid in all_user_msgs:
+                    delete_msg_safe(chat_id, mid)
+
+                # Кечиккан барча хабарларни ҳам тозалаш учун тезкор тўлқинлар:
+                def delayed_full_user_purge(c_id, u_id, a_id):
+                    to_purge = set()
+                    with _media_lock:
+                        to_purge.update(_user_all_media_history.get((c_id, u_id), []))
+                        to_purge.update(_user_all_messages_history.get((c_id, u_id), []))
+                        if a_id:
+                            to_purge.update(_album_all_messages.get((c_id, str(a_id)), []))
+                    for m in to_purge:
+                        delete_msg_safe(c_id, m)
+
+                threading.Timer(0.5, delayed_full_user_purge, args=[chat_id, user_id, mg_id]).start()
+                threading.Timer(1.5, delayed_full_user_purge, args=[chat_id, user_id, mg_id]).start()
+                threading.Timer(3.0, delayed_full_user_purge, args=[chat_id, user_id, mg_id]).start()
+
+                # Г) Базага қайд этиш
+                try:
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO user_bee_ad_limits (chat_id, user_id, count, ad_date, warn_count, last_warn_ts) VALUES (?, ?, ?, ?, 2, ?)",
+                        (chat_id, user_id, curr_d_cnt, today_str, now_ts)
                     )
-                    w_msg = bot.send_message(chat_id, warn_txt, parse_mode="HTML")
-                    del_sec = max(g.get("limit_notice_del", 60) if g else 60, 60)
-                    threading.Timer(del_sec, lambda: delete_msg_safe(chat_id, w_msg.message_id)).start()
+                    conn.commit()
+                except Exception:
+                    pass
+
+                # Д) Огоҳлантириш хабари (БотМастер скриншотидаги аниқ матн)
+                last_w = _last_media_warn.get((chat_id, user_id), 0)
+                if now_ts - last_w > 8:
+                    _last_media_warn[(chat_id, user_id)] = now_ts
+                    warn_txt = (
+                        "Огоҳлантириш ‼️\n"
+                        f"Ассалому алейкум {u_tag}\n"
+                        "Асаларичилик группага фақат бир кунда 3 та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️"
+                    )
+                    try:
+                        w_msg = bot.send_message(chat_id, warn_txt, parse_mode="HTML")
+                        threading.Timer(60, lambda: delete_msg_safe(chat_id, w_msg.message_id)).start()
+                    except Exception as we:
+                        logging.warning(f"Media warn send error: {we}")
+
                 return
             return
 
