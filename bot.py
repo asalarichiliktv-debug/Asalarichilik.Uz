@@ -1,9 +1,12 @@
 
 # Янги мукаммал медиа лимит ва альбом кэшлари (Барча расмларни ўчириш ва 24 соатлик мут учун)
-_user_all_media_history = {}  # (chat_id, user_id) -> list of message_ids
-_album_all_messages = {}      # (chat_id, mg_id) -> list of message_ids
-_album_counts_dict = {}       # (chat_id, mg_id) -> int
-_user_daily_counts = {}       # (chat_id, user_id, date_str) -> int
+_user_all_media_history = {}      # (chat_id, user_id) -> list of message_ids
+_album_all_messages = {}          # (chat_id, mg_id) -> list of message_ids
+_album_counts_dict = {}           # (chat_id, mg_id) -> int
+_user_daily_counts = {}           # (chat_id, user_id, date_str) -> int
+_flagged_violation_albums = set() # (chat_id, mg_id) that exceeded media limit
+_flagged_violation_users = {}     # (chat_id, user_id) -> muted_until_ts
+_admin_cache = {}                 # (chat_id, user_id) -> (is_adm, timestamp)
 # ========================================================
 # 🐝 Asalarichilik.Uz🇺🇿 - Telegram Гуруҳ Бошқарув & Хавфсизлик Боти
 # Муаллиф ва Бот эгаси: @JamshidjonDavronov
@@ -913,25 +916,36 @@ def register_channel(chat_id, title, username=None):
     backup_settings_to_file()
 
 def get_group(group_id):
-    cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (group_id,))
-    row = cursor.fetchone()
-    if not row and int(group_id) == -1001275726275:
-        ensure_main_group_seeded()
+    try:
         cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (group_id,))
         row = cursor.fetchone()
-    return row
+        if not row and int(group_id) == -1001275726275:
+            ensure_main_group_seeded()
+            cursor.execute("SELECT * FROM groups WHERE chat_id = ?", (group_id,))
+            row = cursor.fetchone()
+        if row:
+            return dict(row)
+    except Exception as e:
+        logging.error(f"get_group error: {e}")
+    return {}
 
 def is_admin(chat_id, user_id):
     # Telegram хизмат ҳисоблари ва бот эгаси
     if user_id == OWNER_ID:
         return True
-    if user_id in [777000, 1087968824]:
+    if user_id in [777000, 1087968824, 136817688]:
         return True
     if user_id <= 0:
         return False
+    now = time.time()
+    cached = _admin_cache.get((chat_id, user_id))
+    if cached and (now - cached[1]) < 300:
+        return cached[0]
     try:
         m = bot.get_chat_member(chat_id, user_id)
-        return m.status in ['creator', 'administrator']
+        is_adm = m.status in ['creator', 'administrator']
+        _admin_cache[(chat_id, user_id)] = (is_adm, now)
+        return is_adm
     except Exception:
         return False
 
@@ -10173,17 +10187,42 @@ def group_protection_filter(message):
             now_ts = int(time.time())
             mg_id = getattr(message, 'media_group_id', None)
 
+            # 0. АГАР БУ АЛЬБОМ ЁКИ ФОЙДАЛАНУВЧИ БОТ ТОМОНИДАН ҚОИДАБУЗАР ДЕБ БЕЛГИЛАНГАН БЎЛСА
+            # (Масалан, 10 талик альбомнинг кейинги параллел расмлари ёки 24 соатлик мутдаги фойдаланувчи):
+            is_already_flagged = False
+            with _media_lock:
+                if mg_id and (chat_id, str(mg_id)) in _flagged_violation_albums:
+                    is_already_flagged = True
+                elif now_ts < _flagged_violation_users.get((chat_id, user_id), 0):
+                    is_already_flagged = True
+
+            if is_already_flagged:
+                delete_msg_safe(chat_id, message.message_id)
+                with _media_lock:
+                    if mg_id:
+                        _album_all_messages.setdefault((chat_id, str(mg_id)), []).append(message.message_id)
+                    _user_all_media_history.setdefault((chat_id, user_id), []).append(message.message_id)
+                return
+
             with _media_lock:
                 # 1. Барча келаётган расм ва видеоларни кэшга оламиз
                 _user_all_media_history.setdefault((chat_id, user_id), []).append(message.message_id)
                 if mg_id:
-                    _album_all_messages.setdefault((chat_id, mg_id), []).append(message.message_id)
-                    _album_counts_dict[(chat_id, mg_id)] = _album_counts_dict.get((chat_id, mg_id), 0) + 1
-                    curr_album_cnt = _album_counts_dict[(chat_id, mg_id)]
+                    _album_all_messages.setdefault((chat_id, str(mg_id)), []).append(message.message_id)
+                    _album_counts_dict[(chat_id, str(mg_id))] = _album_counts_dict.get((chat_id, str(mg_id)), 0) + 1
+                    curr_album_cnt = _album_counts_dict[(chat_id, str(mg_id))]
                 else:
                     curr_album_cnt = 1
 
-                # 2. Кунлик ҳисоблаш
+                # 2. Кунлик ҳисоблаш (базадан кэшга олиш ва ошириш)
+                if (chat_id, user_id, today_str) not in _user_daily_counts:
+                    try:
+                        cursor.execute("SELECT count FROM user_bee_ad_limits WHERE chat_id = ? AND user_id = ? AND ad_date = ?", (chat_id, user_id, today_str))
+                        row_cnt = cursor.fetchone()
+                        _user_daily_counts[(chat_id, user_id, today_str)] = row_cnt["count"] if (row_cnt and "count" in row_cnt) else 0
+                    except Exception:
+                        _user_daily_counts[(chat_id, user_id, today_str)] = 0
+
                 curr_d_cnt = _user_daily_counts.get((chat_id, user_id, today_str), 0) + 1
                 _user_daily_counts[(chat_id, user_id, today_str)] = curr_d_cnt
 
@@ -10197,32 +10236,42 @@ def group_protection_filter(message):
                 except Exception:
                     pass
 
-            # 3. АГАР 3 ТАДАН ОШСА (АЛЬБОМДА 4 ТА, 5 ТА БЎЛСА ЁКИ КУНЛИК 3 ТАДАН ОШСА):
-            is_excess = (mg_id and curr_album_cnt > limit_max) or curr_d_cnt > limit_max
+            # 3. АГАР 3 ТАДАН ОШСА (АЛЬБОМДА 4, 5, 10 ТА БЎЛСА ЁКИ КУНЛИК 3 ТАДАН ОШСА):
+            is_excess = (mg_id and curr_album_cnt > limit_max) or (curr_d_cnt > limit_max)
             if is_excess:
+                with _media_lock:
+                    if mg_id:
+                        _flagged_violation_albums.add((chat_id, str(mg_id)))
+                    _flagged_violation_users[(chat_id, user_id)] = now_ts + 86400
+
                 # А) Жорий хабарни ўчириш
                 delete_msg_safe(chat_id, message.message_id)
 
-                # Б) ФОЙДАЛАНУВЧИ ТАШЛАГАН БАРЧА РАСМЛАРНИ ТЎЛИҚ ЎЧИРИШ (1, 2, 3, 4, 5-чиси ҳаммаси!)
+                # Б) ФОЙДАЛАНУВЧИ ТАШЛАГАН БАРЧА РАСМЛАРНИ ТЎЛИҚ ЎЧИРИШ (1, 2, 3, 4... 10-чиси ҳаммаси!)
                 all_to_purge = set()
                 all_to_purge.add(message.message_id)
-                if mg_id:
-                    all_to_purge.update(_album_all_messages.get((chat_id, mg_id), []))
-                all_to_purge.update(_user_all_media_history.get((chat_id, user_id), []))
+                with _media_lock:
+                    if mg_id:
+                        all_to_purge.update(_album_all_messages.get((chat_id, str(mg_id)), []))
+                    all_to_purge.update(_user_all_media_history.get((chat_id, user_id), []))
 
                 for mid in all_to_purge:
                     delete_msg_safe(chat_id, mid)
 
-                # В) Параллел келаётган кечиккан расмларни ҳам йўқ қилиш учун 1 ва 2.5 сонияда яна тозалаш:
+                # В) Параллел келаётган кечиккан барча 10 талик расмларни ҳам йўқ қилиш учун тезкор тозалашлар:
                 def delayed_purge(c_id, u_id, a_id):
                     to_del = set()
-                    if a_id:
-                        to_del.update(_album_all_messages.get((c_id, a_id), []))
-                    to_del.update(_user_all_media_history.get((c_id, u_id), []))
+                    with _media_lock:
+                        if a_id:
+                            to_del.update(_album_all_messages.get((c_id, str(a_id)), []))
+                        to_del.update(_user_all_media_history.get((c_id, u_id), []))
                     for m in to_del:
                         delete_msg_safe(c_id, m)
-                threading.Timer(1.0, delayed_purge, args=[chat_id, user_id, mg_id]).start()
+
+                threading.Timer(0.5, delayed_purge, args=[chat_id, user_id, mg_id]).start()
+                threading.Timer(1.2, delayed_purge, args=[chat_id, user_id, mg_id]).start()
                 threading.Timer(2.5, delayed_purge, args=[chat_id, user_id, mg_id]).start()
+                threading.Timer(4.5, delayed_purge, args=[chat_id, user_id, mg_id]).start()
 
                 # Г) ДАРҲОЛ БИР КУНГА (24 СОАТ = 86400 сония) МУТ ЎРНАТИШ!
                 apply_group_mute(chat_id, user_id, 86400)
