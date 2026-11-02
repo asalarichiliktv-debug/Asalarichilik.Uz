@@ -4997,7 +4997,266 @@ async def on_ask_group_callback(call: types.CallbackQuery):
         except Exception:
             pass
 
-@dp.message(F.chat.type.in_({"group", "supergroup"}))
+# ==============================================================================
+# GURUH MEDIA CHEKLOVI (KUNIGA MAKSIMAL 3 TA RASM/VIDEO, 1-MUT 2 SOAT, 2-MUT 24 SOAT)
+# ==============================================================================
+GROUP_MEDIA_LIMITS_FILE = os.path.join(BASE_DIR, "group_media_limits.json")
+
+def get_tashkent_today_str() -> str:
+    try:
+        tz = timezone(timedelta(hours=5))
+        return datetime.now(tz).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.utcnow().strftime("%Y-%m-%d")
+
+def load_group_media_limits() -> dict:
+    data = load_json_file(GROUP_MEDIA_LIMITS_FILE, {})
+    if not isinstance(data, dict):
+        return {}
+    today = get_tashkent_today_str()
+    # Prune old days beyond recent 3 days
+    keys = sorted(data.keys())
+    if len(keys) > 5:
+        for k in keys[:-3]:
+            if k < today:
+                data.pop(k, None)
+    return data
+
+def save_group_media_limits(data: dict):
+    save_json_file(GROUP_MEDIA_LIMITS_FILE, data)
+
+def get_user_group_media_record(limits_db: dict, chat_id: int, user_id: int) -> dict:
+    today = get_tashkent_today_str()
+    if today not in limits_db:
+        limits_db[today] = {}
+    c_key = str(chat_id)
+    if c_key not in limits_db[today]:
+        limits_db[today][c_key] = {}
+    u_key = str(user_id)
+    if u_key not in limits_db[today][c_key]:
+        limits_db[today][c_key][u_key] = {
+            "media_count": 0,
+            "violations": 0,
+            "last_warn_time": 0.0,
+            "last_violation_time": 0.0,
+            "active_media_group_id": None,
+            "message_ids": []
+        }
+    return limits_db[today][c_key][u_key]
+
+def record_user_group_message(chat_id: int, user_id: int, message_id: int):
+    try:
+        db = load_group_media_limits()
+        u_data = get_user_group_media_record(db, chat_id, user_id)
+        msg_ids = u_data.get("message_ids", [])
+        if message_id not in msg_ids:
+            msg_ids.append(message_id)
+            if len(msg_ids) > 100:
+                msg_ids = msg_ids[-100:]
+            u_data["message_ids"] = msg_ids
+            save_group_media_limits(db)
+    except Exception as e:
+        logging.error(f"[MEDIA LIMIT] record_user_group_message xatolik: {e}")
+
+async def is_group_admin_or_exempt(chat_id: int, user: Optional[types.User], message: types.Message) -> bool:
+    if not user:
+        return True
+    if user.id == OWNER_ID:
+        return True
+    if user.id in (777000, 1087968824) or user.username == "Telegram":
+        return True
+    try:
+        bot_info = await bot.get_me()
+        if user.id == bot_info.id:
+            return True
+    except Exception:
+        pass
+    if getattr(message, "is_automatic_forward", False) or bool(getattr(message, "forward_from_chat", None)):
+        return True
+    if message.sender_chat is not None:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id, user.id)
+        if member.status in ("creator", "administrator"):
+            return True
+    except Exception:
+        pass
+    return False
+
+async def auto_delete_message_after_delay(chat_id: int, message_id: int, delay_seconds: int = 60):
+    try:
+        await asyncio.sleep(delay_seconds)
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logging.info(f"[MEDIA LIMIT] Ogohlantirish xabari {message_id} ({chat_id}) {delay_seconds}s dan keyin avtomatik o'chirildi")
+    except Exception as e:
+        logging.warning(f"[MEDIA LIMIT] Ogohlantirish xabarini o'chirishda xatolik {message_id}: {e}")
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}) &
+    (F.photo | F.video | F.animation | F.video_note | F.document)
+)
+async def group_media_limiter_handler(message: types.Message):
+    chat_id = message.chat.id
+    user = message.from_user
+    if not user:
+        return
+
+    # Faqat rasm, video, animatsiya va video-xabarlar tekshiriladi
+    is_media = bool(
+        message.photo or 
+        message.video or 
+        message.animation or 
+        message.video_note or 
+        (message.document and (message.document.mime_type or "").startswith(("image/", "video/")))
+    )
+    if not is_media:
+        return
+
+    # 1. Admin, bot egasi, rasmiy kanallar va xizmat akkauntlariga to'liq daxlsizlik
+    if await is_group_admin_or_exempt(chat_id, user, message):
+        return
+
+    if not is_chat_allowed(chat_id):
+        save_allowed_chat(chat_id, message.chat.title or "Guruh", "group")
+
+    db = load_group_media_limits()
+    u_data = get_user_group_media_record(db, chat_id, user.id)
+
+    # Foydalanuvchining bugungi media sonini oshirish
+    cur_count = u_data.get("media_count", 0) + 1
+    u_data["media_count"] = cur_count
+
+    # Xabar ID sini yozib borish
+    msg_ids = u_data.get("message_ids", [])
+    if message.message_id not in msg_ids:
+        msg_ids.append(message.message_id)
+        if len(msg_ids) > 100:
+            msg_ids = msg_ids[-100:]
+        u_data["message_ids"] = msg_ids
+
+    # RUXSAT ETILGAN: Bir kunda 3 tagacha rasm yoki video ruxsat etiladi
+    if cur_count <= 3:
+        save_group_media_limits(db)
+        logging.info(f"[MEDIA LIMIT] Ruxsat etildi: {user.id} ({user.full_name}) media #{cur_count}/3 (chat: {chat_id})")
+        return
+
+    # 3 TA LIМИТДАН ОШДИ (QOIDABUZARLIK):
+    # O'sha zahotiyoq 3 tadan oshiqcha yuborilgan rasmni o'chirish
+    try:
+        await message.delete()
+        logging.info(f"[MEDIA LIMIT] 3 tadan oshiqcha rasm/video o'chirildi: msg {message.message_id} (user: {user.id})")
+    except Exception as de:
+        logging.error(f"[MEDIA LIMIT] Xabarni o'chirishda xatolik: {de}")
+
+    now = time.time()
+    last_violation_time = u_data.get("last_violation_time", 0.0)
+    active_mg_id = u_data.get("active_media_group_id")
+    current_mg_id = message.media_group_id
+
+    # Bitta albom (media_group_id) yoki bir vaqtda ketma-ket yuborilgan burst to'plamini aniqlash
+    is_same_batch = False
+    if current_mg_id and active_mg_id and current_mg_id == active_mg_id:
+        is_same_batch = True
+    elif (now - last_violation_time) < 45.0:
+        is_same_batch = True
+
+    if not is_same_batch:
+        u_data["violations"] = u_data.get("violations", 0) + 1
+        u_data["last_violation_time"] = now
+        if current_mg_id:
+            u_data["active_media_group_id"] = current_mg_id
+
+    violations = u_data.get("violations", 1)
+
+    # Qoidabuzarlik choralarini qo'llash:
+    if violations == 1:
+        # 1-marta 3 tadan oshganda: 2 soatlik mut
+        until_date = int(now) + 2 * 3600
+        try:
+            await bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user.id,
+                permissions=ChatPermissions(
+                    can_send_messages=False,
+                    can_send_media_messages=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False
+                ),
+                until_date=until_date
+            )
+            logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} 2 soatga mut qilindi (1-qoidabuzarlik)")
+        except Exception as re:
+            logging.error(f"[MEDIA LIMIT] 2 soatlik mut o'rnatishda xatolik: {re}")
+    else:
+        # 2-marta (takroriy) yuborganda: 24 soatlik (1 kunlik) mut va barcha xabarlarini avtomatik o'chirish
+        until_date = int(now) + 24 * 3600
+        try:
+            await bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user.id,
+                permissions=ChatPermissions(
+                    can_send_messages=False,
+                    can_send_media_messages=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False
+                ),
+                until_date=until_date
+            )
+            logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} 24 soatga mut qilindi (takroriy qoidabuzarlik)")
+        except Exception as re:
+            logging.error(f"[MEDIA LIMIT] 24 soatlik mut o'rnatishda xatolik: {re}")
+
+        # Guruhdagi bugungi barcha yozishmalarini avtomatik o'chirish
+        all_mids = list(u_data.get("message_ids", []))
+        u_data["message_ids"] = []
+        for mid in all_mids:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=mid)
+                await asyncio.sleep(0.04)
+            except Exception:
+                pass
+        logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} ning {len(all_mids)} ta yozishmasi o'chirildi")
+
+    # Guruhda ogohlantirish xabari yuborish (bitta albom uchun har bir rasmda spam bo'lmasligi uchun 25 soniya debounce)
+    last_warn_time = u_data.get("last_warn_time", 0.0)
+    if (now - last_warn_time) > 25.0:
+        u_data["last_warn_time"] = now
+        save_group_media_limits(db)
+
+        user_mention = user.mention_html()
+        if violations == 1:
+            warn_text = (
+                "<b>Огоҳлантириш ‼️</b>\n"
+                f"Ассалому алейкум {user_mention}\n"
+                "Асаларичилик группага фақат бир кунда 3 та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️\n\n"
+                "⚠️ <b>Сиз кунлик 3 талик расм ва видео лимитидан ошдингиз!</b>\n"
+                "⏳ <b>Сизга 2 соатлик мут (ёзиш чеклови) ўрнатилди ва ортиқча медиа ўчирилди.</b>\n\n"
+                "<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
+            )
+        else:
+            warn_text = (
+                "<b>Огоҳлантириш ‼️</b>\n"
+                f"Ассалому алейкум {user_mention}\n"
+                "Асаларичилик группага фақат бир кунда 3 та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️\n\n"
+                "⛔️ <b>Сиз қоидани такроран буздингиз!</b>\n"
+                "🚫 <b>Сизга 1 кунлик (24 соат) мут белгиланди ва гуруҳдаги барча ёзишмаларингиз автоматик ўчириб ташланди!</b>\n\n"
+                "<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
+            )
+
+        try:
+            warn_msg = await bot.send_message(
+                chat_id=chat_id,
+                text=warn_text,
+                parse_mode="HTML"
+            )
+            # 1 дақиқадан (60 сония) сўнг огоҳлантиришни автоматик ўчириб юбориш
+            asyncio.create_task(auto_delete_message_after_delay(chat_id, warn_msg.message_id, 60))
+        except Exception as we:
+            logging.error(f"[MEDIA LIMIT] Ogohlantirish yuborishda xatolik: {we}")
+    else:
+        save_group_media_limits(db)
+
+@dp.message(F.chat.type.in_({"group", "supergroup"}) & F.text)
 async def group_handler(message: types.Message):
     chat_id = message.chat.id
     user = message.from_user
@@ -5042,6 +5301,10 @@ async def group_handler(message: types.Message):
                     is_admin = True
             except Exception:
                 pass
+
+    # Oddiy a'zolarning xabarlarini tozalash uchun ro'yxatga olib borish
+    if user and not is_admin:
+        record_user_group_message(chat_id, user.id, message.message_id)
 
     # Гуруҳ ҳаволаларини тозалаш ва муте қилиш бошқа махсус ботга топширилган.
     # Ushbu bot guruhda begona havolalarni o'chirmaydi va a'zolarni mute qilmaydi.
@@ -6253,7 +6516,11 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
         f"📋 **НАЗОРАТДАГИ ГУРУҲЛАР ({len(group_list)} та):**\n"
         f"{grps_text}\n\n"
         "────────────────────────\n"
-        "🛡 **Гуруҳ хавфсизлиги:** Бегона бот ва спам реклама ҳаволаларини ўчириш ва муте қилиш махсус тозаловчи ботга бириктирилган.\n"
+        "🛡 **Гуруҳ хавфсизлиги ва Медиа чеклови:**\n"
+        "  ├ 📷 Расм ва видео лимити: 🟢 ФАОЛ (Кунига макс 3 та)\n"
+        "  ├ ⏳ 1-қоидабузарлик: 2 соатлик мут + ортиқча медиани ўчириш\n"
+        "  ├ 🚫 2-қоидабузарлик: 24 соатлик мут + барча ёзишмаларни ўчириш\n"
+        "  └ ⏱ Огоҳлантириш: 1 дақиқадан сўнг автоматик ўчирилади\n"
         "🎯 **Имкониятлар:** Бот гуруҳда аричилар саволларига автоматик мутахассис жавобини беради ҳамда викторина ва илмий тестларни ўтказади."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -6431,12 +6698,10 @@ async def on_grp_nav_guide(call: types.CallbackQuery):
     await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
 # ==============================================================================
-# 22. GURUHLARDA MODERATSIYA (BOSHQA BOTGA TOPSHIRILGAN)
+# 22. GURUHLARDA MODERATSIYA VA MEDIA CHEKLOVI
+# (Kuniga maks 3 ta rasm/video, 1-mut 2 soat, 2-mut 24 soat + xabarlarni o'chirish)
+# Yuqorida to'liq amalga oshirilgan (group_media_limiter_handler)
 # ==============================================================================
-@dp.message(F.chat.type.in_({"group", "supergroup"}) & (F.photo | F.video | F.animation))
-async def group_media_limiter_handler(message: types.Message):
-    # Guruh moderatsiyasi (havolalar, tozalash va mute) boshqa maxsus botga topshirilgan
-    return
 
 # ==============================================================================
 # 23. АСАЛАРИЧИЛИК ИЛМИЙ ТАДҚИҚОТ ИНСТИТУТЛАРИ ТЕСТЛАРИ БЎЛИМИ
