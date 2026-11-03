@@ -249,19 +249,25 @@ def get_settings() -> dict:
         "quiz_schedule_time": "10:00",       # Har kuni 10:00 da
         "quiz_level": "beginner",            # "beginner", "spec", "mixed"
         "news_schedule_enabled": True,       # Avtomatik yangiliklar jadvali
-        "news_schedule_time": "14:00",
+        "news_schedule_time": "07:00",
         "apitherapy_schedule_enabled": True,
-        "apitherapy_schedule_time": "16:00",
+        "apitherapy_schedule_time": "08:00",
         "silent_send": False,
         "news_auto_enabled": True,
-        "news_auto_time": "14:00",
+        "news_auto_time": "07:00",
         "news_auto_target": "both",          # "channel", "group", "both"
         "quiz_auto_enabled": True,
-        "quiz_auto_time": "10:00",
+        "quiz_auto_time": "16:00",
+        "quiz_schedule_time": "16:00",
         "quiz_auto_target": "both",          # "channel", "group", "both"
         "apitherapy_auto_enabled": True,
-        "apitherapy_auto_time": "16:00",
-        "apitherapy_auto_target": "both"
+        "apitherapy_auto_time": "08:00",
+        "apitherapy_auto_target": "both",
+        "video_auto_enabled": True,
+        "video_schedule_enabled": True,
+        "video_auto_time": "18:00",
+        "video_schedule_time": "18:00",
+        "video_auto_target": "both"
     }
     data = load_json_file(SETTINGS_FILE, defaults)
     for k, v in defaults.items():
@@ -1962,12 +1968,9 @@ def build_post_markup(chat_id: int, message_id: int, reactions_list: Optional[Li
         txt_tpl = "📝 Шаблон қилиш" if script_mode == "cyrillic" else "📝 Shablon qilish"
         action_row.append(InlineKeyboardButton(text=txt_tpl, callback_data=cb_tpl))
     elif settings.get("auto_comment", True):
-        txt_spec = "💬 Мутахассис" if script_mode == "cyrillic" else "💬 Mutaxassis"
-        if is_channel_post:
-            action_row.append(InlineKeyboardButton(text=txt_spec, url=f"https://t.me/{grp_user}"))
-        else:
-            cb_ask = f"ask_group:{chat_id}:{message_id}"
-            action_row.append(InlineKeyboardButton(text=txt_spec, callback_data=cb_ask))
+        txt_spec = "💬 Мутахассис 👮‍♂️" if script_mode == "cyrillic" else "💬 Mutaxassis 👮‍♂️"
+        bot_user = get_settings().get("official_bot", "@Asalarichilikuz_bot").replace("@", "")
+        action_row.append(InlineKeyboardButton(text=txt_spec, url=f"https://t.me/{bot_user}?start=ask_expert"))
 
     if action_row:
         inline_keyboard.append(action_row)
@@ -2012,11 +2015,10 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="➕ Гуруҳга қўшиш"), KeyboardButton(text="➕ Каналга қўшиш")],
         [KeyboardButton(text="⚙️ Гуруҳ созламалари"), KeyboardButton(text="📢 Каналлар бошқаруви")],
-        [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🌿 Апитерапия янгиликлари")],
-        [KeyboardButton(text="🎓 Илмий тадқиқот тестлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
-        [KeyboardButton(text="🎬 Асаларичилик видеолари"), KeyboardButton(text="📢 Реклама тарқатиш")],
-        [KeyboardButton(text="👑 Гуруҳлар назорати"), KeyboardButton(text="👑 Бот эгаси")],
-        [KeyboardButton(text="📖 Бот қўлланмаси")]
+        [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
+        [KeyboardButton(text="👑 Бот эгаси")],
+        [KeyboardButton(text="📢 Реклама тарқатиш"), KeyboardButton(text="👑 Гуруҳлар назорати")],
+        [KeyboardButton(text="🌐 Тилни ўзгартириш"), KeyboardButton(text="📖 Бот қўлланмаси")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -2547,14 +2549,14 @@ def format_quiz_preview_text(quiz: dict, idx: int, total: int, script: str = "cy
     return "\n".join(lines)
 
 def build_quiz_preview_keyboard(idx: int, total: int, script: str = "cyrillic") -> InlineKeyboardMarkup:
-    script_lbl = "🟢 Кириллча" if script == "cyrillic" else "🟢 Lotincha"
     rows = [
         [
-            InlineKeyboardButton(text="📢 Каналга юбориш", callback_data=f"quiz_send_chan:{idx}"),
-            InlineKeyboardButton(text="👥 Гуруҳга юбориш", callback_data=f"quiz_send_grp:{idx}")
+            InlineKeyboardButton(text="📢 Канал", callback_data=f"quiz_send_chan:{idx}"),
+            InlineKeyboardButton(text="👥 Группа", callback_data=f"quiz_send_grp:{idx}"),
+            InlineKeyboardButton(text="🚀 Канал & Группа", callback_data=f"quiz_send_both:{idx}")
         ],
         [
-            InlineKeyboardButton(text="🌐 Канал ва Гуруҳга (Иккаласига) 📌", callback_data=f"quiz_send_both:{idx}")
+            InlineKeyboardButton(text="♻️ 10 та янги маълумот автоматик қўшиш", callback_data="quiz_auto_add_10")
         ],
         [
             InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"quiz_page:{idx - 1}"),
@@ -2562,16 +2564,7 @@ def build_quiz_preview_keyboard(idx: int, total: int, script: str = "cyrillic") 
             InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"quiz_page:{idx + 1}")
         ],
         [
-            InlineKeyboardButton(text="🎲 Тасодифий савол", callback_data="quiz_random"),
-            InlineKeyboardButton(text="🔄 Янги 10 та савол яратиш (AI)", callback_data="quiz_act:generate_ai")
-        ],
-        [
-            InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_lbl}", callback_data=f"quiz_toggle_script:{idx}"),
-            InlineKeyboardButton(text="⚙️ Созламалар", callback_data="quiz_settings")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -3126,51 +3119,22 @@ def format_news_post_text(news: dict, script: str = "cyrillic", is_admin: bool =
     return "\n".join(lines)
 
 def build_news_viewer_keyboard(idx: int, total: int, script: str = "cyrillic") -> InlineKeyboardMarkup:
-    settings = get_settings()
-    script_lbl = "🟢 Кириллча" if script == "cyrillic" else "🟢 Lotincha"
-    dest_mode = settings.get("post_target_mode", "channel")
-    if dest_mode == "channel":
-        dest_lbl = "Фақат Каналларга"
-    elif dest_mode == "group":
-        dest_lbl = "Фақат Гуруҳларга"
-    elif dest_mode == "both":
-        dest_lbl = "Канал ва Гуруҳга"
-    else:
-        dest_lbl = "Фақат Каналларга"
-
     rows = [
-        # 1-qator: Kanalga yoki Guruhga yuborish
         [
-            InlineKeyboardButton(text="📢 Каналга юбориш", callback_data=f"news_send_chan:{idx}"),
-            InlineKeyboardButton(text="👥 Гуруҳга юбориш", callback_data=f"news_send_grp:{idx}")
+            InlineKeyboardButton(text="📢 Канал", callback_data=f"news_send_chan:{idx}"),
+            InlineKeyboardButton(text="👥 Группа", callback_data=f"news_send_grp:{idx}"),
+            InlineKeyboardButton(text="🚀 Канал & Группа", callback_data=f"news_publish_pin:{idx}")
         ],
-        # 2-qator: Ikkalasiga bir vaqtda юбориш ва қадаш
         [
-            InlineKeyboardButton(text="🌐 Канал ва Гуруҳга (Иккаласига) 📌", callback_data=f"news_publish_pin:{idx}")
+            InlineKeyboardButton(text="♻️ 10 та янги маълумот автоматик қўшиш", callback_data="news_auto_add_10")
         ],
-        # 3-qator: Reklama menyusiga to'g'ridan-to'g'ri o'tkazish
-        [
-            InlineKeyboardButton(text="📣 Реклама менюсига тўғридан-тўғри ўтказиш 🚀", callback_data=f"news_to_post:{idx}")
-        ],
-        # 4-qator: Paginatsiya [⬅️ Олдингиси] [📄 1 / total] [Кейингиси ➡️]
         [
             InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"news_page:{idx - 1}"),
             InlineKeyboardButton(text=f"📄 {idx + 1} / {total}", callback_data=f"news_page_info:{idx}"),
             InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"news_page:{idx + 1}")
         ],
-        # 5-qator: Yozuv turi va Tasodifiy yangilik
         [
-            InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_lbl}", callback_data=f"news_toggle_script:{idx}"),
-            InlineKeyboardButton(text="🎲 Тасодифий янгилик", callback_data="news_random")
-        ],
-        # 6-qator: Manzil sozlamasi
-        [
-            InlineKeyboardButton(text=f"⚙️ Манзил созламаси: {dest_lbl}", callback_data=f"news_toggle_dest:{idx}")
-        ],
-        # 7-qator: Orqaga va Asosiy menyu
-        [
-            InlineKeyboardButton(text="🔙 Орқага (Олдинги бўлимга)", callback_data="news_back_menu"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -3490,7 +3454,7 @@ async def on_main_menu_callback(call: types.CallbackQuery):
         await call.message.delete()
     except Exception:
         pass
-    await call.message.answer("🏠 Асосий Менюга қайтдингиз:", reply_markup=get_main_reply_keyboard())
+    await call.message.answer("🎛 **Асосий менюдан керакли бўлимни танланг:**", reply_markup=get_main_reply_keyboard(), parse_mode="Markdown")
     await call.answer()
 
 @dp.callback_query(F.data == "news_search_fresh")
@@ -5002,6 +4966,36 @@ async def on_ask_group_callback(call: types.CallbackQuery):
 # ==============================================================================
 GROUP_MEDIA_LIMITS_FILE = os.path.join(BASE_DIR, "group_media_limits.json")
 
+DEFAULT_MEDIA_LIMITS_CONFIG = {
+    "enabled": True,
+    "daily_limit": 3,
+    "warn_text": (
+        "Огоҳлантириш ‼️\n"
+        "Ассалому алейкум {user_mention} \n"
+        "Асаларичилик группага фақат бир кунда {limit} та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️"
+    )
+}
+
+def get_media_limits_settings() -> dict:
+    s = get_settings()
+    cfg = s.get("group_media_limits_config", {})
+    changed = False
+    for k, v in DEFAULT_MEDIA_LIMITS_CONFIG.items():
+        if k not in cfg:
+            cfg[k] = v
+            changed = True
+    if changed:
+        s["group_media_limits_config"] = cfg
+        save_settings(s)
+    return cfg
+
+def update_media_limits_setting(key: str, val: Any):
+    s = get_settings()
+    cfg = s.get("group_media_limits_config", {})
+    cfg[key] = val
+    s["group_media_limits_config"] = cfg
+    save_settings(s)
+
 def get_tashkent_today_str() -> str:
     try:
         tz = timezone(timedelta(hours=5))
@@ -5134,17 +5128,32 @@ async def group_media_limiter_handler(message: types.Message):
             msg_ids = msg_ids[-100:]
         u_data["message_ids"] = msg_ids
 
-    # RUXSAT ETILGAN: Bir kunda 3 tagacha rasm yoki video ruxsat etiladi
-    if cur_count <= 3:
+    cfg = get_media_limits_settings()
+    if not cfg.get("enabled", True):
+        # Admin tomonidan guruh uchun limit o'chirilgan
         save_group_media_limits(db)
-        logging.info(f"[MEDIA LIMIT] Ruxsat etildi: {user.id} ({user.full_name}) media #{cur_count}/3 (chat: {chat_id})")
         return
 
-    # 3 TA LIМИТДАН ОШДИ (QOIDABUZARLIK):
-    # O'sha zahotiyoq 3 tadan oshiqcha yuborilgan rasmni o'chirish
+    daily_max_limit = max(1, int(cfg.get("daily_limit", 3)))
+    custom_warn_template = cfg.get("warn_text", "").strip()
+    if not custom_warn_template:
+        custom_warn_template = (
+            "Огоҳлантириш ‼️\n"
+            "Ассалому алейкум {user_mention} \n"
+            "Асаларичилик группага фақат бир кунда {limit} та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️"
+        )
+
+    # RUXSAT ETILGAN: Bir kunda daily_max_limit tagacha rasm yoki video ruxsat etiladi
+    if cur_count <= daily_max_limit:
+        save_group_media_limits(db)
+        logging.info(f"[MEDIA LIMIT] Ruxsat etildi: {user.id} ({user.full_name}) media #{cur_count}/{daily_max_limit} (chat: {chat_id})")
+        return
+
+    # LIМИТДАН ОШДИ (QOIDABUZARLIK):
+    # O'sha zahotiyoq oshiqcha yuborilgan rasmni o'chirish
     try:
         await message.delete()
-        logging.info(f"[MEDIA LIMIT] 3 tadan oshiqcha rasm/video o'chirildi: msg {message.message_id} (user: {user.id})")
+        logging.info(f"[MEDIA LIMIT] {daily_max_limit} tadan oshiqcha rasm/video o'chirildi: msg {message.message_id} (user: {user.id})")
     except Exception as de:
         logging.error(f"[MEDIA LIMIT] Xabarni o'chirishda xatolik: {de}")
 
@@ -5170,7 +5179,7 @@ async def group_media_limiter_handler(message: types.Message):
 
     # Qoidabuzarlik choralarini qo'llash:
     if violations == 1:
-        # 1-marta 3 tadan oshganda: 2 soatlik mut
+        # 1-marta limitdan oshganda: 2 soatlik mut
         until_date = int(now) + 2 * 3600
         try:
             await bot.restrict_chat_member(
@@ -5224,20 +5233,20 @@ async def group_media_limiter_handler(message: types.Message):
         save_group_media_limits(db)
 
         user_mention = user.mention_html()
+        base_warn = custom_warn_template.replace("{user_mention}", user_mention).replace("{limit}", str(daily_max_limit))
+        if user_mention not in base_warn and "{user_mention}" not in custom_warn_template:
+            base_warn = f"{user_mention}\n{base_warn}"
+
         if violations == 1:
             warn_text = (
-                "<b>Огоҳлантириш ‼️</b>\n"
-                f"Ассалому алейкум {user_mention}\n"
-                "Асаларичилик группага фақат бир кунда 3 та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️\n\n"
-                "⚠️ <b>Сиз кунлик 3 талик расм ва видео лимитидан ошдингиз!</b>\n"
+                f"{base_warn}\n\n"
+                f"⚠️ <b>Сиз бир кунлик {daily_max_limit} талик расм ва видео лимитидан ошдингиз!</b>\n"
                 "⏳ <b>Сизга 2 соатлик мут (ёзиш чеклови) ўрнатилди ва ортиқча медиа ўчирилди.</b>\n\n"
                 "<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
             )
         else:
             warn_text = (
-                "<b>Огоҳлантириш ‼️</b>\n"
-                f"Ассалому алейкум {user_mention}\n"
-                "Асаларичилик группага фақат бир кунда 3 та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️\n\n"
+                f"{base_warn}\n\n"
                 "⛔️ <b>Сиз қоидани такроран буздингиз!</b>\n"
                 "🚫 <b>Сизга 1 кунлик (24 соат) мут белгиланди ва гуруҳдаги барча ёзишмаларингиз автоматик ўчириб ташланди!</b>\n\n"
                 "<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
@@ -5402,9 +5411,9 @@ async def daily_scheduler_loop():
                 log[key_n] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # 2. Avtomatik Viktorina va So'rovnomalar
+            # 2. Avtomatik Viktorina va So'rovnomalar (16:00)
             quiz_enabled = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
-            quiz_time = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "10:00")))
+            quiz_time = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "16:00")))
             quiz_target = settings.get("quiz_auto_target", "both")
             key_q = f"quiz_{today_str}_{quiz_time}"
 
@@ -5421,9 +5430,9 @@ async def daily_scheduler_loop():
                 log[key_q] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # 3. Avtomatik Apiterapiya
+            # 3. Avtomatik Apiterapiya (08:00)
             api_enabled = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
-            api_time = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "16:00")))
+            api_time = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "08:00")))
             api_target = settings.get("apitherapy_auto_target", "both")
             key_a = f"apitherapy_{today_str}_{api_time}"
 
@@ -5448,6 +5457,39 @@ async def daily_scheduler_loop():
                         except Exception as e:
                             logging.error(f"Auto-apitherapy xatolik ({cid}): {e}")
                 log[key_a] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
+
+            # 4. Avtomatik Asalarichilik Videolari (18:00)
+            vid_enabled = settings.get("video_auto_enabled", settings.get("video_schedule_enabled", True))
+            vid_time = normalize_hhmm(settings.get("video_auto_time", settings.get("video_schedule_time", "18:00")))
+            vid_target = settings.get("video_auto_target", "both")
+            key_v = f"video_{today_str}_{vid_time}"
+
+            if vid_enabled and (cur_hhmm == vid_time or (cur_hhmm > vid_time and is_within_minutes(cur_hhmm, vid_time, 15))) and not log.get(key_v):
+                logging.info(f"⏰ Avto-video vaqti keldi ({cur_hhmm})! Target: {vid_target}")
+                targets = get_destinations_for_target(vid_target)
+                v = get_next_sequential_video()
+                if v:
+                    script = settings.get("script_mode", "cyrillic")
+                    text = format_video_card_text(v, script)
+                    for cid in targets:
+                        try:
+                            markup = build_post_markup(
+                                chat_id=int(cid) if str(cid).replace("-", "").isdigit() else 0,
+                                message_id=0,
+                                reactions_list=settings.get("reactions"),
+                                is_channel_post=(cid == get_official_channel()),
+                                share_title=f"🎬 {v.get('title', '')[:60]}",
+                                share_text=v.get("description", "")[:250]
+                            )
+                            sent_v = await safe_send_to_destination(bot_inst=bot, destination=cid, text=text, reply_markup=markup, parse_mode="Markdown")
+                            try:
+                                await bot.pin_chat_message(chat_id=cid, message_id=sent_v.message_id, both_silent=True)
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            logging.error(f"Auto-video xatolik ({cid}): {e}")
+                log[key_v] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
             # 5. Avtomatik Asalarichilik Ilmiy Testlari (10 talik A, B, C, D, E) ва ТАҚДИРЛАШ
@@ -5600,43 +5642,22 @@ def format_apitherapy_post_text(item: dict, idx: int, total: int, script: str = 
     return "\n".join(lines)
 
 def build_apitherapy_viewer_keyboard(idx: int, total: int, script: str = "cyrillic") -> InlineKeyboardMarkup:
-    txt_prev = "⬅️ Олдинги" if script == "cyrillic" else "⬅️ Oldingi"
-    txt_next = "Кейингиси ➡️" if script == "cyrillic" else "Keyingisi ➡️"
-    txt_c = "📢 Каналга узатиш" if script == "cyrillic" else "📢 Kanalga uzatish"
-    txt_g = "👥 Гуруҳга узатиш" if script == "cyrillic" else "👥 Guruhga uzatish"
-    txt_b = "🚀 Иккаласига узатиш" if script == "cyrillic" else "🚀 Ikkalasiga uzatish"
-    txt_pin = "📌 Қадаб қўйиш" if script == "cyrillic" else "📌 Qadab qo'yish"
-    txt_lang = "🔤 Лотинчага" if script == "cyrillic" else "🔤 Крилчага"
-    txt_ai = "🔄 Янги 10 тани янгилаш (AI)" if script == "cyrillic" else "🔄 Yangi 10 tani yangilash (AI)"
-    txt_rand = "🎲 Тасодифий" if script == "cyrillic" else "🎲 Tasodifiy"
-    txt_set = "⚙️ Созламалар" if script == "cyrillic" else "⚙️ Sozlamalar"
-    txt_home = "🏠 Асосий Меню" if script == "cyrillic" else "🏠 Asosiy Menyu"
-
     rows = [
         [
-            InlineKeyboardButton(text=txt_prev, callback_data=f"api_nav:{idx - 1}"),
-            InlineKeyboardButton(text=f"{idx + 1}/{total}", callback_data="api_page_info"),
-            InlineKeyboardButton(text=txt_next, callback_data=f"api_nav:{idx + 1}")
+            InlineKeyboardButton(text="📢 Канал", callback_data=f"api_send:channel:{idx}"),
+            InlineKeyboardButton(text="👥 Группа", callback_data=f"api_send:group:{idx}"),
+            InlineKeyboardButton(text="🚀 Канал & Группа", callback_data=f"api_send:both:{idx}")
         ],
         [
-            InlineKeyboardButton(text=txt_c, callback_data=f"api_send:channel:{idx}"),
-            InlineKeyboardButton(text=txt_g, callback_data=f"api_send:group:{idx}")
+            InlineKeyboardButton(text="♻️ 10 та янги маълумот автоматик қўшиш", callback_data="api_auto_add_10")
         ],
         [
-            InlineKeyboardButton(text=txt_b, callback_data=f"api_send:both:{idx}"),
-            InlineKeyboardButton(text=txt_pin, callback_data=f"api_pin:{idx}")
+            InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"api_nav:{idx - 1}"),
+            InlineKeyboardButton(text=f"📄 {idx + 1} / {total}", callback_data="api_page_info"),
+            InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"api_nav:{idx + 1}")
         ],
         [
-            InlineKeyboardButton(text=txt_lang, callback_data=f"api_toggle_lang:{idx}"),
-            InlineKeyboardButton(text=txt_ai, callback_data="api_fetch_ai")
-        ],
-        [
-            InlineKeyboardButton(text=txt_rand, callback_data="api_rand"),
-            InlineKeyboardButton(text=txt_set, callback_data="api_settings")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
-            InlineKeyboardButton(text=txt_home, callback_data="api_home")
+            InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -6372,94 +6393,175 @@ async def bot_guide_menu(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
-def build_group_settings_dashboard() -> tuple[str, InlineKeyboardMarkup]:
+def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, InlineKeyboardMarkup]:
     settings = get_settings()
-    cur_target = settings.get("post_target_mode", "channel")
+    cur_target = settings.get("post_target_mode", "both")
     off_group = get_official_group()
     off_channel = get_official_channel()
     chan_title = get_channel_title()
+    script = settings.get("script_mode", "cyrillic")
+    script_display = "Крил 🇺🇿" if script == "cyrillic" else "Лотин 🇺🇿"
 
-    target_labels = {
-        "channel": f"📢 Фақат Каналга ({off_channel})",
-        "group": f"👥 Фақат Гуруҳга ({off_group})",
-        "both": "🚀 Канал ва Гуруҳга (Иккаласига бирданига)",
-        "ask": "❓ Ҳар сафар сўралсин"
+    target_map = {
+        "channel": ("📢 1-Канал", "📢 1-Канал"),
+        "group": ("👥 2-Группа", "👥 2-Группа"),
+        "both": ("📢+👥 3-Канал ва Группа", "📢+👥 3-Канал ва Группа"),
+        "ask": ("❓ 4-Сўралсин", "❓ 4-Сўралсин")
     }
-    cur_lbl = target_labels.get(cur_target, f"📢 Фақат Каналга ({off_channel})")
+    dest_str, dest_btn = target_map.get(cur_target, ("📢+👥 3-Канал ва Группа", "📢+👥 3-Канал ва Группа"))
 
-    allowed = load_allowed_chats()
-    groups_list = []
-    channels_list = []
+    # Reactions
+    auto_react = settings.get("auto_reactions", True)
+    react_icon = "✅" if auto_react else "❌"
+    react_status_txt = "✅ Ёқилган" if auto_react else "❌ Ўчирилган"
+    reactions_list = settings.get("reactions", ["👍", "👎", "❤️", "👏"])
+    react_emojis_str = " ".join(reactions_list[:4])
 
-    groups_list.append(
-        f"• 🟢 **Asalarichilik.Uz Гуруҳи**\n"
-        f"  ├ Юзернейм: `{off_group}`\n"
-        f"  ├ Тури: Супергуруҳ (Supergroup)\n"
-        f"  └ Ҳолати: ✅ Фаол (Админ ва Бот уланган)"
-    )
+    # Share
+    auto_share = settings.get("auto_share", True)
+    share_icon = "✅ Ёқилган" if auto_share else "❌ Ўчирилган"
+    share_status_txt = "✅ Ёқилган" if auto_share else "❌ Ўчирилган"
 
-    channels_list.append(
-        f"• 🟢 **{chan_title}**\n"
-        f"  ├ Юзернейм: `{off_channel}`\n"
-        f"  ├ Тури: Расмий Канал (Channel)\n"
-        f"  └ Ҳолати: ✅ Фаол (Пост ва тестлар узатилади)"
-    )
+    # Expert
+    auto_comment = settings.get("auto_comment", True)
+    expert_icon = "✅" if auto_comment else "❌"
+    expert_status_txt = "✅ Ёқилган" if auto_comment else "❌ Ўчирилган"
 
-    for cid, info in allowed.items():
-        c_title = info.get("title", "Guruh")
-        c_type = info.get("type", "group")
-        if c_title in ["Asalarichilik.Uz", "Asalarichilik.Uz Гуруҳи", off_group, off_channel]:
-            continue
-        if c_type in ["group", "supergroup", "Guruh"]:
-            groups_list.append(f"• 🔹 **{c_title}**\n  ├ ID: `{cid}`\n  └ Ҳолати: ✅ Уланган")
-        elif c_type in ["channel", "Kanal"]:
-            channels_list.append(f"• 🔹 **{c_title}**\n  ├ ID: `{cid}`\n  └ Ҳолати: ✅ Уланган")
+    # Schedules
+    news_en = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
+    news_time = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "07:00")))
+    news_status = "🟢 Ёқилган" if news_en else "🔴 Ўчирилган"
+    news_btn_icon = "🟢" if news_en else "🔴"
 
-    groups_txt = "\n\n".join(groups_list)
-    channels_txt = "\n\n".join(channels_list)
+    api_en = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
+    api_time = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "08:00")))
+    api_status = "🟢 Ёқилган" if api_en else "🔴 Ўчирилган"
+    api_btn_icon = "🟢" if api_en else "🔴"
+
+    quiz_en = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
+    quiz_time = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "16:00")))
+    quiz_status = "🟢 Ёқилган" if quiz_en else "🔴 Ўчирилган"
+    quiz_btn_icon = "🟢" if quiz_en else "🔴"
+
+    vid_en = settings.get("video_auto_enabled", settings.get("video_schedule_enabled", True))
+    vid_time = normalize_hhmm(settings.get("video_auto_time", settings.get("video_schedule_time", "18:00")))
+    vid_status = "🟢 Ёқилган" if vid_en else "🔴 Ўчирилган"
+    vid_btn_icon = "🟢" if vid_en else "🔴"
 
     text = (
-        "⚙️ **ГУРУҲ ВА КАНАЛ СОЗЛАМАЛАРИ БЎЛИМИ**\n\n"
-        "Ушбу бўлимда бот уланган барча гуруҳ ва каналлар рўйхатини кўришингиз ҳамда "
-        "ботдан юбориладиган ҳар қандай хабар (янгилик, викторина, илмий тест, апитерапия ва постлар) учун "
-        "**олдиндан белгиланган манзил**ни созлашингиз мумкин.\n\n"
-        "────────────────────────\n"
-        f"🎯 **ОЛДИНДАН БЕЛГИЛАНГАН ЮБОРИШ МАНЗИЛИ:**\n"
-        f"👉 **{cur_lbl}**\n\n"
-        "*(Ҳар қандай пост ёки тест юборилганда бот автоматик тарзда шу танланган манзилга йўналтиради)*\n"
-        "────────────────────────\n\n"
-        f"👥 **АДМИН ВА БОТ УЛАНГАН ГУРУҲЛАР ({len(groups_list)} та):**\n"
-        f"{groups_txt}\n\n"
-        f"📢 **УЛАНГАН КАНАЛЛАР ({len(channels_list)} та):**\n"
-        f"{channels_txt}\n\n"
-        "────────────────────────\n"
-        "Юбориладиган хабарлар учун олдиндан белгиланган манзилни танланг:"
+        f"⚙️ **АСАЛАРИЧИЛИК БОТ ВА КАНАЛ/ГУРУҲ СОЗЛАМАЛАРИ**\n\n"
+        f"Ушбу ягона панел орқали ботнинг барча канал ва гуруҳларга хабар жўнатиш тартиби, расмий манзиллар, реакциялар ҳамда 4 та асосий бўлим авто-жўнатиш вақтларини созлашингиз мумкин:\n\n"
+        f"🎯 **Жўнатмалар манзили:** {dest_str}\n"
+        f"📢 **Расмий Канал:** `{off_channel}`\n"
+        f"👥 **Расмий Группа:** `{off_group}`\n"
+        f"🏷 **Канал номи:** {chan_title}\n"
+        f"abc **Барча маълумотлар ёзув тури:** {script_display}\n"
+        f"🔄 **Авто-реакциялар:** {react_status_txt} ({react_emojis_str})\n"
+        f"↗️ **Улашиш тугмаси:** {share_status_txt}\n"
+        f"💬 **Мутахассис тугмаси:** {expert_status_txt} *(Барча ёзишмалар ботга йўналади)*\n\n"
+        f"⏰ **Бўлимлар бўйича кунлик авто-жўнатиш вақтлари:**\n"
+        f"• 📰 1-Асаларичилик янгиликлари: {news_status} ({news_time})\n"
+        f"• 🌿 2-Апитерапия янгиликлари: {api_status} ({api_time})\n"
+        f"• 🐝 3-Викторина сўровномалари: {quiz_status} ({quiz_time})\n"
+        f"• 🎬 4-Асаларичилик видеолари: {vid_status} ({vid_time})"
     )
-
-    btn_chan = ("✅ " if cur_target == "channel" else "") + "📢 1. Фақат Каналга"
-    btn_grp = ("✅ " if cur_target == "group" else "") + "👥 2. Фақат Гуруҳга"
-    btn_both = ("✅ " if cur_target == "both" else "") + "🚀 3. Канал + Гуруҳ"
-    btn_ask = ("✅ " if cur_target == "ask" else "") + "❓ 4. Ҳар сафар сўралсин"
 
     rows = [
         [
-            InlineKeyboardButton(text=btn_chan, callback_data="grp_set_dest:channel"),
-            InlineKeyboardButton(text=btn_grp, callback_data="grp_set_dest:group")
+            InlineKeyboardButton(text=f"🎯 Жўнатмалар манзили: {dest_btn}", callback_data="grp_cycle_dest")
         ],
         [
-            InlineKeyboardButton(text=btn_both, callback_data="grp_set_dest:both"),
-            InlineKeyboardButton(text=btn_ask, callback_data="grp_set_dest:ask")
+            InlineKeyboardButton(text="📢 Расмий Канални таҳрирлаш", callback_data="set_change_channel"),
+            InlineKeyboardButton(text="👥 Расмий Группани таҳрирлаш", callback_data="set_change_group")
         ],
         [
-            InlineKeyboardButton(text="✏️ Расмий гуруҳни ўзгартириш", callback_data="set_change_group"),
-            InlineKeyboardButton(text="✏️ Расмий канални ўзгартириш", callback_data="set_change_channel")
+            InlineKeyboardButton(text=f"🏷 Канал номи: {chan_title}", callback_data="set_change_channel_title")
         ],
         [
-            InlineKeyboardButton(text="➕ Янги гуруҳга қўшиш йўриқномаси", callback_data="grp_nav:guide"),
-            InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="grp_nav:refresh")
+            InlineKeyboardButton(text=f"🔄 Авто-реакциялар: {react_icon}", callback_data="set_toggle:auto_reactions"),
+            InlineKeyboardButton(text=f"🎨 Эможилар: {react_emojis_str}", callback_data="set_reactions_menu")
         ],
         [
-            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
+            InlineKeyboardButton(text=f"↗️ Улашиш: {share_icon}", callback_data="set_toggle:auto_share"),
+            InlineKeyboardButton(text="✏️ Улашишни таҳрирлаш", callback_data="set_edit_share_text")
+        ],
+        [
+            InlineKeyboardButton(text=f"💬 Мутахассис тугмаси: {expert_icon}", callback_data="set_toggle:auto_comment"),
+            InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_display}", callback_data="set_toggle_script:group_settings")
+        ],
+        [
+            InlineKeyboardButton(text=f"📰 1-Янгилик: {news_btn_icon} {news_time}", callback_data="set_toggle_sched:news"),
+            InlineKeyboardButton(text="✏️ Вақтини ўзгартириш", callback_data="set_edit_time:news")
+        ],
+        [
+            InlineKeyboardButton(text=f"🌿 2-Апитерапия: {api_btn_icon} {api_time}", callback_data="set_toggle_sched:apitherapy"),
+            InlineKeyboardButton(text="✏️ Вақтини ўзгартириш", callback_data="set_edit_time:apitherapy")
+        ],
+        [
+            InlineKeyboardButton(text=f"🐝 3-Викторина: {quiz_btn_icon} {quiz_time}", callback_data="set_toggle_sched:quiz"),
+            InlineKeyboardButton(text="✏️ Вақтини ўзгартириш", callback_data="set_edit_time:quiz")
+        ],
+        [
+            InlineKeyboardButton(text=f"🎬 4-Видеолар: {vid_btn_icon} {vid_time}", callback_data="set_toggle_sched:video"),
+            InlineKeyboardButton(text="✏️ Вақтини ўзгартириш", callback_data="set_edit_time:video")
+        ],
+        [
+            InlineKeyboardButton(text="« 🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+def build_group_limits_dashboard(from_screen: str = "main") -> tuple[str, InlineKeyboardMarkup]:
+    cfg = get_media_limits_settings()
+    enabled = cfg.get("enabled", True)
+    limit = max(1, int(cfg.get("daily_limit", 3)))
+    warn_text = cfg.get("warn_text", "")
+    
+    status_str = "🟢 ЁҚИЛГАН (ФАОЛ)" if enabled else "🔴 ЎЧИРИЛГАН (ЛИМИТСИЗ)"
+    toggle_btn_text = "🔴 Лимитни ўчириш" if enabled else "🟢 Лимитни ёқиш"
+
+    text = (
+        "🛡 **ГУРУҲ РАСМ ВА ВИДЕО ЛИМИТЛАРИ СОЗЛАМАСИ**\n\n"
+        "Ушбу бўлимда гуруҳ аъзолари учун кунлик расм ва видеолар сонини чеклаш, "
+        "қоидабузарлик мут муддатларини ва фойдаланувчига юбориладиган огоҳлантириш матнини бошқаришингиз мумкин.\n\n"
+        "────────────────────────\n"
+        f"⚙️ **Лимит ҳолати:** {status_str}\n"
+        f"📷 **Кунлик лимит:** **{limit} та** расм ёки видео (альбомлар билан бирга)\n"
+        "⏳ **1-қоидабузарлик:** 2 соатлик мут (ёзиш чеклови) + ортиқча медиани ўчириш\n"
+        "🚫 **2-қоидабузарлик:** 24 соатлик мут + гуруҳдаги барча ёзишмаларни ўчириш\n"
+        "⏱ **Огоҳлантириш хабари:** 1 дақиқадан сўнг автоматик ўчирилади\n"
+        "────────────────────────\n"
+        "💬 **ҲОЗИРГИ ОГОҲЛАНТИРИШ ХАБАРИ МАТНИ:**\n"
+        f"«{warn_text}»\n\n"
+        "*(Матнда `{user_mention}` фойдаланувчи исмига, `{limit}` эса белгиланган лимит сонига автоматик алмашади)*\n"
+        "────────────────────────\n"
+        "Керакли амални танланг:"
+    )
+
+    rows = [
+        [
+            InlineKeyboardButton(text=toggle_btn_text, callback_data=f"grp_lim:toggle:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="➖ 1 та камайтириш", callback_data=f"grp_lim:dec:{from_screen}"),
+            InlineKeyboardButton(text="➕ 1 та кўпайтириш", callback_data=f"grp_lim:inc:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="1 та", callback_data=f"grp_lim:set_1:{from_screen}"),
+            InlineKeyboardButton(text="2 та", callback_data=f"grp_lim:set_2:{from_screen}"),
+            InlineKeyboardButton(text="3 та", callback_data=f"grp_lim:set_3:{from_screen}"),
+            InlineKeyboardButton(text="5 та", callback_data=f"grp_lim:set_5:{from_screen}"),
+            InlineKeyboardButton(text="10 та", callback_data=f"grp_lim:set_10:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Огоҳлантириш хабарини ўзгартириш", callback_data=f"grp_lim:edit_warn:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Стандарт матнга қайтариш", callback_data=f"grp_lim:reset_warn:{from_screen}"),
+            InlineKeyboardButton(text="🔄 Янгилаш", callback_data=f"grp_lim:refresh:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Гуруҳ созламалари)", callback_data=f"grp_nav:refresh:{from_screen}"),
             InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
         ]
     ]
@@ -6811,14 +6913,14 @@ def format_scientific_preview_text(item: dict, idx: int, total: int, cat: str, s
     return chr(10).join(lines)
 
 def build_scientific_preview_keyboard(idx: int, total: int, cat: str, script: str = "cyrillic") -> InlineKeyboardMarkup:
-    script_lbl = "🟢 Кириллча" if script == "cyrillic" else "🟢 Lotincha"
     rows = [
         [
-            InlineKeyboardButton(text="📢 Каналга юбориш", callback_data=f"sci_send_single:channel:{idx}"),
-            InlineKeyboardButton(text="👥 Гуруҳга юбориш", callback_data=f"sci_send_single:group:{idx}")
+            InlineKeyboardButton(text="📢 Канал", callback_data=f"sci_send_single:channel:{idx}"),
+            InlineKeyboardButton(text="👥 Группа", callback_data=f"sci_send_single:group:{idx}"),
+            InlineKeyboardButton(text="🚀 Канал & Группа", callback_data=f"sci_send_single:both:{idx}")
         ],
         [
-            InlineKeyboardButton(text="🌐 Канал ва Гуруҳга (Иккаласига) 📌", callback_data=f"sci_send_single:both:{idx}")
+            InlineKeyboardButton(text="♻️ 10 та янги маълумот автоматик қўшиш", callback_data=f"sci_auto_add:{cat}")
         ],
         [
             InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"sci_prev_page:{idx - 1}"),
@@ -6826,12 +6928,7 @@ def build_scientific_preview_keyboard(idx: int, total: int, cat: str, script: st
             InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"sci_prev_page:{idx + 1}")
         ],
         [
-            InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_lbl}", callback_data=f"sci_toggle_script:{idx}"),
-            InlineKeyboardButton(text="🚀 Тўлиқ тестни бошлаш", callback_data="sci_act:launch_now")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -7563,26 +7660,31 @@ def get_current_video(idx: int) -> dict:
         }
     return vids[idx % len(vids)]
 
-def build_video_admin_card_and_kb(idx: int, target_mode: str) -> tuple[str, InlineKeyboardMarkup]:
+def build_video_admin_card_and_kb(idx: int, target_mode: str = "both") -> tuple[str, InlineKeyboardMarkup]:
     v = get_current_video(idx)
     settings = get_settings()
     script = settings.get("script_mode", "cyrillic")
     text = format_video_card_text(v, script)
-
-    tgt_str = "Иккаласи (Канал + Гуруҳ) 📢👥" if target_mode == "both" else ("Расмий Канал 📢" if target_mode == "channel" else "Расмий Гуруҳ 👥")
+    vids = load_video_db()
+    total = len(vids) if vids else 1
+    cur_idx = idx % total
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🚀 Тасдиқлаш ва юбориш (Канал/Гуруҳга)", callback_data=f"vid_act:publish:{idx}")
+            InlineKeyboardButton(text="📢 Канал", callback_data=f"vid_act:send_chan:{cur_idx}"),
+            InlineKeyboardButton(text="👥 Группа", callback_data=f"vid_act:send_grp:{cur_idx}"),
+            InlineKeyboardButton(text="🚀 Канал & Группа", callback_data=f"vid_act:send_both:{cur_idx}")
         ],
         [
-            InlineKeyboardButton(text="🔄 Кейинги видеони кўриш ⏩", callback_data=f"vid_act:next:{idx}"),
-            InlineKeyboardButton(text=f"🎯 Манзил: {tgt_str}", callback_data=f"vid_act:toggle_target:{idx}")
+            InlineKeyboardButton(text="♻️ 10 та янги маълумот автоматик қўшиш", callback_data="vid_act:add_10_ai")
         ],
         [
-            InlineKeyboardButton(text="▶️ YouTube да томоша қилиш", url=v.get("url", "https://youtube.com/@asalarichilikuztv")),
-            InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"vid_act:page:{cur_idx - 1}"),
+            InlineKeyboardButton(text=f"📄 {cur_idx + 1} / {total}", callback_data=f"vid_act:info:{cur_idx}"),
+            InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"vid_act:page:{cur_idx + 1}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu")
         ]
     ])
     return text, kb
@@ -8547,18 +8649,416 @@ async def on_sci_set_select_btn(call: types.CallbackQuery):
 # 24. SHAXSIY YOZISHMA (LICHKA): FAQAT BOT EGASI UCHUN MUTAXASSIS SAVOL-JAVOB
 # (Barcha menyu tugmalari ishlaganidan so'nggina erkin savollarga javob beradi)
 # ==============================================================================
+
+# ==============================================================================
+# UNIFIED GROUP SETTINGS & MULTI-SECTION DIRECT ACTION HANDLERS
+# ==============================================================================
+@dp.callback_query(F.data == "grp_cycle_dest")
+async def on_grp_cycle_dest_unified(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    settings = get_settings()
+    cur = settings.get("post_target_mode", "both")
+    cycle = ["channel", "group", "both"]
+    next_mode = cycle[(cycle.index(cur) + 1) % len(cycle)] if cur in cycle else "both"
+    update_setting("post_target_mode", next_mode)
+    update_setting("news_auto_target", next_mode)
+    update_setting("quiz_auto_target", next_mode)
+    update_setting("apitherapy_auto_target", next_mode)
+    update_setting("video_auto_target", next_mode)
+    update_sci_setting("target", next_mode)
+    labels = {
+        "channel": "📢 1-Канал",
+        "group": "👥 2-Группа",
+        "both": "📢+👥 3-Канал ва Группа"
+    }
+    await call.answer(f"Жўнатмалар манзили: {labels.get(next_mode, next_mode)}")
+    text, kb = build_group_settings_dashboard()
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("set_toggle_sched:"))
+async def on_set_toggle_sched_unified(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    section = call.data.split(":")[1]
+    settings = get_settings()
+    key_map = {
+        "news": ("news_auto_enabled", "news_schedule_enabled"),
+        "apitherapy": ("apitherapy_auto_enabled", "apitherapy_schedule_enabled"),
+        "quiz": ("quiz_auto_enabled", "quiz_schedule_enabled"),
+        "video": ("video_auto_enabled", "video_schedule_enabled"),
+    }
+    if section in key_map:
+        k1, k2 = key_map[section]
+        cur = settings.get(k1, True)
+        new_state = not cur
+        update_setting(k1, new_state)
+        update_setting(k2, new_state)
+        state_txt = "ёқилди 🟢" if new_state else "ўчирилди 🔴"
+        sec_names = {
+            "news": "1-Янгилик",
+            "apitherapy": "2-Апитерапия",
+            "quiz": "3-Викторина",
+            "video": "4-Видеолар"
+        }
+        await call.answer(f"{sec_names.get(section, section)} авто-жўнатиш {state_txt}")
+    text, kb = build_group_settings_dashboard()
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("set_edit_time:"))
+async def on_set_edit_time_unified(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    section = call.data.split(":")[1]
+    ADMIN_WAITING_INPUT[call.from_user.id] = f"time_{section}"
+    sec_names = {
+        "news": "📰 1-Асаларичилик янгиликлари",
+        "apitherapy": "🌿 2-Апитерапия янгиликлари",
+        "quiz": "🐝 3-Викторина сўровномалари",
+        "video": "🎬 4-Асаларичилик видеолари"
+    }
+    title = sec_names.get(section, section)
+    await call.message.answer(
+        f"⏰ **{title} кунлик автоматик жўнатиш вақтини киритинг:**\n\n"
+        "Масалан: `07:00`, `08:00`, `16:00` ёки `18:00` каби соат ва дақиқани ёзинг.",
+        parse_mode="Markdown"
+    )
+    await call.answer()
+
+@dp.callback_query(F.data == "set_edit_share_text")
+async def on_set_edit_share_text_unified(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    ADMIN_WAITING_INPUT[call.from_user.id] = "edit_share_text"
+    await call.message.answer(
+        "✏️ **Улашиш (Share) тугмаси матнини киритинг:**\n\n"
+        "Масалан: `Асаларичилик бўйича долзарб илмий тадқиқот ва янгиликлар!`",
+        parse_mode="Markdown"
+    )
+    await call.answer()
+
+# Video send callbacks
+@dp.callback_query(F.data.startswith("vid_act:send_"))
+async def on_vid_act_send_direct(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    parts = call.data.split(":")
+    dest_type = parts[1].replace("send_", "") # chan, grp, both
+    idx = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+    
+    target_key = "both" if dest_type == "both" else ("channel" if dest_type == "chan" else "group")
+    targets = get_destinations_for_target(target_key)
+    
+    v = get_current_video(idx)
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_video_card_text(v, script)
+    
+    sent_cnt = 0
+    for cid in targets:
+        try:
+            markup = build_post_markup(
+                chat_id=int(cid) if str(cid).replace("-", "").isdigit() else 0,
+                message_id=0,
+                reactions_list=settings.get("reactions"),
+                share_title=f"🎬 {v.get('title')[:60]}",
+                share_text=v.get('description', '')[:250]
+            )
+            sent_msg = await safe_send_to_destination(bot_inst=bot, destination=cid, text=text, reply_markup=markup, parse_mode="Markdown")
+            try:
+                await bot.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
+            except Exception:
+                pass
+            sent_cnt += 1
+        except Exception as e:
+            logging.error(f"Video direct send error ({cid}): {e}")
+            
+    await call.answer(f"✅ Видео {sent_cnt} та манзилга юборилди!", show_alert=True)
+
+@dp.callback_query(F.data.startswith("vid_act:page:"))
+async def on_vid_act_page(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    idx = int(call.data.split(":")[2])
+    text, kb = build_video_admin_card_and_kb(idx)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("vid_act:info:"))
+async def on_vid_act_info(call: types.CallbackQuery):
+    await call.answer("📄 Асаларичилик видео қўлланмалари рўйхати")
+
+@dp.callback_query(F.data == "vid_act:add_10_ai")
+async def on_vid_act_add_10_ai(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("♻️ 10 та янги асаларичилик видеоси базага қўшилмоқда...", show_alert=False)
+    vids = load_video_db()
+    new_vids = [
+        {
+            "id": f"v_{len(vids) + 1}",
+            "title": "Она ари етиштиришнинг энг замонавий ЖЕНТЕР усули",
+            "title_lat": "Ona ari yetishtirishning eng zamonaviy JENTER usuli",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "18 дақиқа",
+            "description": "Жентер соти ёрдамида сифатли ва кучли она ариларни кўпайтириш сирлари ва амалий қўлланмаси.",
+            "description_lat": "Jenter soti yordamida sifatli va kuchli ona arilarni ko'paytirish sirlari va amaliy qo'llanmasi.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 2}",
+            "title": "Баҳорги биринчи кўрик ва ари оиласини ривожлантириш",
+            "title_lat": "Bahorgi birinchi ko'rik va ari oilasini rivojlantirish",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "22 дақиқа",
+            "description": "Эрта баҳорда ари оиласини кенгайтириш, озуқа бериш ва касалликларни олдини олиш чоралари.",
+            "description_lat": "Erta bahorda ari oilasini kengaytirish, ozuqa berish va kasalliklarni oldini olish choralari.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 3}",
+            "title": "Асалари оиласида болалаш (роевня) нинг олдини олиш сирлари",
+            "title_lat": "Asalari oilasida bolalash (roevnya) ning oldini olish sirlari",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "16 дақиқа",
+            "description": "Арилар кучли бўлганда оила бўлинишини тўхтатиш ва юқори асал олиш учун корпусларни алмаштириш.",
+            "description_lat": "Arilar kuchli bo'lganda oila bo'linishini to'xtatish va yuqori asal olish uchun korpuslarni almashtirish.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 4}",
+            "title": "Варроа канасига қарши самарали ва хавфсиз кураш усуллари",
+            "title_lat": "Varroa kanasiga qarshi samarali va xavfsiz kurash usullari",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "20 дақиқа",
+            "description": "Оксалат кислотаси, муравьин кислота ва табиий мойлар ёрдамида варроатозни даволаш.",
+            "description_lat": "Oksalat kislotasi, muravin kislota va tabiiy moylar yordamida varroatozni davolash.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 5}",
+            "title": "Ари сути йиғиш ва уни сақлаш технологияси",
+            "title_lat": "Ari suti yig'ish va uni saqlash texnologiyasi",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "25 дақиқа",
+            "description": "Энг қимматбаҳо асалари маҳсулоти — ари сутини тўғри йиғиш ва музлатиш қоидалари.",
+            "description_lat": "Eng qimmatbaho asalari mahsuloti — ari sutini to'g'ri yig'ish va muzlatish qoidalari.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 6}",
+            "title": "Кўчма пасека қуриш ва асал берадиган майдонларни танлаш",
+            "title_lat": "Ko'chma paseka qurish va asal beradigan maydonlarni tanlash",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "19 дақиқа",
+            "description": "Тоғ ва дашт ҳудудларига ариларни хавфсиз кўчириш ва нектар манбаларини хариталаштириш.",
+            "description_lat": "Tog' va dasht hududlariga arilarni xavfsiz ko'chirish va nektar manbalarini xaritalashtirish.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 7}",
+            "title": "Прополис (елим) йиғиш тўрларини ўрнатиш ва сифатли олиш",
+            "title_lat": "Propolis (yelim) yig'ish to'rlarini o'rnatish va sifatli olish",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "14 дақиқа",
+            "description": "Уялар тепасига махсус прополис сеткаларини қўйиш ва тоза прополис ажратиб олиш усули.",
+            "description_lat": "Uyalar tepasiga maxsus propolis setkalarini qo'yish va toza propolis ajratib olish usuli.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 8}",
+            "title": "Гулчанги (обножка) йиғиш тузоқлари ва уни қуритиш",
+            "title_lat": "Gulchangi (obnozhka) yig'ish tuzoqlari va uni quritish",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "21 дақиқа",
+            "description": "Гулчанги тўплагичларни уя кириш жойига ўрнатиш, намликдан асраш ва қуритиш технологияси.",
+            "description_lat": "Gulchangi to'plagichlarni uya kirish joyiga o'rnatish, namlikdan asrash va quritish texnologiyasi.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 9}",
+            "title": "Кузги озиқлантириш ва ариларни қишга тайёрлаш қоидалари",
+            "title_lat": "Kuzgi oziqlantirish va arilarni qishga tayyorlash qoidalari",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "23 дақиқа",
+            "description": "Қишлов учун шакар шарбати бериш, уяни иситиш ва шамоллатиш тизимини яратиш.",
+            "description_lat": "Qishlov uchun shakar sharbati berish, uyani isitish va shamollatish tizimini yaratish.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        },
+        {
+            "id": f"v_{len(vids) + 10}",
+            "title": "Апитерапия: Асалари чақтириш орқали бўғим ва асаб касалликларини даволаш",
+            "title_lat": "Apiterapiya: Asalari chaqtirish orqali bo'g'im va asab kasalliklarini davolash",
+            "channel": "Asalarichilik.Uz TV",
+            "duration": "27 дақиқа",
+            "description": "Ари заҳри билан даволаш нуқталари, биологик фаол зоналар ва хавфсизлик қоидалари.",
+            "description_lat": "Ari zahri bilan davolash nuqtalari, biologik faol zonalar va xavfsizlik qoidalari.",
+            "url": "https://youtube.com/@asalarichilikuztv"
+        }
+    ]
+    vids.extend(new_vids)
+    save_json_file(VIDEO_DB_FILE, vids)
+    new_idx = len(vids) - len(new_vids)
+    text, kb = build_video_admin_card_and_kb(new_idx)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.message.answer(f"✅ **10 та янги видео дарс қўшилди! Базадаги жами видеолар: {len(vids)} та.**", parse_mode="Markdown")
+
+@dp.callback_query(F.data == "news_auto_add_10")
+async def on_news_auto_add_10_btn(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("♻️ 10 та янги илмий янгилик тайёрланмоқда...", show_alert=False)
+    news_db = get_news_db()
+    n_count = len(news_db)
+    new_articles = [
+        {"id": f"n_{n_count+1}", "title": "Асалари оиласининг иммунитети ва гулчангининг роли", "body": "Илмий тадқиқотлар шуни кўрсатдики, полифлор (кўп гулли) гулчанги билан озиқланган арилар оиласи касалликларга нисбатан 40 фоиз чидамлироқ бўлади.", "category": "Илмий янгилик"},
+        {"id": f"n_{n_count+2}", "title": "Янги асаларичилик мавсумида уяларни тозалаш ва дезинфекция", "body": "Баҳорги мавсумда уяларни олов ва махсус эритмалар билан тозалаш нозематоз ҳамда варроатоз тарқалишини 80 фоизга камайтиради.", "category": "Амалий тавсия"},
+        {"id": f"n_{n_count+3}", "title": "Она арининг ёши ва унинг асал маҳсулдорлигига таъсири", "body": "1 ёшли она арилар 2 ёшлиларига нисбатан 30 фоиз кўпроқ тухум қўяди ва оиланинг болалаш мойиллиги кескин камаяди.", "category": "Селекция"},
+        {"id": f"n_{n_count+4}", "title": "Асал таркибидаги диастаза сони ва унинг сифат кўрсаткичи", "body": "Табиий асалдаги ферментлар (диастаза) унинг ҳақиқий шифобахшлигини белгилайди. Ўзбекистон тоғ асалларида бу кўрсаткич 25-35 Готе бирлигигача етади.", "category": "Лаборатория"},
+        {"id": f"n_{n_count+5}", "title": "Иссиқлик ва намликнинг уя микроиқлимига таъсири", "body": "Уяда ҳарорат 34-35 даражада сақланиши керак. Шамоллатиш тизими тўғри йўлга қўйилса, арилар сув ташишга кам энергия сарфлаб кўпроқ асал йиғади.", "category": "Уя бошқаруви"},
+        {"id": f"n_{n_count+6}", "title": "Карника ва Карпат зотининг Ўзбекистон шароитида мослашуви", "body": "Карника зотли арилар баҳорда жуда тез ривожланади ва эртанги нектар оқимидан юқори унумдорлик билан фойдаланади.", "category": "Зотлар"},
+        {"id": f"n_{n_count+7}", "title": "Прополис қазиш тўрларини тўғри қўллаш ва ҳосил олиш", "body": "Уя қопқоғи остига қўйиладиган эластик тўрлар ёрдамида бир уядан мавсумда 150-250 грамм тоза прополис олиш мумкин.", "category": "Маҳсулотлар"},
+        {"id": f"n_{n_count+8}", "title": "Ари заҳри билан даволашда антибактериал хусусиятлар", "body": "Мелиттин моддаси кучли яллиғланишга қарши таъсирга эга бўлиб, бўғим оғриқлари ва радикулитда юқори самара беради.", "category": "Апитерапия"},
+        {"id": f"n_{n_count+9}", "title": "Асаларичиликда GPS ва электрон тарозилардан фойдаланиш", "body": "Замонавий электрон тарозилар суткалик асал оқимини Telegram орқали реал вақтда кўрсатиб, кўчириш вақтини аниқ белгилашга ёрдам беради.", "category": "Инновация"},
+        {"id": f"n_{n_count+10}", "title": "Қишловдан кейин ари оилаларини бирлаштириш сирлари", "body": "Кучсиз оилаларни баҳорда кучли оилаларга қўшиш орқали асосий асал йиғимига юқори тайёргарлик таъминланади.", "category": "Амалиёт"}
+    ]
+    news_db.extend(new_articles)
+    save_json_file(NEWS_DB_FILE, news_db)
+    new_idx = len(news_db) - len(new_articles)
+    text = format_news_post_text(news_db[new_idx], "cyrillic", is_admin=True)
+    kb = build_news_viewer_keyboard(new_idx, len(news_db), "cyrillic")
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.message.answer(f"✅ **10 та янги янгилик қўшилди! Базадаги жами янгиликлар: {len(news_db)} та.**", parse_mode="Markdown")
+
+@dp.callback_query(F.data == "api_auto_add_10")
+async def on_api_auto_add_10_btn(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("♻️ 10 та янги апитерапия мақоласи қўшилмоқда...", show_alert=False)
+    api_db = load_apitherapy_db()
+    c = len(api_db)
+    new_api = [
+        {"id": c+1, "title": "Асал ва долчин (корица) билан юракни мустаҳкамлаш", "body": "Ҳар куни эрталаб бир чой қошиқ тоза тоғ асали ва долчин аралашмаси томирлардаги холестерин тиқилмаларини эритишга ёрдам беради.", "category": "Юрак саломатлиги"},
+        {"id": c+2, "title": "Прополис дамламасининг ошқозон ярасидаги шифобахшлиги", "body": "20% ли сувли прополис экстракти ошқозон шиллиқ қаватини ҳимоя қилиб, эрозия ва яраларнинг тез битишини таъминлайди.", "category": "Ошқозон-ичак"},
+        {"id": c+3, "title": "Ари сутининг ёшлик ва хотирани сақлашдаги мўъжизаси", "body": "Табиий ари сути таркибидаги 10-HDA кислотаси мия ҳужайраларини озиқлантиради ва чарчоқни тез бартараф этади.", "category": "Иммунитет"},
+        {"id": c+4, "title": "Гулчанги билан қондаги гемоглобинни ошириш усули", "body": "Тонгда оч қоринга 1 чой қошиқ гулчангини илиқ асалли сув билан қабул қилиш камқонликда (анемия) қон ҳосил бўлишини фаоллаштиради.", "category": "Қон тизими"},
+        {"id": c+5, "title": "Ари муми (мум) билан нафас йўлларини тозалаш", "body": "Забрус ва табиий мумни чайнаш тиш милкларини мустаҳкамлайди, гайморит ва ангинада бактерияларни йўқотади.", "category": "ЛОР касалликлари"},
+        {"id": c+6, "title": "Апитоксин (ари заҳри) ёрдамида остеохондрозни даволаш", "body": "Биологик фаол нуқталарга ари чақтириш орқали бўйин ва белдаги оғриқлар қисқа муддатда сезиларли камаяди.", "category": "Суяк ва бўғим"},
+        {"id": c+7, "title": "Асал ва ёнғоқ аралашмаси — эркаклар ва аёллар қуввати манбаи", "body": "Тенг миқдордаги тоғ ёнғоғи ва тоза май асали аралашмаси сурункали чарчоқни йўқотади ва жисмоний қувватни тиклайди.", "category": "Энергия ва қувват"},
+        {"id": c+8, "title": "Асалари нафаси (апидомик) терапияси", "body": "Уя устида қурилган апиуйчада ухлаш ва ари уяси ҳавосидан нафас олиш бронхиал астма ва аллергияда нафасни енгиллаштиради.", "category": "Апидомик"},
+        {"id": c+9, "title": "Ари ўлиги (подмор) спиртли дамламаси", "body": "Подмор таркибидаги хитозан ва меланин моддалари буйрак ва жигарни токсинлардан тозалашда юқори самара беради.", "category": "Подмор терапия"},
+        {"id": c+10, "title": "Асал билан тери парвариши ва табиий ниқоблар", "body": "Табиий асал терининг чуқур қатламларини озиқлантиради, майда ажинларни текислайди ва табиий намлик бағишлайди.", "category": "Косметология"}
+    ]
+    api_db.extend(new_api)
+    save_json_file(APITHERAPY_DB_FILE, api_db)
+    new_idx = len(api_db) - len(new_api)
+    text = format_apitherapy_post_text(api_db[new_idx], new_idx, len(api_db), script="cyrillic")
+    kb = build_apitherapy_viewer_keyboard(new_idx, len(api_db), script="cyrillic")
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode=None)
+    await call.message.answer(f"✅ **10 та янги апитерапия мақоласи қўшилди! Базада: {len(api_db)} та.**", parse_mode="Markdown")
+
+@dp.callback_query(F.data == "quiz_auto_add_10")
+async def on_quiz_auto_add_10_btn(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    await call.answer("♻️ 10 та янги викторина саволи қўшилмоқда...", show_alert=False)
+    q_db = get_quizzes_db()
+    c = len(q_db)
+    letters = ["A", "B", "C", "D", "E"]
+    raw_qs = [
+        ("Асалари оиласида энг узоқ умр кўрадиган ари қайси?", ["Она ари (3-5 йил)", "Ишчи ари", "Эркак ари"], 0, "Она ари яхши шароитда 3 йилдан 5 йилгача яшайди."),
+        ("Ишчи ари баҳор-ёз мавсумида ўртача неча кун яшайди?", ["35-45 кун", "1 йил", "6 ой"], 0, "Ёзги асал йиғиш даврида ишчи арилар кучли ишлаб 35-45 кун яшайди."),
+        ("Асалари қанотлари бир сонияда неча марта қоқилади?", ["200-250 марта", "50 марта", "500 марта"], 0, "Асалари сониясига ўртача 230 марта қанот қоқади."),
+        ("Асаларилар нектарни қайси аъзоси ёрдамида уяга ташийди?", ["Асал халтачаси (зоб) ёрдамида", "Оёқчаларида", "Ичагида"], 0, "Арилар нектарни қизилўнгачнинг махсус кенгайган жойи — асал халтачасида ташийди."),
+        ("Ари уясидаги мум катакчалар неча бурчакли шаклда бўлади?", ["Олти бурчакли (шестигранник)", "Тўрт бурчакли", "Айлана шаклида"], 0, "Олти бурчакли шакл геометрик жиҳатдан энг кам мум сарфлаб энг катта ҳажмни беради."),
+        ("Асалари рақси (вилляние) нимани билдиради?", ["Нектар манзили ва йўналишини", "Хавф яқинлигини", "Ёмғир ёғишини"], 0, "Карл фон Фриш кашф этган асалари рақси озуқа манбаининг масофаси ва йўналишини кўрсатади."),
+        ("Она ари бир кеча-кундузда нечтагача тухум қўйиши мумкин?", ["1500 - 2000 тагача", "100 та", "500 та"], 0, "Фаол баҳор мавсумида яхши она ари кунига 2000 тагача тухум қўяди."),
+        ("Асаларилар кўзи неча хил турга бўлинади?", ["2 та мураккаб ва 3 та оддий кўз", "Фақат 2 та кўз", "Фақат 1 жуфт оддий кўз"], 0, "Арида бошнинг икки четида 2 та катта фасетли кўз ва тепасида 3 та оддий кўз бор."),
+        ("Уяда эркак арилар (трутенлар) нинг асосий биологик вазифаси нима?", ["Она ари билан жуфтлашиш", "Асал йиғиш", "Уяни қўриқлаш"], 0, "Трутенлар нектар йиғмайди, улар фақат насл давомчиси — она ари билан жуфтлашиш учун хизмат қилади."),
+        ("Ари заҳрини тиббиётда нима деб аталади?", ["Апитоксин", "Мелиттин", "Хитозан"], 0, "Ари заҳри илмий тилда апитоксин (Apitoxin) деб аталади.")
+    ]
+    new_qs = []
+    for i, (q_txt, opts, corr_idx, expl) in enumerate(raw_qs):
+        corr_val = opts[corr_idx]
+        n_opts = len(opts)
+        target_pos = (c + i) % n_opts
+        other_vals = [o for idx, o in enumerate(opts) if idx != corr_idx]
+        shuffled_opts = other_vals[:target_pos] + [corr_val] + other_vals[target_pos:]
+        new_qs.append({
+            "id": c + i + 1,
+            "level": "spec" if i % 2 == 0 else "beginner",
+            "question": q_txt,
+            "options": shuffled_opts,
+            "correct_option_id": target_pos,
+            "explanation": expl,
+            "category": "Асалари биологияси",
+            "posted": False
+        })
+    q_db.extend(new_qs)
+    save_json_file(QUIZZES_DB_FILE, q_db)
+    new_idx = len(q_db) - len(new_qs)
+    text = format_quiz_preview_text(q_db[new_idx], new_idx, len(q_db), "cyrillic")
+    kb = build_quiz_preview_keyboard(new_idx, len(q_db), "cyrillic")
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.message.answer(f"✅ **10 та янги викторина саволи қўшилди! Базада: {len(q_db)} та.**", parse_mode="Markdown")
+
 @dp.message(F.chat.type == "private")
 async def private_chat_handler(message: types.Message):
-    if message.from_user.id != OWNER_ID:
-        await message.reply(
-            "⛔️ **Кириш чекланган!**\n\n"
-            f"Кечирасиз, ушбу ботдан фойдаланиш фақат бот эгаси ({OWNER_USERNAME}) учун очиқ."
-        )
-        return
     if not message.text:
         return
 
+    # Non-owner contacting expert
+    if message.from_user.id != OWNER_ID:
+        text_msg = message.text or ""
+        if text_msg.startswith("/start") and "ask_expert" in text_msg:
+            return await message.reply(
+                "🐝 **Ассалому алайкум! Сиз асаларичилик бўйича мутахассисга савол йўллаш бўлимидасиз.**\n\n"
+                "Саволингизни батафсил ёзиб қолдиринг, мутахассисимиз тез орада саволингизга жавоб қайтаради!",
+                parse_mode="Markdown"
+            )
+        u = message.from_user
+        uname = f"@{u.username}" if u.username else "номаълум"
+        alert_txt = (
+            f"👮‍♂️ **АСАЛАРИЧИДАН ЯНГИ САВОЛ (Мутахассис учун):**\n\n"
+            f"👤 Фойдаланувчи: {u.full_name}\n"
+            f"🆔 User ID: `{u.id}`\n"
+            f"🔗 Профиль: {uname}\n\n"
+            f"📝 **Савол матни:**\n{text_msg}\n\n"
+            f"*(Ушбу хабарга «Reply» (Жавоб) ёзиб жавоб қайтарсангиз, бот автоматик равишда фойдаланувчига етказади)*"
+        )
+        try:
+            adm_msg = await bot.send_message(chat_id=OWNER_ID, text=alert_txt, parse_mode="Markdown")
+            expert_map = load_json_file("expert_questions_map.json", {})
+            expert_map[str(adm_msg.message_id)] = u.id
+            save_json_file("expert_questions_map.json", expert_map)
+            return await message.reply("✅ **Саволингиз мутахассисга юборилди!** Тез орада шу ерга жавоб қайтарилади.")
+        except Exception as e:
+            logging.error(f"Forward to expert error: {e}")
+            return await message.reply("⚠️ Саволни мутахассисга юборишда хатолик юз берди.")
+
     clean_text = message.text.strip().lower()
+
+    # Admin replying to a forwarded user question
+    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == (await bot.get_me()).id:
+        r_id = str(message.reply_to_message.message_id)
+        expert_map = load_json_file("expert_questions_map.json", {})
+        target_uid = expert_map.get(r_id)
+        if not target_uid:
+            r_txt = message.reply_to_message.text or ""
+            match_uid = re.search(r"User ID:\s*`?(\d+)`?", r_txt)
+            if match_uid:
+                target_uid = int(match_uid.group(1))
+        if target_uid:
+            reply_txt = (
+                f"👮‍♂️ **Асаларичилик мутахассисидан жавоб:**\n\n"
+                f"{message.text}\n\n"
+                f"— Asalarichilik.Uz 🇺🇿"
+            )
+            try:
+                await bot.send_message(chat_id=target_uid, text=reply_txt, parse_mode="Markdown")
+                return await message.reply("✅ **Жавобингиз фойдаланувчига муваффақиятли етказилди!**")
+            except Exception as ex:
+                return await message.reply(f"⚠️ Фойдаланувчига етказишда хатолик: {ex}")
 
     # Агар фойдаланувчи меню тугмасини босган бўлса, кутиш ҳолатини бекор қилиш
     is_menu_action = any(k in clean_text for k in [
@@ -8568,6 +9068,46 @@ async def private_chat_handler(message: types.Message):
     ])
     if is_menu_action and message.from_user.id in ADMIN_WAITING_INPUT:
         ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+
+    # Time editing for news, apitherapy, quiz, video
+    state = ADMIN_WAITING_INPUT.get(message.from_user.id)
+    if state and state.startswith("time_"):
+        section = state.split("_")[1]
+        match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
+        if match and match.group(1):
+            h = int(match.group(1)) % 24
+            m = int(match.group(2)) % 60 if match.group(2) else 0
+            new_t = f"{h:02d}:{m:02d}"
+            key_time = {
+                "news": ("news_auto_time", "news_schedule_time"),
+                "apitherapy": ("apitherapy_auto_time", "apitherapy_schedule_time"),
+                "quiz": ("quiz_auto_time", "quiz_schedule_time"),
+                "video": ("video_auto_time", "video_schedule_time"),
+            }
+            if section in key_time:
+                k1, k2 = key_time[section]
+                update_setting(k1, new_t)
+                update_setting(k2, new_t)
+            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+            sec_titles = {
+                "news": "1-Янгилик",
+                "apitherapy": "2-Апитерапия",
+                "quiz": "3-Викторина",
+                "video": "4-Видеолар"
+            }
+            title = sec_titles.get(section, section)
+            await message.answer(f"✅ **{title} авто-жўнатиш вақти {new_t} қилиб белгиланди.**", parse_mode="Markdown")
+            text, kb = build_group_settings_dashboard()
+            return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        else:
+            return await message.answer("⚠️ Илтимос, вақтни `07:00` ёки `18:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
+
+    elif state == "edit_share_text":
+        update_setting("share_text", message.text.strip())
+        ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+        await message.answer("✅ **Улашиш тугмаси матни янгиланди!**", parse_mode="Markdown")
+        text, kb = build_group_settings_dashboard()
+        return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
     # 0. Админ махсус вақт ва дақиқа киритиш текшируви
     state = ADMIN_WAITING_INPUT.get(message.from_user.id)
