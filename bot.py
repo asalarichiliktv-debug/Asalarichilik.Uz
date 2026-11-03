@@ -981,6 +981,13 @@ def get_official_channel():
 def get_official_group():
     return get_system_setting("official_group", "@asalarichilik_uzbekistan")
 
+
+def get_official_channel_name():
+    return get_system_setting("official_channel_name", "Asalarichilik.Uz🇺🇿")
+
+def set_official_channel_name(val):
+    set_system_setting("official_channel_name", val.strip())
+
 def get_official_youtube():
     return get_system_setting("youtube_url", "https://youtube.com/@asalarichilikuztv?feature=shared")
 
@@ -1249,8 +1256,12 @@ def get_main_menu_markup(lang="uz_kr", user_id=None):
             InlineKeyboardButton("📢 Управление каналами", callback_data="channels_panel")
         )
         markup.row(
-            InlineKeyboardButton("📰 Новости пчеловодства (/news)", callback_data="open_bee_news"),
-            InlineKeyboardButton("🐝 Викторины & Опросы 📊", callback_data="open_bee_quiz")
+            InlineKeyboardButton("📰 Новости пчеловодства", callback_data="open_bee_news"),
+            InlineKeyboardButton("🌿 Новости апитерапии", callback_data="open_bee_apitherapy")
+        )
+        markup.row(
+            InlineKeyboardButton("🐝 Викторины и опросы", callback_data="open_bee_quiz"),
+            InlineKeyboardButton("📹 Видео пчеловодства", callback_data="open_bee_videos")
         )
         markup.row(InlineKeyboardButton("👑 Владелец", url="https://t.me/JamshidjonDavronov"))
         if is_owner:
@@ -1262,29 +1273,6 @@ def get_main_menu_markup(lang="uz_kr", user_id=None):
             InlineKeyboardButton("🌐 Сменить язык", callback_data="menu_language"),
             InlineKeyboardButton("📖 Инструкция бота", callback_data="menu_help")
         )
-    elif lang == "en":
-        markup.row(
-            InlineKeyboardButton("➕ Add to Group", callback_data="menu_add_group"),
-            InlineKeyboardButton("➕ Add to Channel", callback_data="menu_add_channel")
-        )
-        markup.row(
-            InlineKeyboardButton("🎛 Group Settings", callback_data="menu_settings"),
-            InlineKeyboardButton("📢 Manage Channels", callback_data="channels_panel")
-        )
-        markup.row(
-            InlineKeyboardButton("📰 Beekeeping News (/news)", callback_data="open_bee_news"),
-            InlineKeyboardButton("🐝 Beekeeping Quizzes 📊", callback_data="open_bee_quiz")
-        )
-        markup.row(InlineKeyboardButton("👑 Owner", url="https://t.me/JamshidjonDavronov"))
-        if is_owner:
-            markup.row(
-                InlineKeyboardButton("📢 Broadcast Ads (Owner)", callback_data="bc_menu"),
-                InlineKeyboardButton("👑 Group Control", callback_data="owner_groups")
-            )
-        markup.row(
-            InlineKeyboardButton("🌐 Change Language", callback_data="menu_language"),
-            InlineKeyboardButton("📖 Bot Manual", callback_data="menu_help")
-        )
     elif lang == "uz_lat":
         markup.row(
             InlineKeyboardButton("➕ Guruhga qo'shish", callback_data="menu_add_group"),
@@ -1295,8 +1283,12 @@ def get_main_menu_markup(lang="uz_kr", user_id=None):
             InlineKeyboardButton("📢 Kanallar boshqaruvi", callback_data="channels_panel")
         )
         markup.row(
-            InlineKeyboardButton("📰 Asalarichilik yangiliklari (/news)", callback_data="open_bee_news"),
-            InlineKeyboardButton("🐝 Viktorina & So'rovnomalar 📊", callback_data="open_bee_quiz")
+            InlineKeyboardButton("📰 Asalarichilik yangiliklari", callback_data="open_bee_news"),
+            InlineKeyboardButton("🌿 Apiterapiya yangiliklari", callback_data="open_bee_apitherapy")
+        )
+        markup.row(
+            InlineKeyboardButton("🐝 Viktorina so'rovnomalari", callback_data="open_bee_quiz"),
+            InlineKeyboardButton("📹 Asalarichilik videolari", callback_data="open_bee_videos")
         )
         markup.row(InlineKeyboardButton("👑 Bot egasi", url="https://t.me/JamshidjonDavronov"))
         if is_owner:
@@ -1318,8 +1310,12 @@ def get_main_menu_markup(lang="uz_kr", user_id=None):
             InlineKeyboardButton("📢 Каналлар бошқаруви", callback_data="channels_panel")
         )
         markup.row(
-            InlineKeyboardButton("📰 Асаларичилик янгиликлари (/news)", callback_data="open_bee_news"),
-            InlineKeyboardButton("🐝 Викторина & Сўровномалар 📊", callback_data="open_bee_quiz")
+            InlineKeyboardButton("📰 Асаларичилик янгиликлари", callback_data="open_bee_news"),
+            InlineKeyboardButton("🌿 Апитерапия янгиликлари", callback_data="open_bee_apitherapy")
+        )
+        markup.row(
+            InlineKeyboardButton("🐝 Викторина сўровномалари", callback_data="open_bee_quiz"),
+            InlineKeyboardButton("📹 Асаларичилик видеолари", callback_data="open_bee_videos")
         )
         markup.row(InlineKeyboardButton("👑 Бот эгаси", url="https://t.me/JamshidjonDavronov"))
         if is_owner:
@@ -1675,13 +1671,12 @@ def build_controller_post_markup(post_id=0, reactions_list=None, url_buttons_row
             clean_share = "Asalarichilik.Uz"
         if len(clean_share) > 900:
             clean_share = clean_share[:900].rsplit(' ', 1)[0] + "..."
-        share_content = (
-            f"{clean_share}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🐝 Расмий канал: @{c_clean}\n"
-            f"👥 Расмий гуруҳ: @{g_clean}\n"
-            f"🤖 Бот: @{BOT_USERNAME}"
-        )
+        share_content = f"""{clean_share}
+
+━━━━━━━━━━━━━━━━━━━━
+🐝 {c_name}: @{c_clean}
+👥 Расмий гуруҳ: @{g_clean}
+🤖 Бот: @{BOT_USERNAME}"""
         safe_share = urllib.parse.quote(share_content)
         share_url = f"https://t.me/share/url?text={safe_share}"
         extra_row.append(InlineKeyboardButton("↗️ Улашиш", url=share_url))
@@ -1903,6 +1898,20 @@ try:
 except Exception as _e_news:
     logging.warning(f"Error loading bee_news_collection: {_e_news}")
 
+try:
+    from bee_apitherapy_collection import generate_50_apitherapy_news
+    BEE_APITHERAPY_NEWS = generate_50_apitherapy_news()
+except Exception as _e_api:
+    logging.warning(f"Error loading bee_apitherapy_collection: {_e_api}")
+    BEE_APITHERAPY_NEWS = []
+
+try:
+    from bee_videos_collection import generate_40_bee_videos
+    BEE_GLOBAL_VIDEOS = generate_40_bee_videos()
+except Exception as _e_vid:
+    logging.warning(f"Error loading bee_videos_collection: {_e_vid}")
+    BEE_GLOBAL_VIDEOS = []
+
 def format_bee_news_post(item, lang="uz_kr"):
     cfg_script = get_system_setting("news_script", "uz_kr")
     active_lang = lang if lang in ["uz_kr", "uz_lat", "ru", "en"] else cfg_script
@@ -1940,28 +1949,28 @@ def format_bee_news_post(item, lang="uz_kr"):
 
 def show_bee_news_hub(chat_id, news_idx=0, message_id=None, lang="uz_kr"):
     total_news = len(BEE_GLOBAL_NEWS)
+    if total_news == 0:
+        safe_edit_or_send(chat_id, message_id, "⚠️ Янгиликлар базаси бўш!", InlineKeyboardMarkup([[InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main")]]))
+        return
     if news_idx < 0: news_idx = 0
     if news_idx >= total_news: news_idx = total_news - 1
-    
-    cfg_script = get_system_setting("news_script", "uz_kr")
+
+    cfg_script = get_system_setting("script", get_system_setting("news_script", "uz_kr"))
     active_lang = lang if lang in ["uz_kr", "uz_lat", "ru", "en"] else cfg_script
-    
+
     item = BEE_GLOBAL_NEWS[news_idx]
     preview_txt = format_bee_news_post(item, active_lang)
-    
-    script_badge = "🟢 Кириллча (Ўзб)" if active_lang == "uz_kr" else "🔵 Lotincha (O'zb)"
-    news_dest = get_system_setting("news_target_scope", "both")
-    dest_lbl = {"both": "Канал + Гуруҳларга", "channels": "Фақат Каналларга", "groups": "Фақат Гуруҳларга"}.get(news_dest, "Канал + Гуруҳларга")
-    
+
     markup = InlineKeyboardMarkup()
-    # 1. Тўғридан-тўғри манзилга юбориш тугмалари
+    # Фақат 3 та жўнатиш функцияси
     markup.row(
-        InlineKeyboardButton("📢 Каналга юбориш", callback_data=f"pub_bee_news_chan_{news_idx}"),
-        InlineKeyboardButton("👥 Гуруҳга юбориш", callback_data=f"pub_bee_news_grp_{news_idx}")
+        InlineKeyboardButton("📢 1-Каналга жўнатиш", callback_data=f"pub_bee_news_chan_{news_idx}"),
+        InlineKeyboardButton("👥 2-Группага жўнатиш", callback_data=f"pub_bee_news_grp_{news_idx}")
     )
-    markup.row(InlineKeyboardButton("🌐 Канал ва Гуруҳга (Иккаласига) 📌", callback_data=f"pub_bee_news_{news_idx}"))
-    markup.row(InlineKeyboardButton("📣 Реклама менюсига тўғридан-тўғри ўтказиш 🚀", callback_data=f"draft_to_ad_news_{news_idx}"))
-    
+    markup.row(
+        InlineKeyboardButton("📢+👥 3-Канал ва Группага жўнатиш", callback_data=f"pub_bee_news_{news_idx}")
+    )
+
     nav_btns = []
     if news_idx > 0:
         nav_btns.append(InlineKeyboardButton("⬅️ Олдингиси", callback_data=f"view_bee_news_{news_idx - 1}"))
@@ -1970,23 +1979,12 @@ def show_bee_news_hub(chat_id, news_idx=0, message_id=None, lang="uz_kr"):
         nav_btns.append(InlineKeyboardButton("Кейингиси ➡️", callback_data=f"view_bee_news_{news_idx + 1}"))
     if nav_btns:
         markup.row(*nav_btns)
-        
-    markup.row(
-        InlineKeyboardButton(f"🔤 Ёзув тури: {script_badge}", callback_data="toggle_news_script"),
-        InlineKeyboardButton("🎲 Тасодифий янгилик", callback_data="rand_bee_news")
-    )
-    markup.row(
-        InlineKeyboardButton(f"⚙️ Манзил созламаси: {dest_lbl}", callback_data="open_dest_settings")
-    )
-    markup.row(InlineKeyboardButton("« Реклама ва постлар менюсига қайтиш", callback_data="bc_menu"), InlineKeyboardButton("🏠 Асосий Меню", callback_data="back_main"))
-    
+
+    # Орқага тугмаси асосийга қайтаради
+    markup.row(InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main"))
+
     hub_text = (
-        f"🌐 <b>ИНТЕРНЕТ АСАЛАРИЧИЛИК ЯНГИЛИКЛАРИ МАРКАЗИ (100+ МАҚОЛА)</b>\n\n"
-        f"Бу бўлим интернет тармоқларидан асаларичиликка оид илмий янгиликлар ва замонавий технологияларни топиб, ўзбек тилига таржима қилади.\n\n"
-        f"• 🔤 <b>Жорий ёзув тури:</b> <code>{script_badge}</code>\n"
-        f"• 🎯 <b>Авто-юбориш манзили:</b> <code>{dest_lbl}</code>\n"
-        f"• 📄 <b>Жами янгиликлар сони:</b> <b>{total_news}</b> та\n\n"
-        f"<i>💡 <b>Тезкор ҳаракатлар:</b> Сиз ушбу янгиликни текшириб, <b>«Каналга»</b>, <b>«Гуруҳга»</b> ёки <b>«Иккаласига»</b> юборишингиз, ёхуд <b>«📣 Реклама менюсига ўтказиш»</b> тугмаси орқали пост конструкторига ўтказиб эркин тарқатишингиз мумкин!</i>\n\n"
+        f"📰 <b>1-АСАЛАРИЧИЛИК ЯНГИЛИКЛАРИ</b> ({news_idx + 1} / {total_news})\n\n"
         f"{preview_txt}"
     )
     safe_edit_or_send(chat_id, message_id, hub_text, markup)
@@ -2421,58 +2419,48 @@ def show_quiz_hub(chat_id, quiz_idx=0, message_id=None, lang="uz_kr"):
     cat_filter = cfg.get("category_filter", "all")
     all_quizzes = get_all_bee_quizzes(cat_filter)
     total_q = len(all_quizzes)
+    if total_q == 0:
+        safe_edit_or_send(chat_id, message_id, "⚠️ Викториналар мавжуд эмас!", InlineKeyboardMarkup([[InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main")]]))
+        return
     if quiz_idx < 0:
         quiz_idx = 0
     if quiz_idx >= total_q:
         quiz_idx = total_q - 1
 
     item = all_quizzes[quiz_idx]
-    q_cat = item.get("category", "junior")
-    cat_badge = "🟢 Ёш асаларичилар" if q_cat == "junior" else "🔴 Спец / Тажрибали"
-
-    q_script = cfg.get("script") or get_system_setting("quiz_script", "uz_kr")
+    q_script = get_system_setting("script", cfg.get("script") or get_system_setting("quiz_script", "uz_kr"))
     if q_script == "uz_lat":
         q_text = item.get("question_lat") or item.get("question_kr")
         opts = item.get("options_lat") or item.get("options_kr")
         expl = item.get("explanation_lat") or item.get("explanation_kr")
-        script_badge = "🔵 Lotincha (O'zb)"
     else:
         q_text = item.get("question_kr")
         opts = item.get("options_kr")
         expl = item.get("explanation_kr")
-        script_badge = "🟢 Кириллча (Ўзб)"
 
     corr_idx = item.get("correct_id", 0)
-
-    del_h = cfg.get("delete_hours", 0)
-    del_str = "♾ Ўчирилмайди (доимий)" if del_h == 0 else f"{del_h} соатда ўчирилади"
-    pin_str = "🟢 Ҳа (Қадалади 📌)" if cfg.get("auto_pin", 1) == 1 else "⚪️ Қадалмайди"
-    en_str = "🟢 Ёқилган" if cfg.get("enabled", 1) == 1 else "⚪️ Ўчирилган"
-    s_time = cfg.get("send_time", "10:00")
-    scope_str = {"both": "📢 Канал ва Гуруҳлар", "channels": "📢 Фақат Каналлар", "groups": "👥 Фақат Гуруҳлар"}.get(cfg.get("target_scope", "both"), "📢 Канал ва Гуруҳлар")
-    filter_label = {"all": "Ҳаммаси", "junior": "Ёш асаларичилар 🟢", "specialist": "Спец асаларичилар 🔴"}.get(cat_filter, "Ҳаммаси")
 
     opts_preview = []
     for i, opt in enumerate(opts):
         mark = "✅ " if i == corr_idx else "⚪️ "
         opts_preview.append(f"{mark}<b>{opt}</b>")
-    opts_block = "\n".join(opts_preview)
+    opts_block = chr(10).join(opts_preview)
 
-    preview_block = (
-        f"❓ <b>Савол:</b> {q_text}\n\n"
-        f"🔘 <b>Вариантлар (Телеграм сўровнома кўринишида):</b>\n"
-        f"{opts_block}\n\n"
-        f"💡 <b>Изоҳ:</b> <i>{expl}</i>"
-    )
+    preview_block = f"""❓ <b>Савол:</b> {q_text}
+
+🔘 <b>Вариантлар (Телеграм сўровнома кўринишида):</b>
+{opts_block}
+
+💡 <b>Изоҳ:</b> <i>{expl}</i>"""
 
     markup = InlineKeyboardMarkup()
-    # 1. Тўғридан-тўғри манзилга юбориш тугмалари
     markup.row(
-        InlineKeyboardButton("📢 Каналга юбориш", callback_data=f"pub_bee_quiz_chan_{quiz_idx}"),
-        InlineKeyboardButton("👥 Гуруҳга юбориш", callback_data=f"pub_bee_quiz_grp_{quiz_idx}")
+        InlineKeyboardButton("📢 1-Каналга жўнатиш", callback_data=f"pub_bee_quiz_chan_{quiz_idx}"),
+        InlineKeyboardButton("👥 2-Группага жўнатиш", callback_data=f"pub_bee_quiz_grp_{quiz_idx}")
     )
-    markup.row(InlineKeyboardButton("🌐 Канал ва Гуруҳга (Иккаласига) 📌", callback_data=f"pub_bee_quiz_{quiz_idx}"))
-    markup.row(InlineKeyboardButton("📣 Реклама менюсига тўғридан-тўғри ўтказиш 🚀", callback_data=f"draft_to_ad_quiz_{quiz_idx}"))
+    markup.row(
+        InlineKeyboardButton("📢+👥 3-Канал ва Группага жўнатиш", callback_data=f"pub_bee_quiz_{quiz_idx}")
+    )
 
     nav_btns = []
     if quiz_idx > 0:
@@ -2483,43 +2471,12 @@ def show_quiz_hub(chat_id, quiz_idx=0, message_id=None, lang="uz_kr"):
     if nav_btns:
         markup.row(*nav_btns)
 
-    markup.row(
-        InlineKeyboardButton(f"🎯 Тоифа: {filter_label}", callback_data="cycle_quiz_cat_filter"),
-        InlineKeyboardButton(f"🔤 Ёзув: {script_badge}", callback_data="toggle_quiz_script")
-    )
-    markup.row(
-        InlineKeyboardButton(f"⏰ Соат: {s_time}", callback_data="cycle_quiz_time"),
-        InlineKeyboardButton(f"🔔 Ҳолати: {en_str}", callback_data="toggle_quiz_enabled")
-    )
-    markup.row(
-        InlineKeyboardButton(f"⏱ Авто-ўчириш: {del_str}", callback_data="cycle_quiz_autodel"),
-        InlineKeyboardButton(f"📌 Қадаш: {pin_str}", callback_data="toggle_quiz_pin")
-    )
-    markup.row(
-        InlineKeyboardButton(f"📢 Қамров: {scope_str}", callback_data="cycle_quiz_scope"),
-        InlineKeyboardButton("⚙️ Жўнатиш созламалари", callback_data="open_dest_settings")
-    )
-    markup.row(
-        InlineKeyboardButton("« Реклама менюсига қайтиш", callback_data="bc_menu"),
-        InlineKeyboardButton("🏠 Асосий Меню", callback_data="back_main")
-    )
+    markup.row(InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main"))
 
-    hub_text = (
-        f"🐝 <b>АСАЛАРИЧИЛИК ВИКТОРИНА ВА СЎРОВНОМАЛАР МАРКАЗИ 📊</b>\n\n"
-        f"• 🎯 <b>Савол тоифаси:</b> {cat_badge}\n"
-        f"• ⏰ <b>Кунлик юбориш вақти:</b> <code>{s_time}</code>\n"
-        f"• ⏱ <b>Авто-ўчириш муддати:</b> <code>{del_str}</code>\n"
-        f"• 📌 <b>Гуруҳ ва Каналларга қадаш (Pin):</b> <code>{pin_str}</code>\n"
-        f"• 📢 <b>Юбориладиган жойлар:</b> {scope_str}\n"
-        f"• 🔤 <b>Ёзув тури:</b> <code>{script_badge}</code>\n"
-        f"• 🔔 <b>Ҳолати:</b> {en_str}\n\n"
-        f"──────── ВИКТОРИНА НАМУНАСИ ────────\n"
-        f"{preview_block}\n"
-        f"────────────────────────────────────\n"
-        f"<i>💡 <b>Тезкор ҳаракатлар:</b> Сиз ушбу викторинани текшириб, <b>«Каналга»</b>, <b>«Гуруҳга»</b> ёки <b>«Иккаласига»</b> юборишингиз, ёхуд <b>«📣 Реклама менюсига ўтказиш»</b> тугмаси орқали пост конструкторига ўтказиб реклама кўринишида тарқатишингиз мумкин!</i>"
-    )
+    hub_text = f"""🐝 <b>3-ВИКТОРИНА СЎРОВНОМАЛАРИ</b> ({quiz_idx + 1} / {total_q})
+
+{preview_block}"""
     safe_edit_or_send(chat_id, message_id, hub_text, markup)
-
 
 def randomize_quiz_options(item):
     """
@@ -2849,6 +2806,271 @@ def get_next_sequential_quiz():
     return 0, all_quizzes[0], all_quizzes[0].get("id", 1)
 
 
+
+def format_bee_apitherapy_post(item, lang="uz_kr"):
+    cfg_script = get_system_setting("script", get_system_setting("news_script", "uz_kr"))
+    active_lang = lang if lang in ["uz_kr", "uz_lat", "ru", "en"] else cfg_script
+
+    title = item.get("title_lat" if active_lang=="uz_lat" else "title_kr", "")
+    body = item.get("body_lat" if active_lang=="uz_lat" else "body_kr", "")
+    source = item.get("source", "Asalarichilik.Uz Апитерапия Маркази")
+
+    chan = get_official_channel()
+    grp = get_official_group()
+    yt = get_official_youtube()
+    c_name = get_official_channel_name()
+
+    header = "🌿 <b>АПИТЕРАПИЯ ВА ШИФОБАХШ РЕЦЕПТЛАР</b>" if active_lang == "uz_kr" else "🌿 <b>APITERAPIYA VA SHIFOBAXSH RETSEPTLAR</b>"
+    src_lbl = "🌐 <b>Манба:</b>" if active_lang == "uz_kr" else "🌐 <b>Manba:</b>"
+    tag_lbl = "🏷 <b>Теглар:</b>" if active_lang == "uz_kr" else "🏷 <b>Teglar:</b>"
+
+    footer = (
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🐝 <b>{c_name}:</b> {chan}\n"
+        f"👥 <b>Расмий гуруҳ:</b> {grp}\n"
+        f"📺 <b>YouTube:</b> {yt}\n"
+        f"🤖 <b>Бот:</b> @{BOT_USERNAME}"
+    )
+
+    return (
+        f"{header}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 <b>{title}</b>\n\n"
+        f"{body}\n\n"
+        f"{src_lbl} <i>{source}</i>\n"
+        f"{tag_lbl} #Апитерапия #Асал #Шифо #Саломатлик #AsalarichilikUz\n"
+        f"{footer}"
+    )
+
+def show_bee_apitherapy_hub(chat_id, api_idx=0, message_id=None, lang="uz_kr"):
+    total = len(BEE_APITHERAPY_NEWS)
+    if total == 0:
+        safe_edit_or_send(chat_id, message_id, "⚠️ Апитерапия маълумотлари базаси бўш!", InlineKeyboardMarkup([[InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main")]]))
+        return
+    if api_idx < 0: api_idx = 0
+    if api_idx >= total: api_idx = total - 1
+
+    cfg_script = get_system_setting("script", get_system_setting("news_script", "uz_kr"))
+    item = BEE_APITHERAPY_NEWS[api_idx]
+    preview_txt = format_bee_apitherapy_post(item, cfg_script)
+
+    markup = InlineKeyboardMarkup()
+    # 3 та жўнатиш функцияси
+    markup.row(
+        InlineKeyboardButton("📢 1-Каналга жўнатиш", callback_data=f"pub_bee_api_chan_{api_idx}"),
+        InlineKeyboardButton("👥 2-Группага жўнатиш", callback_data=f"pub_bee_api_grp_{api_idx}")
+    )
+    markup.row(
+        InlineKeyboardButton("📢+👥 3-Канал ва Группага жўнатиш", callback_data=f"pub_bee_api_{api_idx}")
+    )
+
+    nav_btns = []
+    if api_idx > 0:
+        nav_btns.append(InlineKeyboardButton("⬅️ Олдингиси", callback_data=f"view_bee_api_{api_idx - 1}"))
+    nav_btns.append(InlineKeyboardButton(f"📄 {api_idx + 1} / {total}", callback_data="noop"))
+    if api_idx < total - 1:
+        nav_btns.append(InlineKeyboardButton("Кейингиси ➡️", callback_data=f"view_bee_api_{api_idx + 1}"))
+    if nav_btns:
+        markup.row(*nav_btns)
+
+    markup.row(InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main"))
+
+    hub_text = (
+        f"🌿 <b>2-АПИТЕРАПИЯ ЯНГИЛИКЛАРИ</b> ({api_idx + 1} / {total})\n\n"
+        f"{preview_txt}"
+    )
+    safe_edit_or_send(chat_id, message_id, hub_text, markup)
+
+def publish_bee_apitherapy(api_idx, admin_user_id=None, target_scope="both", pin=True):
+    if not BEE_APITHERAPY_NEWS:
+        return 0
+    if api_idx < 0 or api_idx >= len(BEE_APITHERAPY_NEWS):
+        api_idx = 0
+    item = BEE_APITHERAPY_NEWS[api_idx]
+    cfg_script = get_system_setting("script", get_system_setting("news_script", "uz_kr"))
+    post_txt = format_bee_apitherapy_post(item, cfg_script)
+    post_markup = get_post_buttons_markup(content_type="apitherapy", content_id=f"api_{item.get('id', api_idx)}", share_text=item.get("title_kr") or item.get("title_lat", "Apiterapiya"))
+
+    sent_cnt = 0
+    sent_channel_ids = set()
+    sent_group_ids = set()
+
+    # Каналларга
+    if target_scope in ["both", "channels"]:
+        cursor.execute("SELECT chat_id FROM channels")
+        chs = [r["chat_id"] for r in cursor.fetchall()]
+        if -1001261575171 not in chs:
+            chs.append(-1001261575171)
+        for cid in chs:
+            if cid in sent_channel_ids: continue
+            try:
+                sm = bot.send_message(cid, post_txt, parse_mode="HTML", reply_markup=post_markup)
+                sent_channel_ids.add(cid)
+                if pin:
+                    try: bot.pin_chat_message(cid, sm.message_id, disable_notification=False)
+                    except: pass
+                sent_cnt += 1
+            except Exception as e:
+                logging.warning(f"Error publishing apitherapy to channel {cid}: {e}")
+
+    # Гуруҳларга
+    if target_scope in ["both", "groups"]:
+        cursor.execute("SELECT chat_id FROM groups WHERE is_authorized = 1")
+        grps = [r["chat_id"] for r in cursor.fetchall()]
+        for gid in grps:
+            if gid in sent_group_ids: continue
+            try:
+                sm = bot.send_message(gid, post_txt, parse_mode="HTML", reply_markup=post_markup)
+                sent_group_ids.add(gid)
+                if pin:
+                    try: bot.pin_chat_message(gid, sm.message_id, disable_notification=False)
+                    except: pass
+                sent_cnt += 1
+            except Exception as e:
+                logging.warning(f"Error publishing apitherapy to group {gid}: {e}")
+
+    return sent_cnt
+
+def format_bee_video_post(item, lang="uz_kr"):
+    cfg_script = get_system_setting("script", get_system_setting("news_script", "uz_kr"))
+    active_lang = lang if lang in ["uz_kr", "uz_lat", "ru", "en"] else cfg_script
+
+    title = item.get("title_lat" if active_lang=="uz_lat" else "title_kr", "")
+    desc = item.get("desc_lat" if active_lang=="uz_lat" else "desc_kr", "")
+    url = item.get("url", get_official_youtube())
+    dur = item.get("duration", "15:00")
+
+    chan = get_official_channel()
+    grp = get_official_group()
+    c_name = get_official_channel_name()
+
+    header = "📹 <b>АСАЛАРИЧИЛИК АМАЛИЙ МАСТЕР-КЛАСС ВИДЕОСИ</b>" if active_lang == "uz_kr" else "📹 <b>ASALARICHILIK AMALIY MASTER-KLASS VIDEOSI</b>"
+
+    footer = (
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🐝 <b>{c_name}:</b> {chan}\n"
+        f"👥 <b>Расмий гуруҳ:</b> {grp}\n"
+        f"🎬 <b>Видео давомийлиги:</b> {dur}\n"
+        f"🤖 <b>Бот:</b> @{BOT_USERNAME}"
+    )
+
+    return (
+        f"{header}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 <b>{title}</b>\n\n"
+        f"{desc}\n\n"
+        f"▶️ <b>Томоша қилиш ҳаволаси:</b> {url}\n\n"
+        f"🏷 #Видео #МастерКласс #Асаларичилик #AsalarichilikUz\n"
+        f"{footer}"
+    )
+
+def show_bee_video_hub(chat_id, video_idx=0, message_id=None, lang="uz_kr"):
+    total = len(BEE_GLOBAL_VIDEOS)
+    if total == 0:
+        safe_edit_or_send(chat_id, message_id, "⚠️ Видеолар базаси бўш!", InlineKeyboardMarkup([[InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main")]]))
+        return
+    if video_idx < 0: video_idx = 0
+    if video_idx >= total: video_idx = total - 1
+
+    cfg_script = get_system_setting("script", get_system_setting("news_script", "uz_kr"))
+    item = BEE_GLOBAL_VIDEOS[video_idx]
+    preview_txt = format_bee_video_post(item, cfg_script)
+
+    markup = InlineKeyboardMarkup()
+    # 3 та жўнатиш функцияси
+    markup.row(
+        InlineKeyboardButton("📢 1-Каналга жўнатиш", callback_data=f"pub_bee_video_chan_{video_idx}"),
+        InlineKeyboardButton("👥 2-Группага жўнатиш", callback_data=f"pub_bee_video_grp_{video_idx}")
+    )
+    markup.row(
+        InlineKeyboardButton("📢+👥 3-Канал ва Группага жўнатиш", callback_data=f"pub_bee_video_{video_idx}")
+    )
+
+    nav_btns = []
+    if video_idx > 0:
+        nav_btns.append(InlineKeyboardButton("⬅️ Олдинги", callback_data=f"view_bee_video_{video_idx - 1}"))
+    nav_btns.append(InlineKeyboardButton(f"📄 {video_idx + 1} / {total}", callback_data="noop"))
+    if video_idx < total - 1:
+        nav_btns.append(InlineKeyboardButton("Кейинги ➡️", callback_data=f"view_bee_video_{video_idx + 1}"))
+    if nav_btns:
+        markup.row(*nav_btns)
+
+    markup.row(InlineKeyboardButton("« 🔙 Орқага", callback_data="back_main"))
+
+    hub_text = (
+        f"📹 <b>4-АСАЛАРИЧИЛИК ВИДЕОЛАРИ</b> ({video_idx + 1} / {total})\n\n"
+        f"{preview_txt}"
+    )
+    safe_edit_or_send(chat_id, message_id, hub_text, markup)
+
+def publish_bee_video(video_idx, admin_user_id=None, target_scope="both", pin=True):
+    if not BEE_GLOBAL_VIDEOS:
+        return 0
+    if video_idx < 0 or video_idx >= len(BEE_GLOBAL_VIDEOS):
+        video_idx = 0
+    item = BEE_GLOBAL_VIDEOS[video_idx]
+    cfg_script = get_system_setting("script", get_system_setting("news_script", "uz_kr"))
+    post_txt = format_bee_video_post(item, cfg_script)
+    post_markup = get_post_buttons_markup(content_type="video", content_id=f"video_{item.get('id', video_idx)}", share_text=item.get("title_kr") or item.get("title_lat", "Video"))
+
+    sent_cnt = 0
+    sent_channel_ids = set()
+    sent_group_ids = set()
+
+    if target_scope in ["both", "channels"]:
+        cursor.execute("SELECT chat_id FROM channels")
+        chs = [r["chat_id"] for r in cursor.fetchall()]
+        if -1001261575171 not in chs:
+            chs.append(-1001261575171)
+        for cid in chs:
+            if cid in sent_channel_ids: continue
+            try:
+                sm = bot.send_message(cid, post_txt, parse_mode="HTML", reply_markup=post_markup)
+                sent_channel_ids.add(cid)
+                if pin:
+                    try: bot.pin_chat_message(cid, sm.message_id, disable_notification=False)
+                    except: pass
+                sent_cnt += 1
+            except Exception as e:
+                logging.warning(f"Error publishing video to channel {cid}: {e}")
+
+    if target_scope in ["both", "groups"]:
+        cursor.execute("SELECT chat_id FROM groups WHERE is_authorized = 1")
+        grps = [r["chat_id"] for r in cursor.fetchall()]
+        for gid in grps:
+            if gid in sent_group_ids: continue
+            try:
+                sm = bot.send_message(gid, post_txt, parse_mode="HTML", reply_markup=post_markup)
+                sent_group_ids.add(gid)
+                if pin:
+                    try: bot.pin_chat_message(gid, sm.message_id, disable_notification=False)
+                    except: pass
+                sent_cnt += 1
+            except Exception as e:
+                logging.warning(f"Error publishing video to group {gid}: {e}")
+
+    return sent_cnt
+
+def publish_next_sequential_apitherapy(admin_user_id=None, manual_scope=None):
+    if not BEE_APITHERAPY_NEWS: return 0, 0, ""
+    last_id = int(get_system_setting("last_sent_apitherapy_id", "0"))
+    next_idx = (last_id) % len(BEE_APITHERAPY_NEWS)
+    item = BEE_APITHERAPY_NEWS[next_idx]
+    scope = manual_scope or get_system_setting("broadcast_default_scope", "both")
+    sent = publish_bee_apitherapy(next_idx, admin_user_id, target_scope=scope, pin=True)
+    set_system_setting("last_sent_apitherapy_id", str(next_idx + 1))
+    return sent, next_idx + 1, item.get("title_kr", "Apiterapiya")
+
+def publish_next_sequential_video(admin_user_id=None, manual_scope=None):
+    if not BEE_GLOBAL_VIDEOS: return 0, 0, ""
+    last_id = int(get_system_setting("last_sent_video_id", "0"))
+    next_idx = (last_id) % len(BEE_GLOBAL_VIDEOS)
+    item = BEE_GLOBAL_VIDEOS[next_idx]
+    scope = manual_scope or get_system_setting("broadcast_default_scope", "both")
+    sent = publish_bee_video(next_idx, admin_user_id, target_scope=scope, pin=True)
+    set_system_setting("last_sent_video_id", str(next_idx + 1))
+    return sent, next_idx + 1, item.get("title_kr", "Video")
+
 def publish_next_sequential_news(admin_user_id=None, manual_scope=None):
     """Навбатдаги янгиликни тартиб билан (1 кейин 2 қилиб) ва такрорламасдан юбориш"""
     idx, item, nid = get_next_sequential_news()
@@ -2998,43 +3220,40 @@ def get_post_buttons_markup(content_type="news", content_id="0", share_text="Asa
             for i in range(0, len(react_row), 5):
                 markup.row(*react_row[i:i+5])
             
-    # 2. Расмий канал ва Гуруҳ қатори
-    chan = get_official_channel()
+        chan = get_official_channel()
     grp = get_official_group()
     yt = get_official_youtube()
+    c_name = get_official_channel_name()
     c_clean = chan.replace("@", "")
     g_clean = grp.replace("@", "").replace("https://t.me/", "")
     g_url = grp if grp.startswith("http") else f"https://t.me/{g_clean}"
-    
+
     markup.row(
-        InlineKeyboardButton("📢 Расмий Канал", url=f"https://t.me/{c_clean}"),
+        InlineKeyboardButton(f"📢 {c_name}", url=f"https://t.me/{c_clean}"),
         InlineKeyboardButton("👥 Расмий Гуруҳ", url=g_url)
     )
-    # 3. YouTube канали қатори
     if yt:
         markup.row(InlineKeyboardButton("📺 YouTube Каналимиз", url=yt))
-    
-    # 4. Улашиш ва Мутахассис қатори
+
     extra_row = []
     if share_btn == "1":
-        raw_share = (share_text or _content_share_cache.get(share_key, "Asalarichilik.Uz")).strip()
+        raw_share = (share_text or _content_share_cache.get(share_key, c_name)).strip()
         clean_share = re.sub(r'<[^>]+>', '', raw_share).strip()
         if len(clean_share) > 1200:
             clean_share = clean_share[:1200].rsplit(' ', 1)[0] + "..."
-        share_content = (
-            f"{clean_share}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🐝 Расмий канал: @{c_clean}\n"
-            f"👥 Расмий гуруҳ: @{g_clean}\n"
-            f"🤖 Бот: @{BOT_USERNAME}"
-        )
+        share_content = f"""{clean_share}
+
+━━━━━━━━━━━━━━━━━━━━
+🐝 {c_name}: @{c_clean}
+👥 Расмий гуруҳ: @{g_clean}
+🤖 Бот: @{BOT_USERNAME}"""
         safe_share = urllib.parse.quote(share_content)
         share_url = f"https://t.me/share/url?text={safe_share}"
         extra_row.append(InlineKeyboardButton("↗️ Улашиш", url=share_url))
-        
+
     if expert_btn == "1":
-        extra_row.append(InlineKeyboardButton("💬 Мутахассис", url=f"https://t.me/{OWNER_USERNAME.lstrip('@')}"))
-        
+        extra_row.append(InlineKeyboardButton("💬 Мутахассис", url=f"https://t.me/{BOT_USERNAME}?start=specialist"))
+
     if extra_row:
         markup.row(*extra_row)
         
@@ -3121,49 +3340,112 @@ def show_destinations_settings_menu(chat_id, message_id=None, lang="uz_kr"):
 
     safe_edit_or_send(chat_id, message_id, txt, markup)
 
-def show_post_settings_menu(chat_id, message_id=None):
+def show_unified_settings_menu(chat_id, message_id=None, lang="uz_kr"):
+    chan = get_official_channel()
+    grp = get_official_group()
+    chan_name = get_official_channel_name()
+    script = get_system_setting("script", "uz_kr")
+
     auto_react = get_system_setting("auto_reactions", "1")
     share_btn = get_system_setting("share_button", "1")
     expert_btn = get_system_setting("expert_button", "1")
-    react_set = get_system_setting("reactions_set", "👍 👎 ❤️ 👏")
-    chan = get_official_channel()
-    grp = get_official_group()
-    script = get_system_setting("script", "uz_kr")
-    q_time = get_system_setting("auto_quiz_time", "09:00")
-    n_time = get_system_setting("auto_news_time", "14:00")
+    react_set = get_system_setting("reactions_set", "👍 ❤️ 🔥 👏 🐝")
+
+    cur_scope = get_system_setting("broadcast_default_scope", "both")
+    scope_dict = {
+        "channels": "📢 1-Канал",
+        "groups": "👥 2-Группа",
+        "both": "📢+👥 3-Канал ва Группа"
+    }
+    scope_lbl = scope_dict.get(cur_scope, "📢+👥 3-Канал ва Группа")
+
+    # Вақтлар
+    news_time = get_system_setting("auto_news_time", "07:00")
+    news_en = (get_system_setting("auto_news_enabled", "1") == "1")
+    api_time = get_system_setting("auto_apitherapy_time", "08:00")
+    api_en = (get_system_setting("auto_apitherapy_enabled", "1") == "1")
+    quiz_time = get_system_setting("auto_quiz_time", "16:00")
+    quiz_en = (get_system_setting("auto_quiz_enabled", "1") == "1")
+    video_time = get_system_setting("auto_video_time", "18:00")
+    video_en = (get_system_setting("auto_video_enabled", "1") == "1")
 
     ar_icon = "✅ Ёқилган" if auto_react == "1" else "⚪️ Ўчирилган"
     sh_icon = "✅ Ёқилган" if share_btn == "1" else "⚪️ Ўчирилган"
     ex_icon = "✅ Ёқилган" if expert_btn == "1" else "⚪️ Ўчирилган"
     sc_icon = "Крил 🇺🇿" if script == "uz_kr" else "Лотин 🇺🇿"
 
-    txt = (
-        "⚙️ <b>БОТ ВА ПОСТ СОЗЛАМАЛАРИ</b>\n\n"
-        "Канал ва гуруҳларга юбориладиган ҳар бир хабар остига автоматик тугмалар ва реакциялар қўйишни шу ердан ёқишингиз ёки ўчиришингиз мумкин:\n\n"
-        "• <b>Манзиллар созламаси:</b> Янгилик ва викториналарни каналга, гуруҳга ёки иккаласига юборишни танлаш.\n"
-        "• <b>Авто-реакциялар:</b> Канал ёки гуруҳдаги янги хабарлар остига лайк тугмалари қўяди.\n"
-        "• <b>Улашиш тугмаси:</b> Постни дўстларга юбориш тугмаси.\n"
-        "• <b>Тўплам:</b> Лайк ва эможилар кўриниши (тайёр ёки қўлда ёзилган).\n"
-        "• <b>Расмий канал ва гуруҳ:</b> Янгиликлар ва ҳаволаларда чиқадиган канал ва гуруҳни қўлда ўзгартириш."
-    )
+    news_st = f"🟢 Ёқилган ({news_time})" if news_en else f"⚪️ Ўчирилган ({news_time})"
+    api_st = f"🟢 Ёқилган ({api_time})" if api_en else f"⚪️ Ўчирилган ({api_time})"
+    quiz_st = f"🟢 Ёқилган ({quiz_time})" if quiz_en else f"⚪️ Ўчирилган ({quiz_time})"
+    video_st = f"🟢 Ёқилган ({video_time})" if video_en else f"⚪️ Ўчирилган ({video_time})"
 
+    txt = f"""⚙️ <b>АСАЛАРИЧИЛИК БОТ ВА КАНАЛ/ГУРУҲ СОЗЛАМАЛАРИ</b>
+
+Ушбу ягона панел орқали ботнинг барча канал ва гуруҳларга хабар жўнатиш тартиби, расмий манзиллар, реакциялар ҳамда 4 та асосий бўлим авто-жўнатиш вақтларини созлашингиз мумкин:
+
+🎯 <b>Жўнатмалар манзили:</b> {scope_lbl}
+📢 <b>Расмий Канал:</b> <code>{chan}</code>
+👥 <b>Расмий Группа:</b> <code>{grp}</code>
+🏷 <b>Канал номи:</b> <b>{chan_name}</b>
+🔤 <b>Барча маълумотлар ёзув тури:</b> <b>{sc_icon}</b>
+🔄 <b>Авто-реакциялар:</b> {ar_icon} ({react_set})
+↗️ <b>Улашиш тугмаси:</b> {sh_icon}
+💬 <b>Мутахассис тугмаси:</b> {ex_icon} <i>(Барча ёзишмалар ботга йўналади)</i>
+
+⏰ <b>Бўлимлар бўйича кунлик авто-жўнатиш вақтлари:</b>
+• 📰 1-Асаларичилик янгиликлари: <b>{news_st}</b>
+• 🌿 2-Апитерапия янгиликлари: <b>{api_st}</b>
+• 🐝 3-Викторина сўровномалари: <b>{quiz_st}</b>
+• 📹 4-Асаларичилик видеолари: <b>{video_st}</b>"""
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🌐 Группа ва Каналлар созламаси (Манзиллар) ⚙️", callback_data="open_dest_settings"))
-    markup.row(InlineKeyboardButton(f"🔄 Авто-реакциялар: {ar_icon}", callback_data="post_toggle_autoreact"))
-    markup.row(InlineKeyboardButton(f"↗️ Улашиш тугмаси: {sh_icon}", callback_data="post_toggle_share"))
-    markup.row(InlineKeyboardButton(f"💬 Мутахассис тугмаси: {ex_icon}", callback_data="post_toggle_expert"))
-    markup.row(InlineKeyboardButton(f"🎨 Тўплам: {react_set}", callback_data="post_cycle_reactions"))
-    markup.row(InlineKeyboardButton("✏️ Лайкларни қўлда ўзгартириш", callback_data="post_custom_reactions"))
-    markup.row(InlineKeyboardButton(f"📢 Расмий канал: {chan}", callback_data="post_set_channel"))
-    markup.row(InlineKeyboardButton(f"👥 Расмий гуруҳ: {grp}", callback_data="post_set_group"))
-    markup.row(InlineKeyboardButton(f"🔤 Ёзув тури: {sc_icon}", callback_data="post_toggle_script"))
-    q_disp = q_time[:2] if len(q_time) >= 2 else q_time
-    markup.row(InlineKeyboardButton(f"⏰ Авто-викторина: {q_disp}", callback_data="post_cycle_quiz_time"))
-    markup.row(InlineKeyboardButton(f"📰 Авто-янгилик: {n_time}", callback_data="post_cycle_news_time"))
-    markup.row(InlineKeyboardButton("📋 Уланган канал ва гуруҳлар", callback_data="post_connected_list"))
-    markup.row(InlineKeyboardButton("🔙 Ёпиш", callback_data="post_close_settings"))
+    # 1. Жўнатмалар жўнатиш манзили
+    markup.row(InlineKeyboardButton(f"🎯 Жўнатмалар манзили: {scope_lbl}", callback_data="post_cycle_dest_scope"))
+    # 2. Расмий канал ва группани таҳрирлаш
+    markup.row(
+        InlineKeyboardButton("📢 Расмий Канални таҳрирлаш", callback_data="post_set_channel"),
+        InlineKeyboardButton("👥 Расмий Группани таҳрирлаш", callback_data="post_set_group")
+    )
+    # 3. Канал номи
+    markup.row(InlineKeyboardButton(f"🏷 Канал номи: {chan_name}", callback_data="post_set_chan_name"))
+    # 4. Авто реакциялар
+    markup.row(
+        InlineKeyboardButton(f"🔄 Авто-реакциялар: {ar_icon}", callback_data="post_toggle_autoreact"),
+        InlineKeyboardButton(f"🎨 Эможилар: {react_set}", callback_data="post_cycle_reactions")
+    )
+    # 5. Улашиш ва Мутахассис
+    markup.row(
+        InlineKeyboardButton(f"↗️ Улашиш: {sh_icon}", callback_data="post_toggle_share"),
+        InlineKeyboardButton("✏️ Улашишни таҳрирлаш", callback_data="post_edit_share")
+    )
+    markup.row(
+        InlineKeyboardButton(f"💬 Мутахассис тугмаси: {ex_icon}", callback_data="post_toggle_expert"),
+        InlineKeyboardButton(f"🔤 Ёзув тури: {sc_icon}", callback_data="post_toggle_script")
+    )
+    # 6. Бўлимлар бўйича авто-жўнатиш вақтлари
+    markup.row(
+        InlineKeyboardButton(f"📰 1-Янгилик: {'🟢' if news_en else '⚪️'} {news_time}", callback_data="toggle_auto_news"),
+        InlineKeyboardButton("✏️ Вақтини ўзгартириш", callback_data="edit_time_news")
+    )
+    markup.row(
+        InlineKeyboardButton(f"🌿 2-Апитерапия: {'🟢' if api_en else '⚪️'} {api_time}", callback_data="toggle_auto_api"),
+        InlineKeyboardButton("✏️ Вақтини ўзгартириш", callback_data="edit_time_api")
+    )
+    markup.row(
+        InlineKeyboardButton(f"🐝 3-Викторина: {'🟢' if quiz_en else '⚪️'} {quiz_time}", callback_data="toggle_auto_quiz"),
+        InlineKeyboardButton("✏️ Вақтини ўзгартириш", callback_data="edit_time_quiz")
+    )
+    markup.row(
+        InlineKeyboardButton(f"📹 4-Видеолар: {'🟢' if video_en else '⚪️'} {video_time}", callback_data="toggle_auto_video"),
+        InlineKeyboardButton("✏️ Вақтини ўзгартириш", callback_data="edit_time_video")
+    )
+    # 7. Орқага
+    markup.row(InlineKeyboardButton("« 🔙 Орқага (Асосийга қайтиш)", callback_data="back_main"))
 
     safe_edit_or_send(chat_id, message_id, txt, markup)
+
+def show_post_settings_menu(chat_id, message_id=None):
+    show_unified_settings_menu(chat_id, message_id)
+
 
 def show_database_settings_menu(chat_id, message_id=None, lang="uz_kr"):
     chan = get_official_channel()
@@ -5648,6 +5930,19 @@ def cmd_start_private(message):
         except Exception as ue:
             logging.error(f"start unmute error: {ue}")
 
+        # Мутахассисга ёзиш deep-link орқали кирганда (Specialist flow)
+    if param in ["specialist", "expert", "doctor"]:
+        USER_STATES[user_id] = {"action": "wait_expert_message"}
+        bot.send_message(
+            message.chat.id,
+            f"👨‍⚕️ <b>АСАЛАРИЧИЛИК ВА АПИТЕРАПИЯ МУТАХАССИСИ ҚАБУЛИ!</b>\n\n"
+            f"Ассалому алайкум, <b>{first_name}</b>!\n"
+            f"Сизни қизиқтирган савол, муаммо ёки ташхис керак бўлган ҳолатни (матн, расм ёки видео кўринишида) шу ерга юборинг.\n\n"
+            f"Мутахассисимиз кўриб чиқиб, шу бот орқали жавоб йўллайди! 🐝🍯",
+            parse_mode="HTML"
+        )
+        return
+
     # БОТГА ҲЕЧ КИМ КИРА ОЛМАСИН: Фақат Бот эгаси (OWNER_ID) кира олади!
     if user_id != OWNER_ID:
         try:
@@ -6119,6 +6414,112 @@ def handle_all_private_messages(message):
             else:
                 USER_STATES.pop(user_id, None)
             show_post_settings_menu(message.chat.id)
+            return
+
+        
+        # Канал номини ўзгартириш
+        if action == "wait_post_custom_chan_name":
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                set_system_setting("official_channel_name", txt.strip())
+                bot.send_message(message.chat.id, f"✅ <b>Канал номи сақланди:</b> <b>{txt.strip()}</b>", parse_mode="HTML")
+            USER_STATES.pop(user_id, None)
+            show_unified_settings_menu(message.chat.id)
+            return
+
+        # Улашиш матнини ўзгартириш
+        if action == "wait_post_custom_share":
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                set_system_setting("custom_share_text", txt.strip())
+                bot.send_message(message.chat.id, f"✅ <b>Улашиш матни сақланди:</b> <i>{txt.strip()}</i>", parse_mode="HTML")
+            USER_STATES.pop(user_id, None)
+            show_unified_settings_menu(message.chat.id)
+            return
+
+        # Вақтларни ўзгартириш
+        if action == "wait_auto_news_time":
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                m = re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', txt.strip())
+                if m:
+                    set_system_setting("auto_news_time", txt.strip())
+                    bot.send_message(message.chat.id, f"✅ <b>1-Янгиликлар авто-жўнатиш вақти:</b> <code>{txt.strip()}</code> қилиб белгиланди.", parse_mode="HTML")
+                else:
+                    bot.send_message(message.chat.id, "⚠️ Вақт формати нотўғри! Масалан: <code>07:00</code> кўринишида ёзинг.", parse_mode="HTML")
+            USER_STATES.pop(user_id, None)
+            show_unified_settings_menu(message.chat.id)
+            return
+
+        if action == "wait_auto_api_time":
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                m = re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', txt.strip())
+                if m:
+                    set_system_setting("auto_apitherapy_time", txt.strip())
+                    bot.send_message(message.chat.id, f"✅ <b>2-Апитерапия авто-жўнатиш вақти:</b> <code>{txt.strip()}</code> қилиб белгиланди.", parse_mode="HTML")
+                else:
+                    bot.send_message(message.chat.id, "⚠️ Вақт формати нотўғри! Масалан: <code>08:00</code> кўринишида ёзинг.", parse_mode="HTML")
+            USER_STATES.pop(user_id, None)
+            show_unified_settings_menu(message.chat.id)
+            return
+
+        if action == "wait_auto_quiz_time":
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                m = re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', txt.strip())
+                if m:
+                    set_system_setting("auto_quiz_time", txt.strip())
+                    bot.send_message(message.chat.id, f"✅ <b>3-Викторина авто-жўнатиш вақти:</b> <code>{txt.strip()}</code> қилиб белгиланди.", parse_mode="HTML")
+                else:
+                    bot.send_message(message.chat.id, "⚠️ Вақт формати нотўғри! Масалан: <code>16:00</code> кўринишида ёзинг.", parse_mode="HTML")
+            USER_STATES.pop(user_id, None)
+            show_unified_settings_menu(message.chat.id)
+            return
+
+        if action == "wait_auto_video_time":
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                m = re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', txt.strip())
+                if m:
+                    set_system_setting("auto_video_time", txt.strip())
+                    bot.send_message(message.chat.id, f"✅ <b>4-Видеолар авто-жўнатиш вақти:</b> <code>{txt.strip()}</code> қилиб белгиланди.", parse_mode="HTML")
+                else:
+                    bot.send_message(message.chat.id, "⚠️ Вақт формати нотўғри! Масалан: <code>18:00</code> кўринишида ёзинг.", parse_mode="HTML")
+            USER_STATES.pop(user_id, None)
+            show_unified_settings_menu(message.chat.id)
+            return
+
+        # Мутахассисга фойдаланувчи томонидан савол ёзилганда
+        if action == "wait_expert_message":
+            USER_STATES.pop(user_id, None)
+            user_tag = message.from_user.full_name or "Фойдаланувчи"
+            u_name = f"@{message.from_user.username}" if message.from_user.username else "Юзернейм йўқ"
+            rep_m = InlineKeyboardMarkup()
+            rep_m.row(InlineKeyboardButton("✉️ Фойдаланувчига жавоб қайтариш", callback_data=f"expert_reply_{user_id}"))
+
+            notify_txt = (
+                f"👨‍⚕️ <b>МУТАХАССИСГА ЯНГИ САВОЛ / МУРОЖААТ:</b>\n\n"
+                f"👤 <b>Фойдаланувчи:</b> <a href=\"tg://user?id={user_id}\">{user_tag}</a> ({u_name})\n"
+                f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+                f"📝 <b>Хабар матни:</b> {txt}"
+            )
+            bot.send_message(OWNER_ID, notify_txt, parse_mode="HTML", reply_markup=rep_m)
+            bot.send_message(message.chat.id, "✅ <b>Саволингиз мутахассисга етказилди!</b>\n\nТез фурсатда шу ерда жавоб оласиз. Раҳмат! 🐝", parse_mode="HTML")
+            return
+
+        # Админ фойдаланувчига жавоб ёзаётганда
+        if action == "wait_expert_reply_to_user":
+            target_uid = state.get("target_user_id")
+            USER_STATES.pop(user_id, None)
+            if txt not in ["◀️ Бекор қилиш", "Бекор қилиш", "Отмена"]:
+                reply_txt = (
+                    f"👨‍⚕️ <b>АСАЛАРИЧИЛИК МУТАХАССИСИ ЖАВОБИ:</b>\n\n"
+                    f"{txt}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<i>Asalarichilik.Uz — Саволингиз учун ташаккур! 🐝</i>"
+                )
+                try:
+                    bot.send_message(target_uid, reply_txt, parse_mode="HTML")
+                    bot.send_message(message.chat.id, f"✅ <b>Жавобингиз фойдаланувчига ({target_uid}) муваффақиятли етказилди!</b>", parse_mode="HTML")
+                except Exception as ex:
+                    bot.send_message(message.chat.id, f"⚠️ Фойдаланувчига юбориб бўлмади: {ex}", parse_mode="HTML")
+            else:
+                bot.send_message(message.chat.id, "🛑 Жавоб қайтариш бекор қилинди.")
             return
 
         # 1.2 Расмий гуруҳни қўлда киритиш (wait_post_custom_group)
@@ -7032,7 +7433,7 @@ def handle_all_callbacks(call):
 
     # Фақат бот эгаси учун шахсий чатдаги барча созламалар:
     if call.message and call.message.chat.type == 'private' and user_id != OWNER_ID:
-        if not data.startswith(("check_sub_", "unmute_me_", "req_check_sub_", "cb_react_", "react_")):
+        if not data.startswith(("check_sub_", "unmute_me_", "req_check_sub_", "cb_react_", "react_", "open_bee_", "view_bee_", "fr_", "fr:", "rx_")):
             bot.answer_callback_query(call.id, "⛔️ Кириш чекланган! Бот фақат эгаси учун.", show_alert=True)
             try:
                 bot.delete_message(chat_id, call.message.message_id)
@@ -7041,7 +7442,7 @@ def handle_all_callbacks(call):
             return
 
     # Ҳамма учун очиқ бўлган умумий callback'лар:
-    public_cb_prefixes = ("cb_react_", "react_", "check_sub_", "set_lang_", "back_main", "menu_language", "menu_help", "menu_guide", "menu_doctor", "menu_add_group", "refresh_comments_", "req_check_sub_", "unmute_me_", "open_bee_news", "open_bee_quiz", "fr_", "fr:", "rx_")
+    public_cb_prefixes = ("cb_react_", "react_", "check_sub_", "set_lang_", "back_main", "menu_language", "menu_help", "menu_guide", "menu_doctor", "menu_add_group", "refresh_comments_", "req_check_sub_", "unmute_me_", "open_bee_news", "open_bee_apitherapy", "open_bee_quiz", "open_bee_videos", "view_bee_", "pub_bee_", "expert_reply_", "post_", "menu_settings", "edit_time_", "toggle_auto_", "fr_", "fr:", "rx_")
     if not any(data.startswith(pfx) for pfx in public_cb_prefixes):
         target_gid = None
         m_gid = re.search(r'(-100\d{6,}| -\d{7,} )', data)
@@ -7057,6 +7458,167 @@ def handle_all_callbacks(call):
         elif not is_user_admin_anywhere(user_id):
             bot.answer_callback_query(call.id, "⚠️ Бу бўлим фақат гуруҳ админлари ва бот эгаси учун!", show_alert=True)
             return
+
+    
+    # 2. Апитерапия Янгиликлари Маркази (Apitherapy Hub)
+    elif data in ["open_bee_apitherapy", "bc_bee_api_hub"]:
+        show_bee_apitherapy_hub(chat_id, 0, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("view_bee_api_"):
+        a_idx = int(data.replace("view_bee_api_", ""))
+        show_bee_apitherapy_hub(chat_id, a_idx, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("pub_bee_api_chan_"):
+        a_idx = int(data.replace("pub_bee_api_chan_", ""))
+        sent_c = publish_bee_apitherapy(a_idx, user_id, target_scope="channels", pin=True)
+        if sent_c > 0:
+            bot.answer_callback_query(call.id, f"✅ Апитерапия {sent_c} та Каналга юборилди ва қадалди! 📌", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Каналга юбориб бўлмади!", show_alert=True)
+        show_bee_apitherapy_hub(chat_id, a_idx, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("pub_bee_api_grp_"):
+        a_idx = int(data.replace("pub_bee_api_grp_", ""))
+        sent_c = publish_bee_apitherapy(a_idx, user_id, target_scope="groups", pin=True)
+        if sent_c > 0:
+            bot.answer_callback_query(call.id, f"✅ Апитерапия {sent_c} та Гуруҳга юборилди ва қадалди! 📌", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Гуруҳга юбориб бўлмади!", show_alert=True)
+        show_bee_apitherapy_hub(chat_id, a_idx, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("pub_bee_api_"):
+        a_idx = int(data.replace("pub_bee_api_", ""))
+        sent_c = publish_bee_apitherapy(a_idx, user_id, target_scope="both", pin=True)
+        if sent_c > 0:
+            bot.answer_callback_query(call.id, f"✅ Апитерапия {sent_c} та жойга (канал ва гуруҳ) юборилди! 📌", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Юбориб бўлмади!", show_alert=True)
+        show_bee_apitherapy_hub(chat_id, a_idx, call.message.message_id, lang=u_lang)
+        return
+
+    # 4. Асаларичилик Видеолари Маркази (Video Hub)
+    elif data in ["open_bee_videos", "bc_bee_video_hub"]:
+        show_bee_video_hub(chat_id, 0, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("view_bee_video_"):
+        v_idx = int(data.replace("view_bee_video_", ""))
+        show_bee_video_hub(chat_id, v_idx, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("pub_bee_video_chan_"):
+        v_idx = int(data.replace("pub_bee_video_chan_", ""))
+        sent_c = publish_bee_video(v_idx, user_id, target_scope="channels", pin=True)
+        if sent_c > 0:
+            bot.answer_callback_query(call.id, f"✅ Видео {sent_c} та Каналга юборилди ва қадалди! 📌", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Каналга юбориб бўлмади!", show_alert=True)
+        show_bee_video_hub(chat_id, v_idx, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("pub_bee_video_grp_"):
+        v_idx = int(data.replace("pub_bee_video_grp_", ""))
+        sent_c = publish_bee_video(v_idx, user_id, target_scope="groups", pin=True)
+        if sent_c > 0:
+            bot.answer_callback_query(call.id, f"✅ Видео {sent_c} та Гуруҳга юборилди ва қадалди! 📌", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Гуруҳга юбориб бўлмади!", show_alert=True)
+        show_bee_video_hub(chat_id, v_idx, call.message.message_id, lang=u_lang)
+        return
+    elif data.startswith("pub_bee_video_"):
+        v_idx = int(data.replace("pub_bee_video_", ""))
+        sent_c = publish_bee_video(v_idx, user_id, target_scope="both", pin=True)
+        if sent_c > 0:
+            bot.answer_callback_query(call.id, f"✅ Видео {sent_c} та жойга (канал ва гуруҳ) юборилди! 📌", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Юбориб бўлмади!", show_alert=True)
+        show_bee_video_hub(chat_id, v_idx, call.message.message_id, lang=u_lang)
+        return
+
+    # Ягона созламалар бошқаруви (Unified Settings Callbacks)
+    elif data == "post_cycle_dest_scope":
+        cur_sc = get_system_setting("broadcast_default_scope", "both")
+        scopes = ["channels", "groups", "both"]
+        next_sc = scopes[(scopes.index(cur_sc) + 1) % len(scopes)] if cur_sc in scopes else "both"
+        set_system_setting("broadcast_default_scope", next_sc)
+        set_system_setting("news_target_scope", next_sc)
+        set_system_setting("quiz_target_scope", next_sc)
+        lbls = {"channels": "📢 1-Канал", "groups": "👥 2-Группа", "both": "📢+👥 3-Канал ва Группа"}
+        bot.answer_callback_query(call.id, f"🎯 Манзил: {lbls[next_sc]}")
+        show_unified_settings_menu(chat_id, call.message.message_id)
+        return
+
+    elif data == "post_set_chan_name":
+        USER_STATES[user_id] = {"action": "wait_post_custom_chan_name"}
+        m_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Бекор қилиш", callback_data="bc_settings")]])
+        bot.send_message(chat_id, "🏷 <b>Янги расмий канал номини ёзиб юборинг:</b>\n\n(Масалан: <code>Asalarichilik.Uz🇺🇿</code>)", reply_markup=m_cancel, parse_mode="HTML")
+        return
+
+    elif data == "post_edit_share":
+        USER_STATES[user_id] = {"action": "wait_post_custom_share"}
+        m_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Бекор қилиш", callback_data="bc_settings")]])
+        bot.send_message(chat_id, "✏️ <b>Улашиш тугмаси матнини ёзиб юборинг:</b>\n\n(Масалан: <code>Дўстларга улашинг</code> ёки <code>Asalarichilik.Uz каналига обуна бўлинг</code>)", reply_markup=m_cancel, parse_mode="HTML")
+        return
+
+    elif data == "toggle_auto_news":
+        en = get_system_setting("auto_news_enabled", "1")
+        new_en = "0" if en == "1" else "1"
+        set_system_setting("auto_news_enabled", new_en)
+        bot.answer_callback_query(call.id, f"📰 Янгилик авто-жўнатиш: {'🟢 Ёқилди' if new_en == '1' else '⚪️ Ўчирилди'}")
+        show_unified_settings_menu(chat_id, call.message.message_id)
+        return
+
+    elif data == "edit_time_news":
+        USER_STATES[user_id] = {"action": "wait_auto_news_time"}
+        m_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Бекор қилиш", callback_data="bc_settings")]])
+        bot.send_message(chat_id, "⏰ <b>1-Асаларичилик янгиликлари кунлик юбориш вақтини киритинг:</b>\n\n(Масалан: <code>07:00</code>)", reply_markup=m_cancel, parse_mode="HTML")
+        return
+
+    elif data == "toggle_auto_api":
+        en = get_system_setting("auto_apitherapy_enabled", "1")
+        new_en = "0" if en == "1" else "1"
+        set_system_setting("auto_apitherapy_enabled", new_en)
+        bot.answer_callback_query(call.id, f"🌿 Апитерапия авто-жўнатиш: {'🟢 Ёқилди' if new_en == '1' else '⚪️ Ўчирилди'}")
+        show_unified_settings_menu(chat_id, call.message.message_id)
+        return
+
+    elif data == "edit_time_api":
+        USER_STATES[user_id] = {"action": "wait_auto_api_time"}
+        m_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Бекор қилиш", callback_data="bc_settings")]])
+        bot.send_message(chat_id, "⏰ <b>2-Апитерапия янгиликлари кунлик юбориш вақтини киритинг:</b>\n\n(Масалан: <code>08:00</code>)", reply_markup=m_cancel, parse_mode="HTML")
+        return
+
+    elif data == "toggle_auto_quiz":
+        en = get_system_setting("auto_quiz_enabled", "1")
+        new_en = "0" if en == "1" else "1"
+        set_system_setting("auto_quiz_enabled", new_en)
+        bot.answer_callback_query(call.id, f"🐝 Викторина авто-жўнатиш: {'🟢 Ёқилди' if new_en == '1' else '⚪️ Ўчирилди'}")
+        show_unified_settings_menu(chat_id, call.message.message_id)
+        return
+
+    elif data == "edit_time_quiz":
+        USER_STATES[user_id] = {"action": "wait_auto_quiz_time"}
+        m_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Бекор қилиш", callback_data="bc_settings")]])
+        bot.send_message(chat_id, "⏰ <b>3-Викторина кунлик юбориш вақтини киритинг:</b>\n\n(Масалан: <code>16:00</code>)", reply_markup=m_cancel, parse_mode="HTML")
+        return
+
+    elif data == "toggle_auto_video":
+        en = get_system_setting("auto_video_enabled", "1")
+        new_en = "0" if en == "1" else "1"
+        set_system_setting("auto_video_enabled", new_en)
+        bot.answer_callback_query(call.id, f"📹 Видеолар авто-жўнатиш: {'🟢 Ёқилди' if new_en == '1' else '⚪️ Ўчирилди'}")
+        show_unified_settings_menu(chat_id, call.message.message_id)
+        return
+
+    elif data == "edit_time_video":
+        USER_STATES[user_id] = {"action": "wait_auto_video_time"}
+        m_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Бекор қилиш", callback_data="bc_settings")]])
+        bot.send_message(chat_id, "⏰ <b>4-Видеолар кунлик юбориш вақтини киритинг:</b>\n\n(Масалан: <code>18:00</code>)", reply_markup=m_cancel, parse_mode="HTML")
+        return
+
+    elif data.startswith("expert_reply_"):
+        target_uid = int(data.replace("expert_reply_", ""))
+        USER_STATES[user_id] = {"action": "wait_expert_reply_to_user", "target_user_id": target_uid}
+        m_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Бекор қилиш", callback_data="bc_settings")]])
+        bot.send_message(chat_id, f"✍️ <b>Фойдаланувчи (ID: <code>{target_uid}</code>) учун жавобингизни ёзинг:</b>", reply_markup=m_cancel, parse_mode="HTML")
+        return
 
     # 1. Асаларичилик Янгиликлари Маркази (News Hub)
     if data in ["bc_bee_news_hub", "open_bee_news"]:
@@ -8443,8 +9005,8 @@ def handle_all_callbacks(call):
         )
         return
 
-    elif data == "menu_settings":
-        open_group_selection(chat_id, call.message.message_id, lang=u_lang)
+    elif data in ["menu_settings", "bc_settings", "group_settings"]:
+        show_unified_settings_menu(chat_id, call.message.message_id, lang=u_lang)
         return
 
     elif data == "menu_language":
