@@ -2011,13 +2011,47 @@ class SettingsStates(StatesGroup):
 # ==============================================================================
 # 10. ASOSIY MENYU KLAVIATURASI (SKRINSHOTDAGI KABI 1-GA-1)
 # ==============================================================================
+def build_main_menu_inline() -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="➕ Гуруҳга қўшиш", url="https://t.me/Asalarichilikuz_bot?startgroup=true"),
+            InlineKeyboardButton(text="➕ Каналга қўшиш", url="https://t.me/Asalarichilikuz_bot?startchannel=true")
+        ],
+        [
+            InlineKeyboardButton(text="⚙️ Гуруҳ созламалари", callback_data="grp_set_dest:open"),
+            InlineKeyboardButton(text="📢 Каналлар бошқаруви", callback_data="channel_ctrl:open")
+        ],
+        [
+            InlineKeyboardButton(text="📰 Асаларичилик янгиликлари", callback_data="news_open_menu"),
+            InlineKeyboardButton(text="🌿 Апитерапия янгиликлари", callback_data="api_open_menu")
+        ],
+        [
+            InlineKeyboardButton(text="🎓 Илмий тадқиқот тестлари", callback_data="sci_act:dashboard"),
+            InlineKeyboardButton(text="🐝 Викторина & Сўровнома", callback_data="quiz_open_menu")
+        ],
+        [
+            InlineKeyboardButton(text="🎬 Асаларичилик видеолари", callback_data="video_open_menu"),
+            InlineKeyboardButton(text="📢 Реклама тарқатиш", callback_data="ad_broadcast_open")
+        ],
+        [
+            InlineKeyboardButton(text="👑 Гуруҳлар назорати", callback_data="groups_ctrl:refresh"),
+            InlineKeyboardButton(text="👑 Бот эгаси", callback_data="owner_card_open")
+        ],
+        [
+            InlineKeyboardButton(text="🌐 Тилни ўзгартириш", callback_data="change_lang_open"),
+            InlineKeyboardButton(text="📖 Бот қўлланмаси", callback_data="bot_guide_open")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="➕ Гуруҳга қўшиш"), KeyboardButton(text="➕ Каналга қўшиш")],
         [KeyboardButton(text="⚙️ Гуруҳ созламалари"), KeyboardButton(text="📢 Каналлар бошқаруви")],
-        [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
-        [KeyboardButton(text="👑 Бот эгаси")],
-        [KeyboardButton(text="📢 Реклама тарқатиш"), KeyboardButton(text="👑 Гуруҳлар назорати")],
+        [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🌿 Апитерапия янгиликлари")],
+        [KeyboardButton(text="🎓 Илмий тадқиқот тестлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
+        [KeyboardButton(text="🎬 Асаларичилик видеолари"), KeyboardButton(text="📢 Реклама тарқатиш")],
+        [KeyboardButton(text="👑 Гуруҳлар назорати"), KeyboardButton(text="👑 Бот эгаси")],
         [KeyboardButton(text="🌐 Тилни ўзгартириш"), KeyboardButton(text="📖 Бот қўлланмаси")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -2328,6 +2362,7 @@ async def start_cmd(message: types.Message, state: FSMContext = None):
     )
 
     await message.answer(welcome_text, reply_markup=get_main_reply_keyboard())
+    await message.answer("🎛 **Асосий менюдан керакли бўлимни танланг:**", reply_markup=build_main_menu_inline(), parse_mode="Markdown")
 
 # ==============================================================================
 # 15. VIKTORINA VA SO'ROVNOMA YUBORISH MEXANIZMI (2-RASMDAGIDEK ANIQ POLL)
@@ -3450,11 +3485,11 @@ async def on_main_menu_callback(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         await call.answer("Рухсат йўқ!", show_alert=True)
         return
+    text = "🎛 **Асосий менюдан керакли бўлимни танланг:**"
     try:
-        await call.message.delete()
+        await call.message.edit_text(text, reply_markup=build_main_menu_inline(), parse_mode="Markdown")
     except Exception:
-        pass
-    await call.message.answer("🎛 **Асосий менюдан керакли бўлимни танланг:**", reply_markup=get_main_reply_keyboard(), parse_mode="Markdown")
+        await call.message.answer(text, reply_markup=build_main_menu_inline(), parse_mode="Markdown")
     await call.answer()
 
 @dp.callback_query(F.data == "news_search_fresh")
@@ -7690,7 +7725,7 @@ def build_video_admin_card_and_kb(idx: int, target_mode: str = "both") -> tuple[
     return text, kb
 
 @dp.message(F.text.in_({
-    "🎬 Асаларичилик видеолари", "Асаларичилик видеолари", "Видеолар", "Видео дарсликлар",
+    "🎬 Асаларичилик видеолари", "Асаларичилик видеолари", "Асаларичилар видеолари", "Видеолар", "Видео дарсликлар",
     "🎬 Asalarichilik videolari", "Asalarichilik videolari", "Videolar", "video"
 }), StateFilter("*"))
 async def beekeeping_video_menu_cmd(message: types.Message, state: FSMContext = None):
@@ -7942,7 +7977,7 @@ async def on_sci_time_picker(call: types.CallbackQuery):
         await call.answer()
 
 @dp.message(F.text.in_({
-    "🎓 Илмий тадқиқот тестлари", "🎓 Илмий тестлар", "Илмий тадқиқот тестлари",
+    "🎓 Илмий тадқиқот тестлари", "Асаларичилар илмий тадқиқот", "Асаларичилик илмий тадқиқот", "🎓 Илмий тестлар", "Илмий тадқиқот тестлари",
     "Илмий тестлар", "Тестлар", "🎓 Асаларичилик илмий тестлари", "илмий тестлар",
     "🎓 Ilmiy tadqiqot testlari", "Ilmiy testlar", "Testlar"
 }), StateFilter("*"))
@@ -9320,3 +9355,119 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
+
+
+# ==============================================================================
+# MAIN MENU INLINE CALLBACK HANDLERS
+# ==============================================================================
+@dp.callback_query(F.data == "channel_ctrl:open")
+async def on_channel_ctrl_open_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    text, kb = build_channel_mgmt_dashboard()
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "news_open_menu")
+async def on_news_open_menu_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    news_db = get_news_db()
+    item = news_db[0] if news_db else INITIAL_NEWS[0]
+    text = format_news_post_text(item, "cyrillic", is_admin=True)
+    kb = build_news_viewer_keyboard(0, len(news_db), "cyrillic")
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "api_open_menu")
+async def on_api_open_menu_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    api_db = load_apitherapy_db()
+    if api_db:
+        text = format_apitherapy_post_text(api_db[0], 0, len(api_db), "cyrillic")
+        kb = build_apitherapy_viewer_keyboard(0, len(api_db), "cyrillic")
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode=None)
+    else:
+        await call.answer("Апитерапия базаси бўш!", show_alert=True)
+    await call.answer()
+
+@dp.callback_query(F.data == "quiz_open_menu")
+async def on_quiz_open_menu_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    q_db = get_quizzes_db()
+    item = q_db[0] if q_db else INITIAL_QUIZZES[0]
+    text = format_quiz_preview_text(item, 0, len(q_db), "cyrillic")
+    kb = build_quiz_preview_keyboard(0, len(q_db), "cyrillic")
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "video_open_menu")
+async def on_video_open_menu_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    text, kb = build_video_admin_card_and_kb(0)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "ad_broadcast_open")
+async def on_ad_broadcast_open_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    text = (
+        "📢 **РЕКЛАМА ВА ЭЪЛОНЛАР ТАРҚАТИШ БЎЛИМИ**\n\n"
+        "Ушбу бўлим орқали сиз канал ва гуруҳларга расмий эълон ва рекламаларни тугмалар билан юборишингиз мумкин.\n\n"
+        "Керакли амални танланг:"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Янги реклама пости яратиш", callback_data="news_nav:create")],
+        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+    ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "owner_card_open")
+async def on_owner_card_open_cb(call: types.CallbackQuery):
+    text = (
+        "👑 **БОТ ЭГАСИ ВА АДМИНИСТРАТОР:**\n\n"
+        "👤 **Исм:** Жамшиджон Давронов\n"
+        "🔗 **Телеграм:** @JamshidjonDavronov\n"
+        "🆔 **ID:** `2047501151`\n\n"
+        "Барча савол ва таклифлар бўйича тўғридан-тўғри бот эгасига мурожаат қилишингиз мумкин."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Шахсийга ёзиш", url="https://t.me/JamshidjonDavronov")],
+        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+    ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "change_lang_open")
+async def on_change_lang_open_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    s = get_settings()
+    cur = s.get("script_mode", "cyrillic")
+    new_mode = "latin" if cur == "cyrillic" else "cyrillic"
+    update_setting("script_mode", new_mode)
+    lbl = "Лотинча 🇺🇿" if new_mode == "latin" else "Крилча 🇺🇿"
+    await call.answer(f"Тил ўзгарди: {lbl}", show_alert=True)
+    text = "🎛 **Асосий менюдан керакли бўлимни танланг:**"
+    await safe_edit_text(call, text, reply_markup=build_main_menu_inline(), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "bot_guide_open")
+async def on_bot_guide_open_cb(call: types.CallbackQuery):
+    text = (
+        "📖 **БОТДАН ФОЙДАЛАНИШ БЎЙИЧА ҚЎЛЛАНМА:**\n\n"
+        "1. 🎓 **Илмий тестлар:** 10 талик ДТМ тестлари. Саволларга жавоб берганда навбатдаги савол очилади.\n"
+        "2. 🎬 **Видеолар:** Асаларичилик бўйича амалий видеолар ва YouTube дарслари.\n"
+        "3. 📰 **Янгиликлар ва Апитерапия:** Соат 07:00 ва 08:00 да автоматик канал ва гуруҳга жўнатилади.\n"
+        "4. 🐝 **Викториналар:** Соат 16:00 да бот канал ва гуруҳга сўровнома юборади.\n"
+        "5. ⚙️ **Созламалар:** Барча параметрларни бир жойдан бошқариш панели."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+    ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
