@@ -707,12 +707,17 @@ async def safe_edit_text(msg_or_call: Any, text: str, reply_markup: Any = None, 
     try:
         return await target.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     except Exception as e:
-        if "can't parse entities" in str(e).lower() and parse_mode:
+        err = str(e).lower()
+        if "is not modified" in err:
+            return target
+        try:
+            return await target.edit_text(text, reply_markup=reply_markup, parse_mode=None)
+        except Exception:
             try:
-                return await target.edit_text(text, reply_markup=reply_markup, parse_mode=None)
-            except Exception:
                 return await target.answer(text, reply_markup=reply_markup, parse_mode=None)
-        raise e
+            except Exception as e2:
+                logging.error(f"safe_edit_text error: {e2}")
+                return None
 
 # 4. VIKTORINA BAZASI (QUIZ DATABASE) - YOSH VA SPETS ASALARICHILAR UCHUN
 # ==============================================================================
@@ -9037,12 +9042,182 @@ async def on_quiz_auto_add_10_btn(call: types.CallbackQuery):
     await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
     await call.message.answer(f"✅ **10 та янги викторина саволи қўшилди! Базада: {len(q_db)} та.**", parse_mode="Markdown")
 
+# ==============================================================================
+# MAIN MENU INLINE CALLBACK HANDLERS
+# ==============================================================================
+@dp.callback_query(F.data == "channel_ctrl:open")
+async def on_channel_ctrl_open_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат фақат админ учун!", show_alert=True)
+        return
+    text, kb = build_channel_mgmt_dashboard()
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "news_open_menu")
+async def on_news_open_menu_cb(call: types.CallbackQuery):
+    news_db = get_news_db()
+    if not news_db:
+        news_db = copy.deepcopy(INITIAL_NEWS)
+        save_news_db(news_db)
+    item = news_db[0]
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    is_admin = (call.from_user.id == OWNER_ID)
+    text = format_news_post_text(item, script, is_admin=is_admin)
+    kb = build_news_viewer_keyboard(0, len(news_db), script)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "api_open_menu")
+async def on_api_open_menu_cb(call: types.CallbackQuery):
+    api_db = load_apitherapy_db()
+    if not api_db:
+        await call.answer("Апитерапия базаси бўш!", show_alert=True)
+        return
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_apitherapy_post_text(api_db[0], 0, len(api_db), script=script)
+    kb = build_apitherapy_viewer_keyboard(0, len(api_db), script=script)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode=None)
+    await call.answer()
+
+@dp.callback_query(F.data == "quiz_open_menu")
+async def on_quiz_open_menu_cb(call: types.CallbackQuery):
+    q_db = get_quizzes_db()
+    if not q_db:
+        q_db = copy.deepcopy(INITIAL_QUIZZES)
+        save_quizzes_db(q_db)
+    item = q_db[0]
+    settings = get_settings()
+    script = settings.get("script_mode", "cyrillic")
+    text = format_quiz_preview_text(item, 0, len(q_db), script)
+    kb = build_quiz_preview_keyboard(0, len(q_db), script)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "video_open_menu")
+async def on_video_open_menu_cb(call: types.CallbackQuery):
+    if call.from_user.id == OWNER_ID:
+        text, kb = build_video_admin_card_and_kb(0)
+    else:
+        v = get_current_video(0)
+        settings = get_settings()
+        script = settings.get("script_mode", "cyrillic")
+        text = format_video_card_text(v, script)
+        share_url = f"https://t.me/share/url?url={v.get('url')}&text=🎬 Асаларичилик бўйича фойдали видео қўлланмани томоша қилинг!"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="▶️ Видеони кўриш (YouTube)", url=v.get("url"))],
+            [InlineKeyboardButton(text="↗️ Дўстларга улашиш", url=share_url)],
+            [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+        ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "ad_broadcast_open")
+async def on_ad_broadcast_open_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат фақат админ учун!", show_alert=True)
+        return
+    text = (
+        "📢 **РЕКЛАМА ВА ЭЪЛОНЛАР ТАРҚАТИШ БЎЛИМИ**\n\n"
+        "Ушбу бўлим орқали сиз канал ва гуруҳларга расмий эълон ва рекламаларни тугмалар билан юборишингиз мумкин.\n\n"
+        "Керакли амални танланг:"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Янги реклама пости яратиш", callback_data="news_nav:create")],
+        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+    ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "owner_card_open")
+async def on_owner_card_open_cb(call: types.CallbackQuery):
+    text = (
+        "👑 **БОТ ЭГАСИ ВА АДМИНИСТРАТОР:**\n\n"
+        "👤 **Исм:** Жамшиджон Давронов\n"
+        "🔗 **Телеграм:** @JamshidjonDavronov\n"
+        "🆔 **ID:** `2047501151`\n\n"
+        "🐝 «Asalarichilik.Uz» миллий лойиҳаси раҳбари.\n"
+        "Барча савол ва таклифлар бўйича тўғридан-тўғри бот эгасига мурожаат қилишингиз мумкин."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Мутахассис билан боғланиш", url="https://t.me/JamshidjonDavronov")],
+        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+    ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
+@dp.callback_query(F.data == "change_lang_open")
+async def on_change_lang_open_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат фақат админ учун!", show_alert=True)
+        return
+    s = get_settings()
+    cur = s.get("script_mode", "cyrillic")
+    new_mode = "latin" if cur == "cyrillic" else "cyrillic"
+    update_setting("script_mode", new_mode)
+    lbl = "Лотинча 🇺🇿" if new_mode == "latin" else "Крилча 🇺🇿"
+    await call.answer(f"Тил ўзгарди: {lbl}", show_alert=True)
+    text = "🎛 **Асосий менюдан керакли бўлимни танланг:**"
+    await safe_edit_text(call, text, reply_markup=build_main_menu_inline(), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "bot_guide_open")
+async def on_bot_guide_open_cb(call: types.CallbackQuery):
+    text = (
+        "📖 **«Asalarichilik.Uz» БОТ ҚЎЛЛАНМАСИ:**\n\n"
+        "1. 🎓 **Илмий тестлар:** 10 талик ДТМ тестлари. Саволларга жавоб берганда навбатдаги савол очилади.\n"
+        "2. 🎬 **Видеолар:** Асаларичилик бўйича амалий видеолар ва YouTube дарслари (ўзбек тилида батафсил изоҳ билан).\n"
+        "3. 📰 **Янгиликлар ва Апитерапия:** Соат 07:00 ва 08:00 да автоматик канал ва гуруҳга жўнатилади.\n"
+        "4. 🐝 **Викториналар:** Соат 16:00 да бот канал ва гуруҳга сўровнома юборади.\n"
+        "5. ⚙️ **Созламалар:** Барча параметрларни бир жойдан бошқариш панели."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+    ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    await call.answer()
+
 @dp.message(F.chat.type == "private")
 async def private_chat_handler(message: types.Message):
     if not message.text:
         return
 
-    # Non-owner contacting expert
+    clean_text = message.text.strip().lower()
+
+    # 1. Меню ва тугмалар текшируви (Барча фойдаланувчилар ва Админ учун)
+    if any(k in clean_text for k in ["бот эгаси", "админ", "egasi"]):
+        return await bot_owner_card(message)
+    if any(k in clean_text for k in ["қўлланма", "qollanma"]):
+        return await bot_guide_menu(message)
+    if any(k in clean_text for k in ["видео", "видеолар", "видеоролик", "video", "videolar"]):
+        return await beekeeping_video_menu_cmd(message)
+    if any(k in clean_text for k in ["илмий тадқиқот", "илмий тест", "тестлар", "тест", "test", "саволлар", "savol"]):
+        return await scientific_tests_menu_cmd(message)
+    if any(k in clean_text for k in ["асаларичилик янгиликлари", "янгиликлари", "yangilik"]):
+        return await news_cmd(message)
+    if any(k in clean_text for k in ["апитерапия", "apiterapiya"]):
+        return await apitherapy_cmd(message)
+    if any(k in clean_text for k in ["викторина", "сўровнома", "quiz", "poll"]):
+        return await quiz_cmd(message)
+    if any(k in clean_text for k in ["реклама тарқатиш", "реклама", "reklama"]):
+        return await ad_broadcast_menu(message)
+    if any(k in clean_text for k in ["тилни ўзгартириш", "тил", "til"]):
+        return await change_lang_menu(message)
+    if any(k in clean_text for k in ["каналга қўшиш", "каналга", "kanalga"]):
+        return await add_to_channel_guide(message)
+    if any(k in clean_text for k in ["каналлар бошқаруви", "канал бошқаруви", "каналлар назорати", "канал назорати", "каналлар", "канал", "kanallar", "kanal"]):
+        return await channel_mgmt_cmd(message)
+    if any(k in clean_text for k in ["гуруҳга қўшиш", "груҳга қўшиш", "группага қўшиш", "гуруҳга", "груҳга", "группага", "guruhga", "gruhga", "gruppaga"]):
+        return await add_to_group_guide(message)
+    if any(k in clean_text for k in ["гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар", "гуруҳ созлама", "груҳ созлама", "созламалари", "созламалар", "созлама", "sozlama"]):
+        return await group_settings_btn_cmd(message)
+    if any(k in clean_text for k in ["гуруҳлар назорати", "груҳлар назорати", "гуруҳ назорати", "груҳ назорати", "гуруҳлар", "груҳлар", "гуруҳ", "груҳ", "guruhlar", "gruhlar"]):
+        return await groups_control_cmd(message)
+    if any(k in clean_text for k in ["старт", "start", "/start"]):
+        return await start_cmd(message)
+
+    # 2. Оддий фойдаланувчи саволини мутахассисга йўналтириш
     if message.from_user.id != OWNER_ID:
         text_msg = message.text or ""
         if text_msg.startswith("/start") and "ask_expert" in text_msg:
@@ -9071,9 +9246,7 @@ async def private_chat_handler(message: types.Message):
             logging.error(f"Forward to expert error: {e}")
             return await message.reply("⚠️ Саволни мутахассисга юборишда хатолик юз берди.")
 
-    clean_text = message.text.strip().lower()
-
-    # Admin replying to a forwarded user question
+    # 3. Админ томонидан фойдаланувчи саволига жавоб қайтариш
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == (await bot.get_me()).id:
         r_id = str(message.reply_to_message.message_id)
         expert_map = load_json_file("expert_questions_map.json", {})
@@ -9095,145 +9268,95 @@ async def private_chat_handler(message: types.Message):
             except Exception as ex:
                 return await message.reply(f"⚠️ Фойдаланувчига етказишда хатолик: {ex}")
 
-    # Агар фойдаланувчи меню тугмасини босган бўлса, кутиш ҳолатини бекор қилиш
-    is_menu_action = any(k in clean_text for k in [
-        "гуруҳ", "груҳ", "гуҳ", "группа", "созлама", "видео", "тест", "канал", "янгилик",
-        "апитерапия", "викторина", "сўровнома", "реклама", "қўлланма", "эгаси",
-        "меню", "орқага", "start", "старт", "guruh", "video", "test", "sozlama"
-    ])
-    if is_menu_action and message.from_user.id in ADMIN_WAITING_INPUT:
-        ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+    # 4. Админ матн киритиш ва вақт созламалари
+    if message.from_user.id in ADMIN_WAITING_INPUT:
+        state = ADMIN_WAITING_INPUT.get(message.from_user.id)
+        if state and state.startswith("time_"):
+            section = state.split("_")[1]
+            match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
+            if match and match.group(1):
+                h = int(match.group(1)) % 24
+                m = int(match.group(2)) % 60 if match.group(2) else 0
+                new_t = f"{h:02d}:{m:02d}"
+                key_time = {
+                    "news": ("news_auto_time", "news_schedule_time"),
+                    "apitherapy": ("apitherapy_auto_time", "apitherapy_schedule_time"),
+                    "quiz": ("quiz_auto_time", "quiz_schedule_time"),
+                    "video": ("video_auto_time", "video_schedule_time"),
+                }
+                if section in key_time:
+                    k1, k2 = key_time[section]
+                    update_setting(k1, new_t)
+                    update_setting(k2, new_t)
+                ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+                sec_titles = {
+                    "news": "1-Янгилик",
+                    "apitherapy": "2-Апитерапия",
+                    "quiz": "3-Викторина",
+                    "video": "4-Видеолар"
+                }
+                title = sec_titles.get(section, section)
+                await message.answer(f"✅ **{title} авто-жўнатиш вақти {new_t} қилиб белгиланди.**", parse_mode="Markdown")
+                text, kb = build_group_settings_dashboard()
+                return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+            else:
+                return await message.answer("⚠️ Илтимос, вақтни `07:00` ёки `18:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
 
-    # Time editing for news, apitherapy, quiz, video
-    state = ADMIN_WAITING_INPUT.get(message.from_user.id)
-    if state and state.startswith("time_"):
-        section = state.split("_")[1]
-        match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
-        if match and match.group(1):
-            h = int(match.group(1)) % 24
-            m = int(match.group(2)) % 60 if match.group(2) else 0
-            new_t = f"{h:02d}:{m:02d}"
-            key_time = {
-                "news": ("news_auto_time", "news_schedule_time"),
-                "apitherapy": ("apitherapy_auto_time", "apitherapy_schedule_time"),
-                "quiz": ("quiz_auto_time", "quiz_schedule_time"),
-                "video": ("video_auto_time", "video_schedule_time"),
-            }
-            if section in key_time:
-                k1, k2 = key_time[section]
-                update_setting(k1, new_t)
-                update_setting(k2, new_t)
+        elif state == "edit_share_text":
+            update_setting("share_text", message.text.strip())
             ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
-            sec_titles = {
-                "news": "1-Янгилик",
-                "apitherapy": "2-Апитерапия",
-                "quiz": "3-Викторина",
-                "video": "4-Видеолар"
-            }
-            title = sec_titles.get(section, section)
-            await message.answer(f"✅ **{title} авто-жўнатиш вақти {new_t} қилиб белгиланди.**", parse_mode="Markdown")
+            await message.answer("✅ **Улашиш тугмаси матни янгиланди!**", parse_mode="Markdown")
             text, kb = build_group_settings_dashboard()
             return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
-        else:
-            return await message.answer("⚠️ Илтимос, вақтни `07:00` ёки `18:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
 
-    elif state == "edit_share_text":
-        update_setting("share_text", message.text.strip())
-        ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
-        await message.answer("✅ **Улашиш тугмаси матни янгиланди!**", parse_mode="Markdown")
-        text, kb = build_group_settings_dashboard()
-        return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        elif state == "sci_start_time":
+            match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
+            if match and match.group(1):
+                h = int(match.group(1)) % 24
+                m = int(match.group(2)) % 60 if match.group(2) else 0
+                new_t = f"{h:02d}:{m:02d}"
+                update_sci_setting("start_time", new_t)
+                update_sci_setting("auto_time", new_t)
+                ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+                kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
+                return await message.answer(f"✅ **Тест бошланиш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
+            else:
+                return await message.answer("⚠️ Илтимос, вақтни `18:30`, `19:05` ёки `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
 
-    # 0. Админ махсус вақт ва дақиқа киритиш текшируви
-    state = ADMIN_WAITING_INPUT.get(message.from_user.id)
-    if state == "sci_start_time":
-        match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
-        if match and match.group(1):
-            h = int(match.group(1)) % 24
-            m = int(match.group(2)) % 60 if match.group(2) else 0
-            new_t = f"{h:02d}:{m:02d}"
-            update_sci_setting("start_time", new_t)
-            update_sci_setting("auto_time", new_t)
-            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
-            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
-            return await message.answer(f"✅ **Тест бошланиш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
-        else:
-            return await message.answer("⚠️ Илтимос, вақтни `18:30`, `19:05` ёки `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
+        elif state == "sci_end_time":
+            match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
+            if match and match.group(1):
+                h = int(match.group(1)) % 24
+                m = int(match.group(2)) % 60 if match.group(2) else 0
+                new_t = f"{h:02d}:{m:02d}"
+                update_sci_setting("end_time", new_t)
+                ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+                kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
+                return await message.answer(f"✅ **Тест тугаш ва тақдирлаш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
+            else:
+                return await message.answer("⚠️ Илтимос, вақтни `19:30`, `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
 
-    elif state == "sci_end_time":
-        match = re.search(r"(\d{1,2})(?:[:\.\-\s](\d{1,2}))?", clean_text)
-        if match and match.group(1):
-            h = int(match.group(1)) % 24
-            m = int(match.group(2)) % 60 if match.group(2) else 0
-            new_t = f"{h:02d}:{m:02d}"
-            update_sci_setting("end_time", new_t)
-            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
-            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Тест созламалари", callback_data="sci_act:settings")]])
-            return await message.answer(f"✅ **Тест тугаш ва тақдирлаш вақти {new_t} га муваффақиятли созланди!**", reply_markup=kb, parse_mode="Markdown")
-        else:
-            return await message.answer("⚠️ Илтимос, вақтни `19:30`, `20:00` каби тўғри форматда киритинг.", parse_mode="Markdown")
+        elif state == "sci_duration_custom":
+            match = re.search(r"\d+", clean_text)
+            if match:
+                dur_min = max(1, int(match.group(0)))
+                ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+                start_dt = get_uzb_now()
+                end_dt = start_dt + timedelta(minutes=dur_min)
+                start_str = start_dt.strftime("%H:%M")
+                end_str = end_dt.strftime("%H:%M")
 
-    elif state == "sci_duration_custom":
-        match = re.search(r"\d+", clean_text)
-        if match:
-            dur_min = max(1, int(match.group(0)))
-            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
-            start_dt = get_uzb_now()
-            end_dt = start_dt + timedelta(minutes=dur_min)
-            start_str = start_dt.strftime("%H:%M")
-            end_str = end_dt.strftime("%H:%M")
+                update_sci_setting("start_time", start_str)
+                update_sci_setting("end_time", end_str)
+                update_sci_setting("total_test_duration_min", dur_min)
 
-            update_sci_setting("start_time", start_str)
-            update_sci_setting("end_time", end_str)
-            update_sci_setting("total_test_duration_min", dur_min)
-
-            await message.answer(f"🚀 **Тест {dur_min} дақиқага мўлжалланиб бошланмоқда...**\n⏰ Вақти: {start_str} дан {end_str} гача\n🏆 Соат {end_str} да автоматик тақдирлаш бўлади!", parse_mode="Markdown")
-            t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
-            dest_rep = f"📍 Расмий эълон юборилган манзиллар: {t_cnt} та" if t_cnt > 0 else "⚠️ Эълон етказишда огоҳлантириш: 0 та манзилга юборилди. Бот канал/гуруҳда админлигини текширинг!"
-            await message.answer(f"🚀 **Тест муваффақиятли бошланди!**\n{dest_rep}\n📊 Саволлар: {p_cnt} та ДТМ тести\n🏆 Соат **{end_str}** да автоматик тақдирлаш бўлади!", parse_mode="Markdown")
-            return
-        else:
-            return await message.answer("⚠️ Илтимос, дақиқани фақат сон билан ёзинг (масалан: `35` ёки `60`).", parse_mode="Markdown")
-
-
-    # 1. Каналлар бошқаруви ва каналга қўшиш
-    if any(k in clean_text for k in ["каналга қўшиш", "каналга", "kanalga"]):
-        return await add_to_channel_guide(message)
-    if any(k in clean_text for k in ["каналлар бошқаруви", "канал бошқаруви", "каналлар назорати", "канал назорати", "каналлар", "канал", "kanallar", "kanal"]):
-        return await channel_mgmt_cmd(message)
-
-    # 2. Гуруҳлар бошқаруви, созламалари ва гуруҳга қўшиш
-    if any(k in clean_text for k in ["гуруҳга қўшиш", "груҳга қўшиш", "группага қўшиш", "гуруҳга", "груҳга", "группага", "guruhga", "gruhga", "gruppaga"]):
-        return await add_to_group_guide(message)
-    if any(k in clean_text for k in ["гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар", "гуруҳ созлама", "груҳ созлама", "созламалари", "созламалар", "созлама", "sozlama"]):
-        return await group_settings_btn_cmd(message)
-    if any(k in clean_text for k in ["гуруҳлар назорати", "груҳлар назорати", "гуруҳ назорати", "груҳ назорати", "гуруҳлар", "груҳлар", "гуруҳ", "груҳ", "guruhlar", "gruhlar"]):
-        return await groups_control_cmd(message)
-
-    # 3. Видеолар
-    if any(k in clean_text for k in ["видео", "видеолар", "видеоролик", "video", "videolar"]):
-        return await beekeeping_video_menu_cmd(message)
-
-    # 4. Илмий тестлар ва саволлар
-    if any(k in clean_text for k in ["илмий тадқиқот", "илмий тест", "тестлар", "тест", "test", "саволлар", "savol"]):
-        return await scientific_tests_menu_cmd(message)
-
-    if any(k in clean_text for k in ["асаларичилик янгиликлари", "янгиликлари", "yangilik"]):
-        return await news_cmd(message)
-    if any(k in clean_text for k in ["апитерапия", "apiterapiya"]):
-        return await apitherapy_cmd(message)
-    if any(k in clean_text for k in ["викторина", "сўровнома", "quiz", "poll"]):
-        return await quiz_cmd(message)
-    if any(k in clean_text for k in ["бот эгаси", "админ", "egasi"]):
-        return await bot_owner_card(message)
-    if any(k in clean_text for k in ["реклама тарқатиш", "реклама", "reklama"]):
-        return await ad_broadcast_menu(message)
-    if any(k in clean_text for k in ["тилни ўзгартириш", "тил", "til"]):
-        return await change_lang_menu(message)
-    if any(k in clean_text for k in ["қўлланма", "qollanma"]):
-        return await bot_guide_menu(message)
-    if any(k in clean_text for k in ["старт", "start", "/start"]):
-        return await start_cmd(message)
+                await message.answer(f"🚀 **Тест {dur_min} дақиқага мўлжалланиб бошланмоқда...**\n⏰ Вақти: {start_str} дан {end_str} гача\n🏆 Соат {end_str} да автоматик тақдирлаш бўлади!", parse_mode="Markdown")
+                t_cnt, p_cnt, s_id = await launch_full_scientific_test(bot)
+                dest_rep = f"📍 Расмий эълон юборилган манзиллар: {t_cnt} та" if t_cnt > 0 else "⚠️ Эълон етказишда огоҳлантириш: 0 та манзилга юборилди. Бот канал/гуруҳда админлигини текширинг!"
+                await message.answer(f"🚀 **Тест муваффақиятли бошланди!**\n{dest_rep}\n📊 Саволлар: {p_cnt} та ДТМ тести\n🏆 Соат **{end_str}** да автоматик тақдирлаш бўлади!", parse_mode="Markdown")
+                return
+            else:
+                return await message.answer("⚠️ Илтимос, дақиқани фақат сон билан ёзинг (масалан: `35` ёки `60`).", parse_mode="Markdown")
 
     if message.text.startswith("/"):
         return
@@ -9349,120 +9472,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-# ==============================================================================
-# MAIN MENU INLINE CALLBACK HANDLERS
-# ==============================================================================
-@dp.callback_query(F.data == "channel_ctrl:open")
-async def on_channel_ctrl_open_cb(call: types.CallbackQuery):
-    if call.from_user.id != OWNER_ID:
-        return
-    text, kb = build_channel_mgmt_dashboard()
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.answer()
-
-@dp.callback_query(F.data == "news_open_menu")
-async def on_news_open_menu_cb(call: types.CallbackQuery):
-    if call.from_user.id != OWNER_ID:
-        return
-    news_db = get_news_db()
-    item = news_db[0] if news_db else INITIAL_NEWS[0]
-    text = format_news_post_text(item, "cyrillic", is_admin=True)
-    kb = build_news_viewer_keyboard(0, len(news_db), "cyrillic")
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.answer()
-
-@dp.callback_query(F.data == "api_open_menu")
-async def on_api_open_menu_cb(call: types.CallbackQuery):
-    if call.from_user.id != OWNER_ID:
-        return
-    api_db = load_apitherapy_db()
-    if api_db:
-        text = format_apitherapy_post_text(api_db[0], 0, len(api_db), "cyrillic")
-        kb = build_apitherapy_viewer_keyboard(0, len(api_db), "cyrillic")
-        await safe_edit_text(call, text, reply_markup=kb, parse_mode=None)
-    else:
-        await call.answer("Апитерапия базаси бўш!", show_alert=True)
-    await call.answer()
-
-@dp.callback_query(F.data == "quiz_open_menu")
-async def on_quiz_open_menu_cb(call: types.CallbackQuery):
-    if call.from_user.id != OWNER_ID:
-        return
-    q_db = get_quizzes_db()
-    item = q_db[0] if q_db else INITIAL_QUIZZES[0]
-    text = format_quiz_preview_text(item, 0, len(q_db), "cyrillic")
-    kb = build_quiz_preview_keyboard(0, len(q_db), "cyrillic")
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.answer()
-
-@dp.callback_query(F.data == "video_open_menu")
-async def on_video_open_menu_cb(call: types.CallbackQuery):
-    if call.from_user.id != OWNER_ID:
-        return
-    text, kb = build_video_admin_card_and_kb(0)
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.answer()
-
-@dp.callback_query(F.data == "ad_broadcast_open")
-async def on_ad_broadcast_open_cb(call: types.CallbackQuery):
-    if call.from_user.id != OWNER_ID:
-        return
-    text = (
-        "📢 **РЕКЛАМА ВА ЭЪЛОНЛАР ТАРҚАТИШ БЎЛИМИ**\n\n"
-        "Ушбу бўлим орқали сиз канал ва гуруҳларга расмий эълон ва рекламаларни тугмалар билан юборишингиз мумкин.\n\n"
-        "Керакли амални танланг:"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Янги реклама пости яратиш", callback_data="news_nav:create")],
-        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
-    ])
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.answer()
-
-@dp.callback_query(F.data == "owner_card_open")
-async def on_owner_card_open_cb(call: types.CallbackQuery):
-    text = (
-        "👑 **БОТ ЭГАСИ ВА АДМИНИСТРАТОР:**\n\n"
-        "👤 **Исм:** Жамшиджон Давронов\n"
-        "🔗 **Телеграм:** @JamshidjonDavronov\n"
-        "🆔 **ID:** `2047501151`\n\n"
-        "Барча савол ва таклифлар бўйича тўғридан-тўғри бот эгасига мурожаат қилишингиз мумкин."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Шахсийга ёзиш", url="https://t.me/JamshidjonDavronov")],
-        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
-    ])
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.answer()
-
-@dp.callback_query(F.data == "change_lang_open")
-async def on_change_lang_open_cb(call: types.CallbackQuery):
-    if call.from_user.id != OWNER_ID:
-        return
-    s = get_settings()
-    cur = s.get("script_mode", "cyrillic")
-    new_mode = "latin" if cur == "cyrillic" else "cyrillic"
-    update_setting("script_mode", new_mode)
-    lbl = "Лотинча 🇺🇿" if new_mode == "latin" else "Крилча 🇺🇿"
-    await call.answer(f"Тил ўзгарди: {lbl}", show_alert=True)
-    text = "🎛 **Асосий менюдан керакли бўлимни танланг:**"
-    await safe_edit_text(call, text, reply_markup=build_main_menu_inline(), parse_mode="Markdown")
-
-@dp.callback_query(F.data == "bot_guide_open")
-async def on_bot_guide_open_cb(call: types.CallbackQuery):
-    text = (
-        "📖 **БОТДАН ФОЙДАЛАНИШ БЎЙИЧА ҚЎЛЛАНМА:**\n\n"
-        "1. 🎓 **Илмий тестлар:** 10 талик ДТМ тестлари. Саволларга жавоб берганда навбатдаги савол очилади.\n"
-        "2. 🎬 **Видеолар:** Асаларичилик бўйича амалий видеолар ва YouTube дарслари.\n"
-        "3. 📰 **Янгиликлар ва Апитерапия:** Соат 07:00 ва 08:00 да автоматик канал ва гуруҳга жўнатилади.\n"
-        "4. 🐝 **Викториналар:** Соат 16:00 да бот канал ва гуруҳга сўровнома юборади.\n"
-        "5. ⚙️ **Созламалар:** Барча параметрларни бир жойдан бошқариш панели."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
-    ])
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.answer()
