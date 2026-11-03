@@ -9285,21 +9285,16 @@ async def main():
             print(f"⚠️ To'g'ridan-to'g'ri ulanishda ham uzilish: {de}", flush=True)
             bot = get_bot_instance(use_proxy=bool(proxy_url))
 
-    # Telegram menyu buyruqlarini faqat shaxsiy chat uchun o'rnatish, guruhlarda mutlaqo ko'rinmasin
+    # Telegram menyu buyruqlarini /start belgisi bilan o'rnatish
     try:
-        # Guruhlar va standart menyudan buyruqlarni butunlay o'chirish
-        await bot.delete_my_commands(scope=types.BotCommandScopeDefault())
-        await bot.delete_my_commands(scope=types.BotCommandScopeAllGroupChats())
-        await bot.delete_my_commands(scope=types.BotCommandScopeAllChatAdministrators())
-
-        # Faqat shaxsiy chat (Private) uchun menyuni belgilash
         private_commands = [
             types.BotCommand(command="start", description="🚀 Асосий Меню"),
             types.BotCommand(command="settings", description="⚙️ Созламалар"),
             types.BotCommand(command="savol", description="🐝 Савол бериш")
         ]
+        await bot.set_my_commands(private_commands, scope=types.BotCommandScopeDefault())
         await bot.set_my_commands(private_commands, scope=types.BotCommandScopeAllPrivateChats())
-        print("✅ Telegram buyruqlar menyusi faqat shaxsiy chat uchun sozlandi (Guruhlarda buyruqlar yashirildi).", flush=True)
+        print("✅ Telegram /start buyruqlar menyusi muvaffaqiyatli sozlandi.", flush=True)
     except Exception as ce:
         logging.warning(f"set_my_commands error: {ce}")
 
