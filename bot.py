@@ -3340,7 +3340,10 @@ def show_destinations_settings_menu(chat_id, message_id=None, lang="uz_kr"):
 
     safe_edit_or_send(chat_id, message_id, txt, markup)
 
-def show_unified_settings_menu(chat_id, message_id=None, lang="uz_kr"):
+def show_unified_settings_menu(chat_id, message_id=None, group_id=None, lang="uz_kr"):
+    g = get_group(group_id) if group_id else None
+    g_title = html.escape(str(g["title"])) if g and g.get("title") else "Гуруҳ"
+
     chan = get_official_channel()
     grp = get_official_group()
     chan_name = get_official_channel_name()
@@ -3379,9 +3382,11 @@ def show_unified_settings_menu(chat_id, message_id=None, lang="uz_kr"):
     quiz_st = f"🟢 Ёқилган ({quiz_time})" if quiz_en else f"⚪️ Ўчирилган ({quiz_time})"
     video_st = f"🟢 Ёқилган ({video_time})" if video_en else f"⚪️ Ўчирилган ({video_time})"
 
-    txt = f"""⚙️ <b>АСАЛАРИЧИЛИК БОТ ВА КАНАЛ/ГУРУҲ СОЗЛАМАЛАРИ</b>
+    title_header = f"⚙️ <b>{g_title} — ГУРУҲ ВА КАНАЛ СОЗЛАМАЛАРИ</b>" if group_id else "⚙️ <b>АСАЛАРИЧИЛИК БОТ ВА КАНАЛ/ГУРУҲ СОЗЛАМАЛАРИ</b>"
 
-Ушбу ягона панел орқали ботнинг барча канал ва гуруҳларга хабар жўнатиш тартиби, расмий манзиллар, реакциялар ҳамда 4 та асосий бўлим авто-жўнатиш вақтларини созлашингиз мумкин:
+    txt = f"""{title_header}
+
+Ушбу созламалар панели орқали ботнинг барча канал ва гуруҳларга хабар жўнатиш тартиби, расмий манзиллар, реакциялар ҳамда 4 та асосий бўлим авто-жўнатиш вақтларини созлашингиз мумкин:
 
 🎯 <b>Жўнатмалар манзили:</b> {scope_lbl}
 📢 <b>Расмий Канал:</b> <code>{chan}</code>
@@ -3397,6 +3402,7 @@ def show_unified_settings_menu(chat_id, message_id=None, lang="uz_kr"):
 • 🌿 2-Апитерапия янгиликлари: <b>{api_st}</b>
 • 🐝 3-Викторина сўровномалари: <b>{quiz_st}</b>
 • 📹 4-Асаларичилик видеолари: <b>{video_st}</b>"""
+
     markup = InlineKeyboardMarkup()
     # 1. Жўнатмалар жўнатиш манзили
     markup.row(InlineKeyboardButton(f"🎯 Жўнатмалар манзили: {scope_lbl}", callback_data="post_cycle_dest_scope"))
@@ -3438,8 +3444,33 @@ def show_unified_settings_menu(chat_id, message_id=None, lang="uz_kr"):
         InlineKeyboardButton(f"📹 4-Видеолар: {'🟢' if video_en else '⚪️'} {video_time}", callback_data="toggle_auto_video"),
         InlineKeyboardButton("✏️ Вақтини ўзгартириш", callback_data="edit_time_video")
     )
-    # 7. Орқага
-    markup.row(InlineKeyboardButton("« 🔙 Орқага (Асосийга қайтиш)", callback_data="back_main"))
+    # 7. Гуруҳ қулфлари ва об-ҳавоси тугмалари
+    if group_id:
+        markup.row(
+            InlineKeyboardButton("🛡 Гуруҳ қулфлари ва ҳимояси", callback_data=f"panel_locks_{group_id}"),
+            InlineKeyboardButton("☀️ Гуруҳ об-ҳавоси", callback_data=f"panel_weather_{group_id}")
+        )
+        markup.row(
+            InlineKeyboardButton("📢 Мажбурий обуна", callback_data=f"panel_forcesub_{group_id}"),
+            InlineKeyboardButton("🌙 Тунги қулф", callback_data=f"panel_autolock_{group_id}")
+        )
+        markup.row(
+            InlineKeyboardButton("◀️ Гуруҳлар рўйхати", callback_data="menu_settings"),
+            InlineKeyboardButton("🏠 Асосий Меню", callback_data="back_main")
+        )
+    else:
+        cursor.execute("SELECT chat_id FROM groups WHERE is_authorized = 1 LIMIT 1")
+        first_g = cursor.fetchone()
+        if first_g:
+            fg_id = first_g["chat_id"]
+            markup.row(
+                InlineKeyboardButton("🛡 Гуруҳ қулфлари ва ҳимояси", callback_data=f"panel_locks_{fg_id}"),
+                InlineKeyboardButton("☀️ Гуруҳ об-ҳавоси", callback_data=f"panel_weather_{fg_id}")
+            )
+        markup.row(
+            InlineKeyboardButton("◀️ Гуруҳлар рўйхати", callback_data="menu_settings"),
+            InlineKeyboardButton("🏠 Асосий Меню", callback_data="back_main")
+        )
 
     safe_edit_or_send(chat_id, message_id, txt, markup)
 
@@ -9005,7 +9036,11 @@ def handle_all_callbacks(call):
         )
         return
 
-    elif data in ["menu_settings", "bc_settings", "group_settings"]:
+    elif data in ["menu_settings", "group_settings"]:
+        open_group_selection(chat_id, call.message.message_id, lang=u_lang)
+        return
+
+    elif data == "bc_settings":
         show_unified_settings_menu(chat_id, call.message.message_id, lang=u_lang)
         return
 
@@ -9063,7 +9098,7 @@ def handle_all_callbacks(call):
     # 6. Панеллар навигацияси
     elif data.startswith("panel_settings_"):
         gid = int(data.replace("panel_settings_", ""))
-        show_settings_panel(chat_id, gid, call.message.message_id, lang=u_lang)
+        show_unified_settings_menu(chat_id, call.message.message_id, group_id=gid, lang=u_lang)
         return
 
     elif data.startswith("panel_forcesub_"):
