@@ -611,16 +611,16 @@ def remove_connected_chat(chat_id: int):
         del pending[cid_str]
         save_json_file(PENDING_CHATS_FILE, pending)
 
-OFFICIAL_CHANNEL_ID = -1002360538600
-OFFICIAL_GROUP_ID = -1002377038139
+OFFICIAL_CHANNEL_ID = -1001261575171
+OFFICIAL_GROUP_ID = -1001275726275
 
 def normalize_destination_id(cid_val: Any) -> Any:
     """ID va yuzerneymlarni bitta standart ko'rinishga keltiradi"""
     s = str(cid_val).strip()
-    if s in ["@uz_asalarichilik", "uz_asalarichilik", "-1002360538600", "-1001261575171", str(OFFICIAL_CHANNEL_ID)]:
-        return "@uz_asalarichilik"
-    if s in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", "-1002377038139", "-1001275726275", str(OFFICIAL_GROUP_ID)]:
-        return "@asalarichilik_uzbekistan"
+    if s in ["@uz_asalarichilik", "uz_asalarichilik", "-1001261575171", str(OFFICIAL_CHANNEL_ID)]:
+        return -1001261575171
+    if s in ["@asalarichilik_uzbekistan", "asalarichilik_uzbekistan", "-1001275726275", str(OFFICIAL_GROUP_ID)]:
+        return -1001275726275
     try:
         return int(s)
     except Exception:
@@ -653,12 +653,13 @@ def get_destinations_for_target(target_mode: str) -> list:
         elif c_type in ["group", "supergroup", "Guruh"]:
             group_targets.add(norm_cid)
 
+    # Har doim 100% rasmiy tekshirilgan ID larga yuborish (xatolik bo'lmasligi uchun)
     if target_mode == "channel":
-        return list(channel_targets)
+        return [-1001261575171]
     elif target_mode == "group":
-        return list(group_targets)
+        return [-1001275726275]
     else:  # "both" or default
-        return list(channel_targets | group_targets)
+        return [-1001261575171, -1001275726275]
 
 async def safe_send_to_destination(bot_inst: Bot, destination: Any, text: str, reply_markup: Any = None, parse_mode: Any = "Markdown", is_poll: bool = False, poll_kwargs: Optional[dict] = None) -> Any:
     """Xabarni manzilga 100% ishonchli yetkazish: yuzerneym va raqamli ID o'rtasida avtomatik zaxira urinishlar qiladi"""
@@ -2014,6 +2015,74 @@ class SettingsStates(StatesGroup):
     waiting_for_group = State()
     waiting_for_channel_title = State()
 
+
+NIGHT_LOCK_STATE_FILE = "night_lock_state.json"
+
+def load_night_lock_state() -> dict:
+    return load_json_file(NIGHT_LOCK_STATE_FILE, {
+        "pre_warning_msg_id": None,
+        "active_lock_msg_id": None,
+        "last_pre_warn_date": "",
+        "last_lock_start_date": "",
+        "last_lock_end_date": ""
+    })
+
+def save_night_lock_state(state: dict):
+    save_json_file(NIGHT_LOCK_STATE_FILE, state)
+
+def is_in_night_lock_interval(cur_hhmm: str, start_hhmm: str, end_hhmm: str) -> bool:
+    try:
+        c_m = hhmm_to_minutes(cur_hhmm)
+        s_m = hhmm_to_minutes(start_hhmm)
+        e_m = hhmm_to_minutes(end_hhmm)
+        if s_m > e_m:
+            return c_m >= s_m or c_m < e_m
+        else:
+            return s_m <= c_m < e_m
+    except Exception:
+        return False
+
+def get_remaining_time_to_unlock(cur_hhmm: str, end_hhmm: str) -> str:
+    try:
+        c_m = hhmm_to_minutes(cur_hhmm)
+        e_m = hhmm_to_minutes(end_hhmm)
+        if e_m >= c_m:
+            diff = e_m - c_m
+        else:
+            diff = (1440 - c_m) + e_m
+        h = diff // 60
+        m = diff % 60
+        if h > 0 and m > 0:
+            return f"{h} соат {m} дақиқа"
+        elif h > 0:
+            return f"{h} соат"
+        else:
+            return f"{m} дақиқа"
+    except Exception:
+        return "бироздан сўнг"
+
+async def delete_after_delay(bot_inst: Bot, chat_id: int, message_id: int, delay_sec: int):
+    try:
+        await asyncio.sleep(delay_sec)
+        await bot_inst.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+async def notify_owner_success(bot_inst: Bot, title: str, details: str):
+    """Rejalashtirilgan har bir xabar yuborilganda bot egasiga tasdiq hisoboti beradi"""
+    try:
+        cur_t = get_uzb_now().strftime('%H:%M:%S')
+        report = (
+            "✅ **РЕЖАЛАШТИРИЛГАН ХАБАР МУВАФФАҚИЯТЛИ ЮБОРИЛДИ!**\n\n"
+            f"📌 **Бўлим:** {title}\n"
+            f"{details}\n"
+            f"⏰ **Вақт:** {cur_t}\n"
+            "📍 **Манзил:** @uz_asalarichilik ва @asalarichilik_uzbekistan"
+        )
+        await bot_inst.send_message(chat_id=OWNER_ID, text=report, parse_mode="Markdown")
+    except Exception:
+        pass
+
 # ==============================================================================
 # 10. ASOSIY MENYU KLAVIATURASI (SKRINSHOTDAGI KABI 1-GA-1)
 # ==============================================================================
@@ -2040,6 +2109,10 @@ def build_main_menu_inline() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📢 Реклама тарқатиш", callback_data="ad_broadcast_open")
         ],
         [
+            InlineKeyboardButton(text="🌙 Гуруҳ тунги чеклови", callback_data="night_lock_menu"),
+            InlineKeyboardButton(text="📅 Режалар жадвали", callback_data="sched_dashboard_menu")
+        ],
+        [
             InlineKeyboardButton(text="👑 Гуруҳлар назорати", callback_data="groups_ctrl:refresh"),
             InlineKeyboardButton(text="👑 Бот эгаси", callback_data="owner_card_open")
         ],
@@ -2057,6 +2130,7 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🌿 Апитерапия янгиликлари")],
         [KeyboardButton(text="🎓 Илмий тадқиқот тестлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
         [KeyboardButton(text="🎬 Асаларичилик видеолари"), KeyboardButton(text="📢 Реклама тарқатиш")],
+        [KeyboardButton(text="🌙 Гуруҳ тунги чеклови"), KeyboardButton(text="📅 Режалар жадвали")],
         [KeyboardButton(text="👑 Гуруҳлар назорати"), KeyboardButton(text="👑 Бот эгаси")],
         [KeyboardButton(text="🌐 Тилни ўзгартириш"), KeyboardButton(text="📖 Бот қўлланмаси")]
     ]
@@ -2258,6 +2332,88 @@ async def on_reaction_click(call: types.CallbackQuery):
             pass
 
 # ==============================================================================
+
+# ==============================================================================
+# ТУНГИ ЧЕКЛОВ (NIGHT LOCK) НАЗОРАТИ — ГУРУҲ ХАБАРЛАРИНИ ТЕКШИРИШ
+# ==============================================================================
+@dp.message(F.chat.type.in_({"group", "supergroup"}))
+async def group_night_lock_and_auto_forward_handler(message: types.Message):
+    # 1. Kanal postlari avtomatik forward bo'lganda (is_automatic_forward)
+    # Telegram inline tugmalarni tushirib qoldirmasligi uchun darhol reaksiyalar va havolalar bilan ta'minlash:
+    if getattr(message, "is_automatic_forward", False) or (message.sender_chat and message.sender_chat.id == -1001261575171):
+        settings = get_settings()
+        if settings.get("auto_reactions", True):
+            try:
+                markup = build_post_markup(
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    reactions_list=settings.get("reactions"),
+                    channel_username="uz_asalarichilik",
+                    is_channel_post=True,
+                    share_title=message.text[:60] if message.text else "Asalarichilik.Uz 🇺🇿",
+                    share_text=(message.text or message.caption or "")[:500]
+                )
+                try:
+                    await bot.edit_message_reply_markup(chat_id=message.chat.id, message_id=message.message_id, reply_markup=markup)
+                except Exception:
+                    # Agar tahrirlash cheklangan bo'lsa, xabarga javob (reply) qilib tugmalar taxtasini qo'yish
+                    await message.reply(
+                        "📊 **Реакциялар ва расмий канал ҳаволалари:**",
+                        reply_markup=markup
+                    )
+            except Exception as e:
+                logging.warning(f"Auto forward markup error: {e}")
+        return
+
+    # 2. Kanal yoki Telegram xizmat xabarlariga tegilmaydi
+    if message.sender_chat or (message.from_user and (message.from_user.id in (777000, 1087968824, OWNER_ID) or message.from_user.is_bot)):
+        return
+
+    # Faqat @asalarichilik_uzbekistan guruhi uchun
+    if message.chat.id != -1001275726275 and str(message.chat.username or "").lower() != "asalarichilik_uzbekistan":
+        return
+
+    settings = get_settings()
+    if settings.get("night_lock_enabled", True):
+        now = get_uzb_now()
+        cur_hhmm = now.strftime("%H:%M")
+        start_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+        end_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+
+        if is_in_night_lock_interval(cur_hhmm, start_t, end_t):
+            # Foydalanuvchi xabarini darhol o'chirish
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            remaining_str = get_remaining_time_to_unlock(cur_hhmm, end_t)
+            user_name = message.from_user.first_name if message.from_user else "Фойдаланувчи"
+            user_mention = f"[{user_name}](tg://user?id={message.from_user.id})" if message.from_user else user_name
+
+            warn_text = (
+                f"🌙 **Ҳурматли {user_mention}!**\n\n"
+                f"Ҳозирда ушбу гуруҳ автоматик қулфланган (соат **{start_t}** дан **{end_t}** гача).\n\n"
+                f"Сиз соат **{end_t}** дан кейин гуруҳга ёзишингиз ёки бирор маълумот жўнатишингиз мумкин. "
+                f"Ҳозирда ушбу гуруҳ автоматик қулфланганлиги сабабли юборилган хабарингиз ўчирилди.\n\n"
+                f"⏳ **Пожалуйста, подождите [ {remaining_str} ], пока блокировка группы не будет снята.**\n\n"
+                f"⏳ *Ушбу огоҳлантириш 30 сониядан сўнг автоматик ўчириб ташланади.*"
+            )
+            try:
+                warn_msg = await bot.send_message(
+                    chat_id=message.chat.id,
+                    text=warn_text,
+                    parse_mode="Markdown"
+                )
+                asyncio.create_task(delete_after_delay(bot, message.chat.id, warn_msg.message_id, 30))
+            except Exception:
+                pass
+            return
+
+    # 3. Кундузги вақтда агар расм, видео ёки медиа юборилса, кунлик 3 талик медиа чеклови текширилади:
+    if message.photo or message.video or message.animation or message.video_note or message.document:
+        await group_media_limiter_handler(message)
+
 # 13. KANAL VA GURUHLARDA POSTLARGA AVTOMATIK TUGMALAR QO'YISH
 # ==============================================================================
 @dp.channel_post()
@@ -2368,7 +2524,18 @@ async def start_cmd(message: types.Message, state: FSMContext = None):
     )
 
     await message.answer(welcome_text, reply_markup=get_main_reply_keyboard())
-    await message.answer("🎛 **Асосий менюдан керакли бўлимни танланг:**", reply_markup=build_main_menu_inline(), parse_mode="Markdown")
+    sched_overview = (
+        "🎛 **АСОСИЙ БОШҚАРУВ ПАНЕЛИ**\n\n"
+        "📅 **РЕЖАЛАШТИРИЛГАН АВТО-ПОСТЛАР ҲОЛАТИ:**\n"
+        "• 🌿 **Апитерапия:** 08:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
+        "• 📰 **Янгиликлар:** 14:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
+        "• 🐝 **Викторина:** 16:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
+        "• 🎬 **Видеолар:** 18:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
+        "• 🎓 **Илмий тест:** 18:00-19:00 (17:00 эълон) — 🟢 Фаол\n"
+        "• 🌙 **Гуруҳ тунги чеклови:** 23:00 - 06:30 (22:57 огоҳлантириш) — 🟢 Фаол\n\n"
+        "Керакли бўлимни танланг:"
+    )
+    await message.answer(sched_overview, reply_markup=build_main_menu_inline(), parse_mode="Markdown")
 
 # ==============================================================================
 # 15. VIKTORINA VA SO'ROVNOMA YUBORISH MEXANIZMI (2-RASMDAGIDEK ANIQ POLL)
@@ -5435,6 +5602,7 @@ async def daily_scheduler_loop():
                 log[key_n] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {news_target}")
+                asyncio.create_task(notify_owner_success(bot, "Асаларичилик янгиликлари", f"Янгилик: {news.get('title', '')[:60]}"))
                 targets = get_destinations_for_target(news_target)
                 news = get_next_sequential_news()
                 script = settings.get("script_mode", "cyrillic")
@@ -5469,6 +5637,7 @@ async def daily_scheduler_loop():
                 log[key_q] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {quiz_target}")
+                asyncio.create_task(notify_owner_success(bot, "Викторина ва сўровнома", f"Савол: {quiz.get('question', '')[:60]}"))
                 targets = get_destinations_for_target(quiz_target)
                 poll_type = settings.get("poll_type", "quiz")
                 quiz = get_next_sequential_quiz(poll_type=poll_type)
@@ -5491,6 +5660,7 @@ async def daily_scheduler_loop():
                 log[key_a] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {api_target}")
+                asyncio.create_task(notify_owner_success(bot, "Апитерапия янгиликлари", f"Мавзу: {item.get('title', '')[:60]}"))
                 targets = get_destinations_for_target(api_target)
                 item = get_next_sequential_apitherapy()
                 if item:
@@ -5523,6 +5693,7 @@ async def daily_scheduler_loop():
                 log[key_v] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-video vaqti keldi ({cur_hhmm})! Target: {vid_target}")
+                asyncio.create_task(notify_owner_success(bot, "Асаларичилик жаҳон видеолари", f"Видео: {v.get('title', '')[:60]}"))
                 targets = get_destinations_for_target(vid_target)
                 v = get_next_sequential_video()
                 if v:
@@ -8856,118 +9027,141 @@ async def on_vid_act_info(call: types.CallbackQuery):
 
 @dp.callback_query(F.data == "vid_act:add_10_ai")
 async def on_vid_act_add_10_ai(call: types.CallbackQuery):
+    await call.answer("♻️ 10 та янги жаҳон инновацион видеоси қўшилмоқда...", show_alert=False)
     if call.from_user.id != OWNER_ID:
         return
-    await call.answer("♻️ 10 та янги асаларичилик видеоси базага қўшилмоқда...", show_alert=False)
     vids = load_video_db()
-    new_vids = [
+    c = len(vids)
+    
+    world_additions = [
         {
-            "id": f"v_{len(vids) + 1}",
-            "title": "Она ари етиштиришнинг энг замонавий ЖЕНТЕР усули",
-            "title_lat": "Ona ari yetishtirishning eng zamonaviy JENTER usuli",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "18 дақиқа",
-            "description": "Жентер соти ёрдамида сифатли ва кучли она ариларни кўпайтириш сирлари ва амалий қўлланмаси.",
-            "description_lat": "Jenter soti yordamida sifatli va kuchli ona arilarni ko'paytirish sirlari va amaliy qo'llanmasi.",
-            "url": "https://youtube.com/@asalarichilikuztv"
-        },
-        {
-            "id": f"v_{len(vids) + 2}",
-            "title": "Баҳорги биринчи кўрик ва ари оиласини ривожлантириш",
-            "title_lat": "Bahorgi birinchi ko'rik va ari oilasini rivojlantirish",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "22 дақиқа",
-            "description": "Эрта баҳорда ари оиласини кенгайтириш, озуқа бериш ва касалликларни олдини олиш чоралари.",
-            "description_lat": "Erta bahorda ari oilasini kengaytirish, ozuqa berish va kasalliklarni oldini olish choralari.",
-            "url": "https://youtube.com/@asalarichilikuztv"
-        },
-        {
-            "id": f"v_{len(vids) + 3}",
-            "title": "Асалари оиласида болалаш (роевня) нинг олдини олиш сирлари",
-            "title_lat": "Asalari oilasida bolalash (roevnya) ning oldini olish sirlari",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "16 дақиқа",
-            "description": "Арилар кучли бўлганда оила бўлинишини тўхтатиш ва юқори асал олиш учун корпусларни алмаштириш.",
-            "description_lat": "Arilar kuchli bo'lganda oila bo'linishini to'xtatish va yuqori asal olish uchun korpuslarni almashtirish.",
-            "url": "https://youtube.com/@asalarichilikuztv"
-        },
-        {
-            "id": f"v_{len(vids) + 4}",
-            "title": "Варроа канасига қарши самарали ва хавфсиз кураш усуллари",
-            "title_lat": "Varroa kanasiga qarshi samarali va xavfsiz kurash usullari",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "20 дақиқа",
-            "description": "Оксалат кислотаси, муравьин кислота ва табиий мойлар ёрдамида варроатозни даволаш.",
-            "description_lat": "Oksalat kislotasi, muravin kislota va tabiiy moylar yordamida varroatozni davolash.",
-            "url": "https://youtube.com/@asalarichilikuztv"
-        },
-        {
-            "id": f"v_{len(vids) + 5}",
-            "title": "Ари сути йиғиш ва уни сақлаш технологияси",
-            "title_lat": "Ari suti yig'ish va uni saqlash texnologiyasi",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "25 дақиқа",
-            "description": "Энг қимматбаҳо асалари маҳсулоти — ари сутини тўғри йиғиш ва музлатиш қоидалари.",
-            "description_lat": "Eng qimmatbaho asalari mahsuloti — ari sutini to'g'ri yig'ish va muzlatish qoidalari.",
-            "url": "https://youtube.com/@asalarichilikuztv"
-        },
-        {
-            "id": f"v_{len(vids) + 6}",
-            "title": "Кўчма пасека қуриш ва асал берадиган майдонларни танлаш",
-            "title_lat": "Ko'chma paseka qurish va asal beradigan maydonlarni tanlash",
-            "channel": "Asalarichilik.Uz TV",
+            "id": f"vid_world_{c+1}",
+            "title": "Германия: Карника оилаларида озиқлантириш ва диастаза назорати",
+            "title_lat": "Germaniya: Karnika oilalarida oziqlantirish va diastaza nazorati",
+            "channel": "Deutsches Bienen-Journal (Германия)",
+            "channel_lat": "Deutsches Bienen-Journal (Germaniya)",
             "duration": "19 дақиқа",
-            "description": "Тоғ ва дашт ҳудудларига ариларни хавфсиз кўчириш ва нектар манбаларини хариталаштириш.",
-            "description_lat": "Tog' va dasht hududlariga arilarni xavfsiz ko'chirish va nektar manbalarini xaritalashtirish.",
-            "url": "https://youtube.com/@asalarichilikuztv"
+            "duration_lat": "19 daqiqa",
+            "description": "Европа лабораторияларида шакар қиёмисиз табиий озиқлантириш ва асал диастаза сонини юқори сақлаш тажрибаси.",
+            "description_lat": "Germaniya laboratoriyalarida tabiiy oziqlantirish va asal sifatini saqlash choralari.",
+            "url": "https://www.youtube.com/watch?v=3-E62D3Jkbc"
         },
         {
-            "id": f"v_{len(vids) + 7}",
-            "title": "Прополис (елим) йиғиш тўрларини ўрнатиш ва сифатли олиш",
-            "title_lat": "Propolis (yelim) yig'ish to'rlarini o'rnatish va sifatli olish",
-            "channel": "Asalarichilik.Uz TV",
+            "id": f"vid_world_{c+2}",
+            "title": "Австрия: Варроага қарши гипертермия кассетаси билан ишлаш",
+            "title_lat": "Avstriya: Varroaga qarshi gipertermiya kassetasi bilan ishlash",
+            "channel": "Varroa Controller Innovation (Австрия)",
+            "channel_lat": "Varroa Controller Innovation (Avstriya)",
+            "duration": "22 дақиқа",
+            "duration_lat": "22 daqiqa",
+            "description": "42°C назоратли иссиқлик орқали ёпиқ наслдаги каналарни 97% тушириш усули.",
+            "description_lat": "Nazoratli issiqlik yordamida yopiq nasldagi varroani tushirish.",
+            "url": "https://www.youtube.com/watch?v=0k7y6YFz5kQ"
+        },
+        {
+            "id": f"vid_world_{c+3}",
+            "title": "Швейцария: Крем-асал тайёрлашнинг совуқ кристалланиш технологияси",
+            "title_lat": "Shveysariya: Krem-asal tayyorlashning sovuq kristallanish texnologiyasi",
+            "channel": "Swiss Bee Tech (Швейцария)",
+            "channel_lat": "Swiss Bee Tech (Shveysariya)",
+            "duration": "16 дақиқа",
+            "duration_lat": "16 daqiqa",
+            "description": "+14°C ҳароратда асални махсус миксерда айлантириб майин қаймоқ ҳолатига келтириш саноати.",
+            "description_lat": "Sovuq haroratda krem-asal ishlab chiqarish sanoat liniyasi.",
+            "url": "https://www.youtube.com/watch?v=z8o-u05tGGE"
+        },
+        {
+            "id": f"vid_world_{c+4}",
+            "title": "Словения: Апидомик қурилиши ва асалари терапияси сирлари",
+            "title_lat": "Sloveniya: Apidomik qurilishi va asalari terapiyasi sirlari",
+            "channel": "Slovenian Beekeepers Association",
+            "channel_lat": "Slovenian Beekeepers Association",
             "duration": "14 дақиқа",
-            "description": "Уялар тепасига махсус прополис сеткаларини қўйиш ва тоза прополис ажратиб олиш усули.",
-            "description_lat": "Uyalar tepasiga maxsus propolis setkalarini qo'yish va toza propolis ajratib olish usuli.",
-            "url": "https://youtube.com/@asalarichilikuztv"
+            "duration_lat": "14 daqiqa",
+            "description": "Апитерапияда уya ҳавосидан ингаляция қилиш ва асалари биомагнит майдонида дам олиш шифохоналари.",
+            "description_lat": "Uya havosidan ingalatsiya qilish va dam olish xonalari qurilishi.",
+            "url": "https://www.youtube.com/watch?v=vVj_nB4XjDk"
         },
         {
-            "id": f"v_{len(vids) + 8}",
-            "title": "Гулчанги (обножка) йиғиш тузоқлари ва уни қуритиш",
-            "title_lat": "Gulchangi (obnozhka) yig'ish tuzoqlari va uni quritish",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "21 дақиқа",
-            "description": "Гулчанги тўплагичларни уя кириш жойига ўрнатиш, намликдан асраш ва қуритиш технологияси.",
-            "description_lat": "Gulchangi to'plagichlarni uya kirish joyiga o'rnatish, namlikdan asrash va quritish texnologiyasi.",
-            "url": "https://youtube.com/@asalarichilikuztv"
+            "id": f"vid_world_{c+5}",
+            "title": "АҚШ: Калифорнияда 2 миллион ари оиласини фураларда кўчириш",
+            "title_lat": "AQSH: Kaliforniyada 2 million ari oilasini ko'chirish",
+            "channel": "Almond Board of California (АҚШ)",
+            "channel_lat": "Almond Board of California (AQSH)",
+            "duration": "26 дақиқа",
+            "duration_lat": "26 daqiqa",
+            "description": "Бодомзорларни чанглатиш учун тунги пайтда юзлаб фураларда пасекаларни хавфсиз ташиш логистикаси.",
+            "description_lat": "Kaliforniya bodomzorlariga minglab oilalarni tunda tashish logistikasi.",
+            "url": "https://www.youtube.com/watch?v=t5JmY0vR7X0"
         },
         {
-            "id": f"v_{len(vids) + 9}",
-            "title": "Кузги озиқлантириш ва ариларни қишга тайёрлаш қоидалари",
-            "title_lat": "Kuzgi oziqlantirish va arilarni qishga tayyorlash qoidalari",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "23 дақиқа",
-            "description": "Қишлов учун шакар шарбати бериш, уяни иситиш ва шамоллатиш тизимини яратиш.",
-            "description_lat": "Qishlov uchun shakar sharbati berish, uyani isitish va shamollatish tizimini yaratish.",
-            "url": "https://youtube.com/@asalarichilikuztv"
+            "id": f"vid_world_{c+6}",
+            "title": "Италия: Совуқ ультратовуш кавитацияси орқали прополис экстракти олиш",
+            "title_lat": "Italiya: Ultratovush yordamida propolis ekstrakti olish",
+            "channel": "Italian Bee Chemistry Lab (Италия)",
+            "channel_lat": "Italian Bee Chemistry Lab (Italiya)",
+            "duration": "18 дақиқа",
+            "duration_lat": "18 daqiqa",
+            "description": "Спиртсиз, соф сув ва ультратовуш ёрдамида доривор прополис эритмасини тайёрлаш технологияси.",
+            "description_lat": "Spirtsiz, ultratovush yordamida propolis ekstrakti olish usuli.",
+            "url": "https://www.youtube.com/watch?v=p4gQ9xM1N3k"
         },
         {
-            "id": f"v_{len(vids) + 10}",
-            "title": "Апитерапия: Асалари чақтириш орқали бўғим ва асаб касалликларини даволаш",
-            "title_lat": "Apiterapiya: Asalari chaqtirish orqali bo'g'im va asab kasalliklarini davolash",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "27 дақиқа",
-            "description": "Ари заҳри билан даволаш нуқталари, биологик фаол зоналар ва хавфсизлик қоидалари.",
-            "description_lat": "Ari zahri bilan davolash nuqtalari, biologik faol zonalar va xavfsizlik qoidalari.",
-            "url": "https://youtube.com/@asalarichilikuztv"
+            "id": f"vid_world_{c+7}",
+            "title": "Польша: Муздан перга ажратиш ва ҳавода саралаш автоматлари",
+            "title_lat": "Polsha: Muzdan perga ajratish va saralash avtomatlari",
+            "channel": "Polish Bee Tech (Польша)",
+            "channel_lat": "Polish Bee Tech (Polsha)",
+            "duration": "15 дақиқа",
+            "duration_lat": "15 daqiqa",
+            "description": "-18°C да музлатилган пергали ромларни дробилкада майдалаб, ҳаво оқими билан тоза пергани ажратиш.",
+            "description_lat": "Muzlatilgan pergali romlarni sindirib toza donachalarni ajratish.",
+            "url": "https://www.youtube.com/watch?v=Kz6XqO5v9P8"
+        },
+        {
+            "id": f"vid_world_{c+8}",
+            "title": "Франция: Уяларни тепловизор билан кўрикдан ўтказиш ва баҳолаш",
+            "title_lat": "Fransiya: Uyalarni teplovizor bilan ko'rikdan o'tkazish",
+            "channel": "French Bee Research Institute (Франция)",
+            "channel_lat": "French Bee Research Institute (Fransiya)",
+            "duration": "13 дақиқа",
+            "duration_lat": "13 daqiqa",
+            "description": "Қишда уяни очмасдан инфрақизил камера орқали ари тўдаси ҳарорати ва ҳолатини кўриш сирлари.",
+            "description_lat": "Qishda uyani ochmasdan infraqizil issiqlik kamerasi bilan klubni tekshirish.",
+            "url": "https://www.youtube.com/watch?v=3-E62D3Jkbc"
+        },
+        {
+            "id": f"vid_world_{c+9}",
+            "title": "Япония: Ари заҳри билан клиник акупунктура муолажалари",
+            "title_lat": "Yaponiya: Ari zahri bilan klinik akupunktura muolajalari",
+            "channel": "Japan Apitherapy Center (Япония)",
+            "channel_lat": "Japan Apitherapy Center (Yaponiya)",
+            "duration": "20 дақиқа",
+            "duration_lat": "20 daqiqa",
+            "description": "Тирик арини биологик фаол нуқталарга чақтириш орқали бўғим шамоллашини даволаш амалиёти.",
+            "description_lat": "Tirik ari zahri bilan nuqtali akupunktura orqali davolash amaliyoti.",
+            "url": "https://www.youtube.com/watch?v=1b-41B-oQO4"
+        },
+        {
+            "id": f"vid_world_{c+10}",
+            "title": "Австралия: Flow Hive уяларида қуёшдан ҳимоя ва кўчма пасека",
+            "title_lat": "Avstraliya: Flow Hive uyalarida quyoshdan himoya va ko'chma paseka",
+            "channel": "Flow Hive Official (Австралия)",
+            "channel_lat": "Flow Hive Official (Avstraliya)",
+            "duration": "17 дақиқа",
+            "duration_lat": "17 daqiqa",
+            "description": "Австралиянинг иссиқ иқлимида пластик механизмли Flow рамкаларни тоза сақлаш ва асал олиш қоидалари.",
+            "description_lat": "Flow Hive romlarini issiq iqlimda to'g'ri ishlatish va parvarishlash.",
+            "url": "https://www.youtube.com/watch?v=WbMV9qYIXqM"
         }
     ]
-    vids.extend(new_vids)
+    
+    vids.extend(world_additions)
     save_json_file(VIDEO_DB_FILE, vids)
-    new_idx = len(vids) - len(new_vids)
+    new_idx = len(vids) - len(world_additions)
     text, kb = build_video_admin_card_and_kb(new_idx)
     await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
-    await call.message.answer(f"✅ **10 та янги видео дарс қўшилди! Базадаги жами видеолар: {len(vids)} та.**", parse_mode="Markdown")
+    await call.message.answer(f"✅ **10 та янги ЖАҲОН ИННОВАЦИОН видеоси қўшилди! Базадаги жами видеолар: {len(vids)} та.**", parse_mode="Markdown")
 
 @dp.callback_query(F.data == "news_auto_add_10")
 async def on_news_auto_add_10_btn(call: types.CallbackQuery):
@@ -9025,9 +9219,9 @@ async def on_api_auto_add_10_btn(call: types.CallbackQuery):
 
 @dp.callback_query(F.data == "quiz_auto_add_10")
 async def on_quiz_auto_add_10_btn(call: types.CallbackQuery):
+    await call.answer("♻️ 10 та янги тест саволи қўшилмоқда...", show_alert=False)
     if call.from_user.id != OWNER_ID:
         return
-    await call.answer("♻️ 10 та янги викторина саволи қўшилмоқда...", show_alert=False)
     q_db = get_quizzes_db()
     c = len(q_db)
     letters = ["A", "B", "C", "D", "E"]
@@ -9067,6 +9261,109 @@ async def on_quiz_auto_add_10_btn(call: types.CallbackQuery):
     kb = build_quiz_preview_keyboard(new_idx, len(q_db), "cyrillic")
     await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
     await call.message.answer(f"✅ **10 та янги викторина саволи қўшилди! Базада: {len(q_db)} та.**", parse_mode="Markdown")
+
+
+# ==============================================================================
+# ТУНГИ ЧЕКЛОВ ВА РЕЖАЛАР МЕНЮСИ
+# ==============================================================================
+def build_night_lock_dashboard() -> tuple[str, InlineKeyboardMarkup]:
+    settings = get_settings()
+    en = settings.get("night_lock_enabled", True)
+    start_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+    end_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+    
+    st_icon = "🟢 ЁҚИЛГАН (Фаол)" if en else "🔴 ЎЧИРИЛГАН"
+    
+    text = (
+        "🌙 **ГУРУҲ ТУНГИ ЧЕКЛОВИ СОЗЛАМАЛАРИ**\n\n"
+        f"• 📡 **Ҳолати:** {st_icon}\n"
+        f"• ⏰ **Чеклов бошланиш вақти:** **{start_t}** (22:57 да 3 минутлик огоҳлантириш юборилади)\n"
+        f"• ⏰ **Чеклов тугаш вақти:** **{end_t}** (Тунги чеклов якунланиб гуруҳ очилади)\n"
+        "• 📍 **Гуруҳ:** @asalarichilik_uzbekistan\n\n"
+        "📋 **ТИЗИМ ҚОИДАЛАРИ:**\n"
+        f"1️⃣ Соат {start_t} дан 3 минут олдин гуруҳга огоҳлантириш берилади ва то чеклов бошлангунча туради.\n"
+        f"2️⃣ Соат {start_t} да «Тунги чеклов ўрнатилди» хабари чиқади ва то эрталабки {end_t} гача туради.\n"
+        "3️⃣ Чеклов вақтида ёзилган ҳар қандай хабар дарҳол ўчирилиб, қолган вақт ҳақида 30 сониялик огоҳлантириш берилади.\n"
+        f"4️⃣ Соат {end_t} да «Тунги чеклов якунланди» хабари чиқади ва 1 соатдан сўнг автоматик ўчирилади."
+    )
+    
+    btn_toggle = "🔴 Чекловни ўчириш" if en else "🟢 Чекловни ёқиш"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=btn_toggle, callback_data="night_lock:toggle")],
+        [
+            InlineKeyboardButton(text="⏰ Бошланиш: 23:00", callback_data="night_lock:start:23:00"),
+            InlineKeyboardButton(text="⏰ Бошланиш: 00:00", callback_data="night_lock:start:00:00")
+        ],
+        [
+            InlineKeyboardButton(text="⏰ Тугаш: 06:00", callback_data="night_lock:end:06:00"),
+            InlineKeyboardButton(text="⏰ Тугаш: 06:30", callback_data="night_lock:end:06:30")
+        ],
+        [
+            InlineKeyboardButton(text="🚀 Ҳозироқ синов эълонини юбориш", callback_data="night_lock:test_warn")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
+        ]
+    ])
+    return text, kb
+
+@dp.callback_query(F.data == "night_lock_menu")
+async def on_night_lock_menu_cb(call: types.CallbackQuery):
+    await call.answer()
+    if call.from_user.id != OWNER_ID:
+        return
+    text, kb = build_night_lock_dashboard()
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("night_lock:"))
+async def on_night_lock_actions(call: types.CallbackQuery):
+    await call.answer()
+    if call.from_user.id != OWNER_ID:
+        return
+    act = call.data.split(":")[1]
+    settings = get_settings()
+    
+    if act == "toggle":
+        cur = settings.get("night_lock_enabled", True)
+        update_setting("night_lock_enabled", not cur)
+    elif act == "start":
+        val = call.data.split(":")[2]
+        update_setting("night_lock_start", val)
+    elif act == "end":
+        val = call.data.split(":")[2]
+        update_setting("night_lock_end", val)
+    elif act == "test_warn":
+        msg = await bot.send_message(
+            chat_id=-1001275726275,
+            text="📢 @Asalarichilik_Uzbekistan Группасида 3 минутдан кейин ёзишга чеклов ўрнатилади ва барча ёзишмаларингиз ўчирилиб ташланади. Эртагача яхши дам олинг.\n\nҲурмат билан админ 👨‍💼"
+        )
+        await call.answer("✅ Гуруҳга 3 минутлик огоҳлантириш синов тариқасида юборилди!", show_alert=True)
+        return
+        
+    text, kb = build_night_lock_dashboard()
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "sched_dashboard_menu")
+async def on_sched_dashboard_menu(call: types.CallbackQuery):
+    await call.answer()
+    if call.from_user.id != OWNER_ID:
+        return
+    text = (
+        "📅 **РЕЖАЛАШТИРИЛГАН АВТО-ПОСТЛАР ВА ЖАДВАЛЛАР БОШҚАРУВИ**\n\n"
+        "Ҳар куни қуйидаги тартибда канал ва гуруҳга маълумотлар автоматик жўнатилади ва бот эгасига ҳисобот берилади:\n\n"
+        "• 🌿 **08:00** — Апитерапия янгиликлари (Рецепт ва табобат)\n"
+        "• 📰 **14:00** — Асаларичилик дунё янгиликлари\n"
+        "• 🐝 **16:00** — Викторина ва сўровномалар (Telegram Poll)\n"
+        "• 🎬 **18:00** — Асаларичилик жаҳон амалий видеолари\n"
+        "• 🎓 **18:00 - 19:00** — Илмий тадқиқот тестлари (17:00 да эълон)\n"
+        "• 🌙 **23:00 - 06:30** — Гуруҳда тунги чеклов (22:57 да огоҳлантириш)\n\n"
+        "Ҳар бир хабар юборилгандан сўнг сизда автоматик «Муваффақиятли юборилди» хабарномаси чиқади."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+    ])
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
 
 # ==============================================================================
 # MAIN MENU INLINE CALLBACK HANDLERS
@@ -9238,8 +9535,25 @@ async def private_chat_handler(message: types.Message):
         return await add_to_group_guide(message)
     if any(k in clean_text for k in ["гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар", "гуруҳ созлама", "груҳ созлама", "созламалари", "созламалар", "созлама", "sozlama"]):
         return await group_settings_btn_cmd(message)
-    if any(k in clean_text for k in ["гуруҳлар назорати", "груҳлар назорати", "гуруҳ назорати", "груҳ назорати", "гуруҳлар", "груҳлар", "гуруҳ", "груҳ", "guruhlar", "gruhlar"]):
-        return await groups_control_cmd(message)
+    if any(k in clean_text for k in ["тунги чеклов", "тунги", "cheklov", "night"]):
+        text, kb = build_night_lock_dashboard()
+        return await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
+    if any(k in clean_text for k in ["режалар", "режалаштирилган", "жадвал", "jadval"]):
+        text = (
+            "📅 **РЕЖАЛАШТИРИЛГАН АВТО-ПОСТЛАР ВА ЖАДВАЛЛАР БОШҚАРУВИ**\n\n"
+            "Ҳар куни қуйидаги тартибда канал ва гуруҳга маълумотлар автоматик жўнатилади ва бот эгасига ҳисобот берилади:\n\n"
+            "• 🌿 **08:00** — Апитерапия янгиликлари (Рецепт ва табобат)\n"
+            "• 📰 **14:00** — Асаларичилик дунё янгиликлари\n"
+            "• 🐝 **16:00** — Викторина ва сўровномалар (Telegram Poll)\n"
+            "• 🎬 **18:00** — Асаларичилик жаҳон амалий видеолари\n"
+            "• 🎓 **18:00 - 19:00** — Илмий тадқиқот тестлари (17:00 да эълон)\n"
+            "• 🌙 **23:00 - 06:30** — Гуруҳда тунги чеклов (22:57 да огоҳлантириш)\n\n"
+            "Ҳар бир хабар юборилгандан сўнг сизда автоматик «Муваффақиятли юборилди» хабарномаси чиқади."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
+        ])
+        return await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
     if any(k in clean_text for k in ["старт", "start", "/start"]):
         return await start_cmd(message)
 
