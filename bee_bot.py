@@ -100,6 +100,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, StateFilter
 from aiogram.types import (
+    BotCommandScopeDefault, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators, BotCommandScopeAllPrivateChats,
     ChatPermissions,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -5405,12 +5406,15 @@ async def group_handler(message: types.Message):
 # ==============================================================================
 # 24. KUNLIK AVTOMATIK JADVAL (SCHEDULER LOOP)
 # ==============================================================================
+ALREADY_SENT_SCHEDULE_KEYS = set()
+
 async def daily_scheduler_loop():
     """
     Ҳар куни соатма-соат текшириб, белгиланган вақтда викторина, янгиликлар ва
     апитерапияни белгиланган манзилларга ФАҚАТ ЯНГИ (аввал жўнатилмаган) ҳолатда
     автоматик жойлаштириш цикли.
     """
+    global ALREADY_SENT_SCHEDULE_KEYS
     while True:
         try:
             now = get_uzb_now()
@@ -5426,7 +5430,10 @@ async def daily_scheduler_loop():
             news_target = settings.get("news_auto_target", "both")
             key_n = f"news_{today_str}_{news_time}"
 
-            if news_enabled and (cur_hhmm == news_time or (cur_hhmm > news_time and is_within_minutes(cur_hhmm, news_time, 15))) and not log.get(key_n):
+            if news_enabled and (cur_hhmm == news_time or (cur_hhmm > news_time and is_within_minutes(cur_hhmm, news_time, 15))) and not log.get(key_n) and (key_n not in ALREADY_SENT_SCHEDULE_KEYS):
+                ALREADY_SENT_SCHEDULE_KEYS.add(key_n)
+                log[key_n] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {news_target}")
                 targets = get_destinations_for_target(news_target)
                 news = get_next_sequential_news()
@@ -5457,7 +5464,10 @@ async def daily_scheduler_loop():
             quiz_target = settings.get("quiz_auto_target", "both")
             key_q = f"quiz_{today_str}_{quiz_time}"
 
-            if quiz_enabled and (cur_hhmm == quiz_time or (cur_hhmm > quiz_time and is_within_minutes(cur_hhmm, quiz_time, 15))) and not log.get(key_q):
+            if quiz_enabled and (cur_hhmm == quiz_time or (cur_hhmm > quiz_time and is_within_minutes(cur_hhmm, quiz_time, 15))) and not log.get(key_q) and (key_q not in ALREADY_SENT_SCHEDULE_KEYS):
+                ALREADY_SENT_SCHEDULE_KEYS.add(key_q)
+                log[key_q] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {quiz_target}")
                 targets = get_destinations_for_target(quiz_target)
                 poll_type = settings.get("poll_type", "quiz")
@@ -5476,7 +5486,10 @@ async def daily_scheduler_loop():
             api_target = settings.get("apitherapy_auto_target", "both")
             key_a = f"apitherapy_{today_str}_{api_time}"
 
-            if api_enabled and (cur_hhmm == api_time or (cur_hhmm > api_time and is_within_minutes(cur_hhmm, api_time, 15))) and not log.get(key_a):
+            if api_enabled and (cur_hhmm == api_time or (cur_hhmm > api_time and is_within_minutes(cur_hhmm, api_time, 15))) and not log.get(key_a) and (key_a not in ALREADY_SENT_SCHEDULE_KEYS):
+                ALREADY_SENT_SCHEDULE_KEYS.add(key_a)
+                log[key_a] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {api_target}")
                 targets = get_destinations_for_target(api_target)
                 item = get_next_sequential_apitherapy()
@@ -5505,7 +5518,10 @@ async def daily_scheduler_loop():
             vid_target = settings.get("video_auto_target", "both")
             key_v = f"video_{today_str}_{vid_time}"
 
-            if vid_enabled and (cur_hhmm == vid_time or (cur_hhmm > vid_time and is_within_minutes(cur_hhmm, vid_time, 15))) and not log.get(key_v):
+            if vid_enabled and (cur_hhmm == vid_time or (cur_hhmm > vid_time and is_within_minutes(cur_hhmm, vid_time, 15))) and not log.get(key_v) and (key_v not in ALREADY_SENT_SCHEDULE_KEYS):
+                ALREADY_SENT_SCHEDULE_KEYS.add(key_v)
+                log[key_v] = True
+                save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-video vaqti keldi ({cur_hhmm})! Target: {vid_target}")
                 targets = get_destinations_for_target(vid_target)
                 v = get_next_sequential_video()
@@ -6340,7 +6356,7 @@ async def add_to_group_guide(message: types.Message, state: FSMContext = None):
         [InlineKeyboardButton(text="➕ Ҳозироқ гуруҳга қўшиш", url="https://t.me/Asalarichilikuz_bot?startgroup=true")],
         [InlineKeyboardButton(text="👥 Расмий гуруҳимиз: @asalarichilik_uzbekistan", url="https://t.me/asalarichilik_uzbekistan")],
         [InlineKeyboardButton(text="👑 Гуруҳлар назорати", callback_data="groups_ctrl:refresh")],
-        [InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"), InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"), InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
     ])
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
@@ -6364,7 +6380,7 @@ async def add_to_channel_guide(message: types.Message, state: FSMContext = None)
         [InlineKeyboardButton(text="➕ Ҳозироқ каналга қўшиш", url="https://t.me/Asalarichilikuz_bot?startchannel=true")],
         [InlineKeyboardButton(text="📢 Расмий каналимиз: @uz_asalarichilik", url="https://t.me/uz_asalarichilik")],
         [InlineKeyboardButton(text="📢 Каналлар бошқаруви", callback_data="channel_ctrl:refresh")],
-        [InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"), InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu"), InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
     ])
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
@@ -6602,7 +6618,7 @@ def build_group_limits_dashboard(from_screen: str = "main") -> tuple[str, Inline
         ],
         [
             InlineKeyboardButton(text="🔙 Орқага (Гуруҳ созламалари)", callback_data=f"grp_nav:refresh:{from_screen}"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ]
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
@@ -6676,7 +6692,7 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
     return text, kb
@@ -6755,7 +6771,7 @@ def build_channel_mgmt_dashboard() -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
     return text, kb
@@ -6914,10 +6930,9 @@ def save_sci_session(session: dict):
 def get_sci_category_title(cat: str, script: str = "cyrillic") -> str:
     """Бошқа сўзлардан яққол ажралиб турувчи қалин ва чиройли йўналиш номлари"""
     if cat == "master_beekeepers":
-        raw = "🎓 «УСТОЗ АРИЧИЛАР»"
+        return "⭐️ **【 УСТОЗ АСАЛАРИЧИЛАР 】**" if script == "cyrillic" else "⭐️ **【 USTOZ ASALARICHILAR 】**"
     else:
-        raw = "👶 «ЁШ АСАЛАРИЧИЛАР»"
-    return apply_script(raw, script)
+        return "🟢 **【 ЁШ АСАЛАРИЧИЛАР 】**" if script == "cyrillic" else "🟢 **【 YOSH ASALARICHILAR 】**"
 
 def format_scientific_preview_text(item: dict, idx: int, total: int, cat: str, script: str = "cyrillic") -> str:
     cat_title = get_sci_category_title(cat, script)
@@ -7035,8 +7050,8 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
     ]
     text = chr(10).join(text_lines)
 
-    cat_yosh_lbl = "👉 👶 Ёш асаларичилар" if cat == "young_beekeepers" else "👶 Ёш асаларичилар"
-    cat_ustoz_lbl = "👉 🎓 Устоз аричилар" if cat == "master_beekeepers" else "🎓 Устоз аричилар"
+    cat_yosh_lbl = "👉 🟢 【 ЁШ АСАЛАРИЧИЛАР 】" if cat == "young_beekeepers" else "🟢 【 ЁШ АСАЛАРИЧИЛАР 】"
+    cat_ustoz_lbl = "👉 ⭐️ 【 УСТОЗ АСАЛАРИЧИЛАР 】" if cat == "master_beekeepers" else "⭐️ 【 УСТОЗ АСАЛАРИЧИЛАР 】"
 
     start_preview_page = (active_set - 1) * 10
 
@@ -7068,7 +7083,7 @@ def build_scientific_dashboard(cat: str = None, script: str = None) -> tuple[str
             InlineKeyboardButton(text="➕ Янги 10 талик тест қўшиш", callback_data="sci_act:new_test")
         ],
         [
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ]
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
@@ -7130,7 +7145,7 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -7222,7 +7237,7 @@ def get_dtm_agreement_text_and_kb(set_id: int = 1, user_id: int = None):
         [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5)", callback_data="dtm_rank:view")],
         [
             InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
     return text, kb
@@ -7242,8 +7257,8 @@ def build_dtm_question_card(exam: dict):
     # Тўғри ечилганда САЛЮТЛАР ва мотивация
     last_fb = exam.get("last_feedback")
     if last_fb == "correct":
-        lines.append("🎆 🎇 ✨ **БАРАКАЛЛА! ТЎҒРИ ЖАВОБ!** ✨ 🎇 🎆")
-        lines.append("Салютлар отилмоқда! 🎆 Сиз ҳақиқий асаларичилик билимдони экансиз! 🐝🍯")
+        lines.append("🌟 🏆 **МУҲТАРАМ МУТАХАССИС! ТЎҒРИ ЖАВОБ!** 👏 🎖")
+        lines.append("Ажойиб натижа! Сиз ҳақиқий илмий ва амалий асаларичилик билимдони экансиз! 🐝🍯")
         lines.append("──────────────────────────────")
     elif last_fb == "wrong":
         lines.append("💡 *Афсус, олдинги саволда хато қилинди. Таслим бўлманг, кейинги саволда омад! 💪*")
@@ -7326,12 +7341,23 @@ def build_dtm_results_card(exam: dict):
     lines.append("🏆 **Сизнинг натижангиз умумий онлайн рейтингга киритилди!**")
     lines.append("Энг юқори балл тўплаган 1-2-3-ўрин соҳибларига Олтин, Кумуш ва Бронза фахрий медаллар тақдим этилади.")
 
+    bot_username = "Asalarichilikuz_bot"
+    import urllib.parse
+    share_text = urllib.parse.quote(
+        f"🐝 Асаларичилик бўйича ДТМ онлайн синов тестида қатнашдим!\n"
+        f"📊 Натижам: {score}/10 та тўғри ({pct} балл)!\n"
+        f"🏆 Сиз ҳам ўз билимингизни синаб кўринг ва энг кучли асаларичилар рейтингига қўшилинг:\n"
+        f"👉 https://t.me/{bot_username}?start=dtm_{exam.get('set_id', 1)}"
+    )
+    share_link = f"https://t.me/share/url?url=https://t.me/{bot_username}?start=dtm_{exam.get('set_id', 1)}&text={share_text}"
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↗️ Тестни бошқа гуруҳларга улашиш ↗️", url=share_link)],
         [InlineKeyboardButton(text="🏆 Онлайн рейтинг (1-2-3-4-5-ўринлар)", callback_data="dtm_rank:view")],
         [InlineKeyboardButton(text="🔄 Янги тест сериясини ечиш", callback_data="dtm_agree:1")],
         [
             InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
     return chr(10).join(lines), kb
@@ -7376,7 +7402,7 @@ def build_dtm_leaderboard_view():
         [InlineKeyboardButton(text="🚀 Тестда қатнашиш", callback_data="dtm_agree:1")],
         [
             InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
     return chr(10).join(lines), kb
@@ -7606,7 +7632,7 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
         lines.append("🥇 **1-ЎРИН — ОЛТИН МЕДАЛ ВА «ОЛИЙ ДАРАЖАЛИ АСАЛАРИЧИ» НОМИ:** 🥇")
         lines.append(f"👤 **{w1['name']}** {u1_str}")
         lines.append(f"🎯 **Натижа:** **{w1['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t1_str})")
-        lines.append("🎆 Салютлар, гулдурос олқишлар ва юксак эҳтиром сиз учун! 🎇✨👏🐝🍯")
+        lines.append("🏆 Юқори илмий савия, тезкор тафаккур ва юксак касбий маҳоратингизни чин қалбдан қутлаймиз! 🎖⭐️🍯")
         lines.append("")
 
         if len(leaderboard) > 1:
@@ -7862,7 +7888,7 @@ async def on_sci_launch_menu_cb(call: types.CallbackQuery):
         ],
         [
             InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
     try:
@@ -7945,7 +7971,7 @@ async def on_sci_time_picker(call: types.CallbackQuery):
             [InlineKeyboardButton(text="✏️ Исталган вақтни қўлда ёзиш (чч:мм)", callback_data=f"sci_time_pick:{mode}:custom")],
             [
                 InlineKeyboardButton(text="🔙 Орқага (Созламаларга)", callback_data="sci_act:settings"),
-                InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+                InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
             ]
         ]
         try:
@@ -8289,7 +8315,7 @@ async def on_dtm_ans_cb(call: types.CallbackQuery):
     if is_correct:
         exam["score"] += 1
         exam["last_feedback"] = "correct"
-        salut_msg = "🎆 🎇 ✨ БАРАКАЛЛА! Тўғри жавоб! Салютлар отилмоқда! 🐝🎉"
+        salut_msg = "🌟 ТЎҒРИ ЖАВОБ! Юқори илмий маҳорат ва билимдонлик намойиши! 👏🎖"
     else:
         exam["last_feedback"] = "wrong"
         salut_msg = "💡 Нотўғри вариант. Кейинги саволда кучлироқ ҳаракат қилинг! 💪"
@@ -8378,7 +8404,7 @@ async def on_sci_participants_cb(call: types.CallbackQuery):
         [InlineKeyboardButton(text="🏆 Натижаларни эълон қилиш", callback_data="sci_act:results")],
         [
             InlineKeyboardButton(text="🔙 Орқага (Тест марказига)", callback_data="sci_act:dashboard"),
-            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
     try:
@@ -9454,6 +9480,21 @@ async def main():
     retry_count = 0
     while True:
         try:
+            # Гуруҳларда "/" босилганда буйруқлар чиқишини тўлиқ йўқотиш
+            try:
+                await bot.delete_my_commands(scope=BotCommandScopeDefault())
+                await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
+                await bot.delete_my_commands(scope=BotCommandScopeAllChatAdministrators())
+                await bot.set_my_commands([
+                    BotCommand(command="start", description="Ботни ишга тушириш"),
+                    BotCommand(command="settings", description="Созламалар"),
+                    BotCommand(command="help", description="Қўлланма"),
+                    BotCommand(command="savol", description="Мутахассисга савол")
+                ], scope=BotCommandScopeAllPrivateChats())
+                print("✅ Telegram commands scopes: Guruhlardan '/' menyusi butkul tozalandi!", flush=True)
+            except Exception as ce:
+                print(f"⚠️ Command scope update notice: {ce}", flush=True)
+
             print("🚀 Bot Telegram serveriga ulandi va xabarlarni qabul qilmoqda...", flush=True)
             # PythonAnywhere bepul proksisida 503 xatosi bo'lmasligi uchun polling_timeout=3 soniya o'rnatiladi
             await dp.start_polling(bot, polling_timeout=3, handle_signals=False)
