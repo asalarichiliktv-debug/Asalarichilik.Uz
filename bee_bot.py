@@ -1014,10 +1014,24 @@ INITIAL_QUIZZES = [
     }
 ]
 
+try:
+    if os.path.exists(QUIZ_DB_FILE):
+        with open(QUIZ_DB_FILE, "r", encoding="utf-8") as _qf:
+            _qdata = json.load(_qf)
+            if _qdata and len(_qdata) >= 20:
+                INITIAL_QUIZZES = _qdata
+except Exception:
+    pass
+
 def get_quizzes_db() -> list:
     db = load_json_file(QUIZ_DB_FILE, [])
-    if not db:
-        db = copy.deepcopy(INITIAL_QUIZZES)
+    # Агар 3 та вариантли эски база бўлса ёки бўш бўлса, 5 та вариантли янги илмий базани автоматик юклаш:
+    if not db or any(len(q.get("options", [])) < 5 for q in db):
+        try:
+            with open("quiz_database.json", "r", encoding="utf-8") as f:
+                db = json.load(f)
+        except Exception:
+            db = copy.deepcopy(INITIAL_QUIZZES)
         save_json_file(QUIZ_DB_FILE, db)
     return db
 
@@ -2572,15 +2586,32 @@ async def start_cmd(message: types.Message, state: FSMContext = None):
     )
 
     await message.answer(welcome_text, reply_markup=get_main_reply_keyboard())
+    settings = get_settings()
+    sci_s = get_sci_settings()
+    api_t = normalize_hhmm(settings.get("apitherapy_auto_time", "08:00"))
+    api_st = "🟢 Фаол" if settings.get("apitherapy_auto_enabled", True) else "🔴 Ўчирилган"
+    news_t = normalize_hhmm(settings.get("news_auto_time", "07:00"))
+    news_st = "🟢 Фаол" if settings.get("news_auto_enabled", True) else "🔴 Ўчирилган"
+    quiz_t = normalize_hhmm(settings.get("quiz_auto_time", "16:00"))
+    quiz_st = "🟢 Фаол" if settings.get("quiz_auto_enabled", True) else "🔴 Ўчирилган"
+    vid_t = normalize_hhmm(settings.get("video_auto_time", "18:00"))
+    vid_st = "🟢 Фаол" if settings.get("video_auto_enabled", True) else "🔴 Ўчирилган"
+    sci_st_t = normalize_hhmm(sci_s.get("start_time", "18:00"))
+    sci_et_t = normalize_hhmm(sci_s.get("end_time", "19:00"))
+    sci_st = "🟢 Фаол" if sci_s.get("auto_enabled", True) else "🔴 Ўчирилган"
+    night_st_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+    night_et_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+    night_st = "🟢 Фаол" if settings.get("night_lock_enabled", True) else "🔴 Ўчирилган"
+
     sched_overview = (
         "🎛 **АСОСИЙ БОШҚАРУВ ПАНЕЛИ**\n\n"
         "📅 **РЕЖАЛАШТИРИЛГАН АВТО-ПОСТЛАР ҲОЛАТИ:**\n"
-        "• 🌿 **Апитерапия:** 08:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
-        "• 📰 **Янгиликлар:** 14:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
-        "• 🐝 **Викторина:** 16:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
-        "• 🎬 **Видеолар:** 18:00 (Канал & Гуруҳ) — 🟢 Фаол\n"
-        "• 🎓 **Илмий тест:** 18:00-19:00 (17:00 эълон) — 🟢 Фаол\n"
-        "• 🌙 **Гуруҳ тунги чеклови:** 23:00 - 06:30 (22:57 огоҳлантириш) — 🟢 Фаол\n\n"
+        f"• 🌿 **Апитерапия:** {api_t} — {api_st}\n"
+        f"• 📰 **Янгиликлар:** {news_t} — {news_st}\n"
+        f"• 🐝 **Викторина:** {quiz_t} — {quiz_st}\n"
+        f"• 🎬 **Видеолар:** {vid_t} — {vid_st}\n"
+        f"• 🎓 **Илмий тест:** {sci_st_t}-{sci_et_t} — {sci_st}\n"
+        f"• 🌙 **Гуруҳ тунги чеклови:** {night_st_t} - {night_et_t} — {night_st}\n\n"
         "Керакли бўлимни танланг:"
     )
     await message.answer(sched_overview, reply_markup=build_main_menu_inline(), parse_mode="Markdown")
@@ -2614,13 +2645,15 @@ async def send_quiz_poll_to_chat(chat_id: Any, quiz: dict, poll_mode: Optional[s
         correct_id = 0
 
     # Викторина созламаларига қараб жавобларни ҳар хил (Аралаш) ёки бир хил тарқатиш:
+    # Фақат тўғри жавоб биринчиси бўлиб қолмаслиги учун target_slot >= 1:
     q_shuffle_en = settings.get("quiz_shuffle_answers", True)
     if len(options_raw) >= 2:
-        shuffled_opts, new_corr = prepare_balanced_shuffled_options(
-            quiz, 
-            target_slot=random.randint(0, min(4, len(options_raw) - 1)) if q_shuffle_en else 0,
-            shuffle_enabled=q_shuffle_en
-        )
+        if q_shuffle_en:
+            max_slot = min(4, len(options_raw) - 1)
+            target_slot = random.randint(1, max_slot) if max_slot >= 1 else 0
+            shuffled_opts, new_corr = prepare_balanced_shuffled_options(quiz, target_slot=target_slot, shuffle_enabled=True)
+        else:
+            shuffled_opts, new_corr = prepare_balanced_shuffled_options(quiz, target_slot=0, shuffle_enabled=False)
         options = [apply_script(opt, script)[:100] for opt in shuffled_opts[:5]]
         correct_id = new_corr
 
@@ -2775,11 +2808,23 @@ def format_quiz_preview_text(quiz: dict, idx: int, total: int, script: str = "cy
     if not explanation:
         explanation = "Асаларичилик бўйича тўғри амалий тажриба ва илмий кўрсатма."
 
+    q_shuffle_en = settings.get("quiz_shuffle_answers", True)
+    shuf_lbl = "Ҳар хил (Аралаш) 🟢" if q_shuffle_en else "Бир хил 🔴"
+
+    # Тўғри жавоб ҳеч қачон биринчиси бўлиб қолмаслиги учун:
+    options_raw = quiz.get("options", [])
+    if q_shuffle_en and len(options_raw) >= 2:
+        slot = ((idx + 1) % (len(options_raw) - 1)) + 1
+        shuffled_opts, calc_corr = prepare_balanced_shuffled_options(quiz, target_slot=slot, shuffle_enabled=True)
+    else:
+        shuffled_opts, calc_corr = prepare_balanced_shuffled_options(quiz, target_slot=0, shuffle_enabled=False)
+
     lines = [
         "🐝 АСАЛАРИЧИЛИК ВИКТОРИНА ВА СЎРОВНОМАЛАР МАРКАЗИ 📊",
         "",
         f"• 🎯 Савол тоифаси: 🟢 {toifa}",
         f"• ⏰ Кунлик юбориш вақти: {sched_time}",
+        f"• 🔀 Жавоблар тартиби: {shuf_lbl}",
         "• ⏱ Авто-ўчириш муддати: ∞ Ўчирилмайди  (доимий)",
         "• 📌 Гуруҳ ва Каналларга қадаш (Pin): 🟢 Ҳа  (Қадалади 📌)",
         f"• 📢 Юбориладиган жойлар: 📢 {dest_lbl}",
@@ -2790,11 +2835,12 @@ def format_quiz_preview_text(quiz: dict, idx: int, total: int, script: str = "cy
         "",
         "🔘 Вариантлар (Телеграм сўровнома кўринишида):"
     ]
-    for opt_idx, opt in enumerate(options):
-        if opt_idx == correct_id:
-            lines.append(f"✅ {opt}")
+    for opt_idx, opt in enumerate(shuffled_opts):
+        opt_str = apply_script(opt, script)
+        if opt_idx == calc_corr:
+            lines.append(f"✅ {opt_str} (Тўғри жавоб)")
         else:
-            lines.append(f"⚪️ {opt}")
+            lines.append(f"⚪️ {opt_str}")
     lines.append("")
     lines.append(f"💡 Изоҳ: {explanation}")
     lines.append("————————————————————————")
@@ -2818,7 +2864,7 @@ def build_quiz_preview_keyboard(idx: int, total: int, script: str = "cyrillic") 
             InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"quiz_page:{idx + 1}")
         ],
         [
-            InlineKeyboardButton(text="⚙️ Викторина созламалари", callback_data="quiz_settings")
+            InlineKeyboardButton(text=f"🔀 Жавоблар: {'Ҳар хил (Аралаш) 🟢' if get_settings().get('quiz_shuffle_answers', True) else 'Бир хил (Фақат А) 🔴'}", callback_data=f"quiz_toggle_shuf:{idx}")
         ],
         [
             InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu")
@@ -3167,6 +3213,32 @@ async def on_quiz_settings(call: types.CallbackQuery):
 # ==============================================================================
 # 16.1. VIKTORINA PREVIEW CALLBACK HANDLERS (1-RASMDAGI BARCHA TUGMALAR)
 # ==============================================================================
+@dp.callback_query(F.data.startswith("quiz_toggle_shuf:"))
+async def on_quiz_toggle_shuf_preview(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    try:
+        idx = int(call.data.split(":")[1])
+    except Exception:
+        idx = 0
+    settings = get_settings()
+    cur = settings.get("quiz_shuffle_answers", True)
+    new_val = not cur
+    update_setting("quiz_shuffle_answers", new_val)
+    status_txt = "Жавоблар: Ҳар хил (Аралаш) 🟢" if new_val else "Жавоблар: Бир хил (Фақат А) 🔴"
+    await call.answer(status_txt)
+
+    quizzes = get_quizzes_db()
+    idx = max(0, min(idx, len(quizzes) - 1))
+    script = settings.get("script_mode", "cyrillic")
+    text = format_quiz_preview_text(quizzes[idx], idx, len(quizzes), script)
+    markup = build_quiz_preview_keyboard(idx, len(quizzes), script)
+    try:
+        await call.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except Exception:
+        pass
+
 @dp.callback_query(F.data.startswith("quiz_page:"))
 async def on_quiz_page(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
@@ -6919,6 +6991,83 @@ def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, Inli
     ]
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
+def build_scheduled_dashboard() -> tuple[str, InlineKeyboardMarkup]:
+    settings = get_settings()
+    sci_s = get_sci_settings()
+
+    api_en = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
+    api_t = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "08:00")))
+    api_status = "🟢 Ёқилган" if api_en else "🔴 Ўчирилган"
+
+    news_en = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
+    news_t = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "07:00")))
+    news_status = "🟢 Ёқилган" if news_en else "🔴 Ўчирилган"
+
+    quiz_en = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
+    quiz_t = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "16:00")))
+    quiz_status = "🟢 Ёқилган" if quiz_en else "🔴 Ўчирилган"
+
+    vid_en = settings.get("video_auto_enabled", settings.get("video_schedule_enabled", True))
+    vid_t = normalize_hhmm(settings.get("video_auto_time", settings.get("video_schedule_time", "18:00")))
+    vid_status = "🟢 Ёқилган" if vid_en else "🔴 Ўчирилган"
+
+    sci_en = sci_s.get("auto_enabled", True)
+    sci_st = normalize_hhmm(sci_s.get("start_time", "18:00"))
+    sci_et = normalize_hhmm(sci_s.get("end_time", "19:00"))
+    sci_status = "🟢 Ёқилган" if sci_en else "🔴 Ўчирилган"
+
+    night_en = settings.get("night_lock_enabled", True)
+    night_st = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+    night_et = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+    night_status = "🟢 Ёқилган" if night_en else "🔴 Ўчирилган"
+
+    text = (
+        "📅 **РЕЖАЛАШТИРИЛГАН АВТО-ПОСТЛАР ВА ЖАДВАЛЛАР БОШҚАРУВИ**\n\n"
+        "Ботдаги барча авто-жўнатиш ва чекловлар ҳозирги созламаларга мос равишда тўлиқ синхрон ишлайди:\n\n"
+        f"• 🌿 **{api_t}** — Апитерапия янгиликлари: {api_status}\n"
+        f"• 📰 **{news_t}** — Асаларичилик дунё янгиликлари: {news_status}\n"
+        f"• 🐝 **{quiz_t}** — Викторина ва сўровномалар: {quiz_status}\n"
+        f"• 🎬 **{vid_t}** — Асаларичилик жаҳон видеолари: {vid_status}\n"
+        f"• 🎓 **{sci_st} - {sci_et}** — Илмий тадқиқот тестлари: {sci_status}\n"
+        f"• 🌙 **{night_st} - {night_et}** — Гуруҳда тунги чеклов: {night_status}\n\n"
+        "Ҳар бир хабар юборилгандан сўнг сизда автоматик «Муваффақиятли юборилди» хабарномаси чиқади.\n"
+        "Қуйидаги тугмалар орқали ҳар бир жадвал ҳолати ва вақтини бевосита созлашингиз мумкин:"
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=f"🌿 Апитерапия ({api_t}): {'🟢' if api_en else '🔴'}", callback_data="set_toggle_sched:apitherapy"),
+            InlineKeyboardButton(text="✏️ Вақти", callback_data="set_edit_time:apitherapy")
+        ],
+        [
+            InlineKeyboardButton(text=f"📰 Янгилик ({news_t}): {'🟢' if news_en else '🔴'}", callback_data="set_toggle_sched:news"),
+            InlineKeyboardButton(text="✏️ Вақти", callback_data="set_edit_time:news")
+        ],
+        [
+            InlineKeyboardButton(text=f"🐝 Викторина ({quiz_t}): {'🟢' if quiz_en else '🔴'}", callback_data="set_toggle_sched:quiz"),
+            InlineKeyboardButton(text="✏️ Вақти", callback_data="set_edit_time:quiz")
+        ],
+        [
+            InlineKeyboardButton(text=f"🎬 Видео ({vid_t}): {'🟢' if vid_en else '🔴'}", callback_data="set_toggle_sched:video"),
+            InlineKeyboardButton(text="✏️ Вақти", callback_data="set_edit_time:video")
+        ],
+        [
+            InlineKeyboardButton(text=f"🎓 Илмий тест: {'🟢' if sci_en else '🔴'} ({sci_st}-{sci_et})", callback_data="sci_set:auto_toggle:now"),
+            InlineKeyboardButton(text="⚙️ Созлаш", callback_data="sci_act:settings")
+        ],
+        [
+            InlineKeyboardButton(text=f"🌙 Тунги чеклов: {'🟢' if night_en else '🔴'} ({night_st}-{night_et})", callback_data="night_lock_set:toggle_enabled"),
+            InlineKeyboardButton(text="⚙️ Созлаш", callback_data="night_lock_menu")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Жадвални янгилаш", callback_data="sched_dashboard_menu")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
+        ]
+    ])
+    return text, kb
+
 def build_group_limits_dashboard(from_screen: str = "main") -> tuple[str, InlineKeyboardMarkup]:
     cfg = get_media_limits_settings()
     enabled = cfg.get("enabled", True)
@@ -9933,20 +10082,7 @@ async def on_sched_dashboard_menu(call: types.CallbackQuery):
     await call.answer()
     if call.from_user.id != OWNER_ID:
         return
-    text = (
-        "📅 **РЕЖАЛАШТИРИЛГАН АВТО-ПОСТЛАР ВА ЖАДВАЛЛАР БОШҚАРУВИ**\n\n"
-        "Ҳар куни қуйидаги тартибда канал ва гуруҳга маълумотлар автоматик жўнатилади ва бот эгасига ҳисобот берилади:\n\n"
-        "• 🌿 **08:00** — Апитерапия янгиликлари (Рецепт ва табобат)\n"
-        "• 📰 **14:00** — Асаларичилик дунё янгиликлари\n"
-        "• 🐝 **16:00** — Викторина ва сўровномалар (Telegram Poll)\n"
-        "• 🎬 **18:00** — Асаларичилик жаҳон амалий видеолари\n"
-        "• 🎓 **18:00 - 19:00** — Илмий тадқиқот тестлари (17:00 да эълон)\n"
-        "• 🌙 **23:00 - 06:30** — Гуруҳда тунги чеклов (22:57 да огоҳлантириш)\n\n"
-        "Ҳар бир хабар юборилгандан сўнг сизда автоматик «Муваффақиятли юборилди» хабарномаси чиқади."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
-    ])
+    text, kb = build_scheduled_dashboard()
     await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
 
 # ==============================================================================
@@ -10123,20 +10259,7 @@ async def private_chat_handler(message: types.Message):
         text, kb = build_night_lock_dashboard()
         return await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
     if any(k in clean_text for k in ["режалар", "режалаштирилган", "жадвал", "jadval"]):
-        text = (
-            "📅 **РЕЖАЛАШТИРИЛГАН АВТО-ПОСТЛАР ВА ЖАДВАЛЛАР БОШҚАРУВИ**\n\n"
-            "Ҳар куни қуйидаги тартибда канал ва гуруҳга маълумотлар автоматик жўнатилади ва бот эгасига ҳисобот берилади:\n\n"
-            "• 🌿 **08:00** — Апитерапия янгиликлари (Рецепт ва табобат)\n"
-            "• 📰 **14:00** — Асаларичилик дунё янгиликлари\n"
-            "• 🐝 **16:00** — Викторина ва сўровномалар (Telegram Poll)\n"
-            "• 🎬 **18:00** — Асаларичилик жаҳон амалий видеолари\n"
-            "• 🎓 **18:00 - 19:00** — Илмий тадқиқот тестлари (17:00 да эълон)\n"
-            "• 🌙 **23:00 - 06:30** — Гуруҳда тунги чеклов (22:57 да огоҳлантириш)\n\n"
-            "Ҳар бир хабар юборилгандан сўнг сизда автоматик «Муваффақиятли юборилди» хабарномаси чиқади."
-        )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")]
-        ])
+        text, kb = build_scheduled_dashboard()
         return await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
     if any(k in clean_text for k in ["старт", "start", "/start"]):
         return await start_cmd(message)
