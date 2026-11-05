@@ -268,7 +268,14 @@ def get_settings() -> dict:
         "video_schedule_enabled": True,
         "video_auto_time": "18:00",
         "video_schedule_time": "18:00",
-        "video_auto_target": "both"
+        "video_auto_target": "both",
+        "night_lock_enabled": True,
+        "night_lock_start": "23:00",
+        "night_lock_end": "06:30",
+        "night_msg_pre_warn": DEFAULT_NIGHT_MSG_PRE_WARN,
+        "night_msg_lock_start": DEFAULT_NIGHT_MSG_LOCK_START,
+        "night_msg_lock_end": DEFAULT_NIGHT_MSG_LOCK_END,
+        "night_msg_user_warn": DEFAULT_NIGHT_MSG_USER_WARN
     }
     data = load_json_file(SETTINGS_FILE, defaults)
     for k, v in defaults.items():
@@ -2018,6 +2025,33 @@ class SettingsStates(StatesGroup):
 
 NIGHT_LOCK_STATE_FILE = "night_lock_state.json"
 
+DEFAULT_NIGHT_MSG_PRE_WARN = (
+    "📢 @Asalarichilik_Uzbekistan Группасида 3 минутдан кейин ёзишга чеклов ўрнатилади ва барча ёзишмаларингиз ўчирилиб ташланади. Эртагача яхши дам олинг.\n\nҲурмат билан админ 👨‍💼"
+)
+DEFAULT_NIGHT_MSG_LOCK_START = (
+    "🌙 @Asalarichilik_Uzbekistan Группасида тунги чеклов бошланди!\n\nСоат {end} гача гуруҳда ёзиш тўхтатилади. Барча янги хабарлар автоматик ўчирилади."
+)
+DEFAULT_NIGHT_MSG_LOCK_END = (
+    "☀️ Ассалому алайкум! @Asalarichilik_Uzbekistan Группасида тунги чеклов якунланди.\n\nСоат {end} дан бошлаб бемалол фикр ва маълумот алмашишингиз мумкин. Кунингиз баракали ўтсин! 🐝🍯"
+)
+DEFAULT_NIGHT_MSG_USER_WARN = (
+    "🌙 **Ҳурматли {user_mention}!**\n\n"
+    "Ҳозирда ушбу гуруҳ автоматик қулфланган (соат **{start}** дан **{end}** гача).\n\n"
+    "Сиз соат **{end}** дан кейин гуруҳга ёзишингиз ёки бирор маълумот жўнатишингиз мумкин. "
+    "Ҳозирда ушбу гуруҳ автоматик қулфланганлиги сабабли юборилган хабарингиз ўчирилди.\n\n"
+    "⏳ **Пожалуйста, подождите [ {remaining_time} ], пока блокировка группы не будет снята.**\n\n"
+    "⏳ *Ушбу огоҳлантириш 30 сониядан сўнг автоматик ўчириб ташланади.*"
+)
+
+class NightLockEditStates(StatesGroup):
+    waiting_for_start_time = State()
+    waiting_for_end_time = State()
+    waiting_for_pre_warn_text = State()
+    waiting_for_lock_start_text = State()
+    waiting_for_lock_end_text = State()
+    waiting_for_user_warn_text = State()
+
+
 def load_night_lock_state() -> dict:
     return load_json_file(NIGHT_LOCK_STATE_FILE, {
         "pre_warning_msg_id": None,
@@ -2339,8 +2373,9 @@ async def on_reaction_click(call: types.CallbackQuery):
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def group_night_lock_and_auto_forward_handler(message: types.Message):
     # 1. Kanal postlari avtomatik forward bo'lganda (is_automatic_forward)
-    # Telegram inline tugmalarni tushirib qoldirmasligi uchun darhol reaksiyalar va havolalar bilan ta'minlash:
-    if getattr(message, "is_automatic_forward", False) or (message.sender_chat and message.sender_chat.id == -1001261575171):
+    if getattr(message, "is_automatic_forward", False) or (message.sender_chat and message.sender_chat.id in (-1001261575171, -1002360538600)):
+        if message.poll:
+            return  # Сўровномаларга ортиқча реакция тугмалари бириктирилмайди
         settings = get_settings()
         if settings.get("auto_reactions", True):
             try:
@@ -2356,7 +2391,6 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
                 try:
                     await bot.edit_message_reply_markup(chat_id=message.chat.id, message_id=message.message_id, reply_markup=markup)
                 except Exception:
-                    # Agar tahrirlash cheklangan bo'lsa, xabarga javob (reply) qilib tugmalar taxtasini qo'yish
                     await message.reply(
                         "📊 **Реакциялар ва расмий канал ҳаволалари:**",
                         reply_markup=markup
@@ -2366,22 +2400,25 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
         return
 
     # 2. Kanal yoki Telegram xizmat xabarlariga tegilmaydi
-    if message.sender_chat or (message.from_user and (message.from_user.id in (777000, 1087968824, OWNER_ID) or message.from_user.is_bot)):
+    if message.from_user and (message.from_user.id in (777000, 1087968824, OWNER_ID) or message.from_user.is_bot):
         return
 
-    # Faqat @asalarichilik_uzbekistan guruhi uchun
-    if message.chat.id != -1001275726275 and str(message.chat.username or "").lower() != "asalarichilik_uzbekistan":
-        return
+    # 3. Rasmiy guruh tekshiruvi
+    is_official_group = (
+        message.chat.id in (-1001275726275, -1002377038139) or 
+        str(message.chat.username or "").lower() == "asalarichilik_uzbekistan"
+    )
 
     settings = get_settings()
-    if settings.get("night_lock_enabled", True):
-        now = get_uzb_now()
-        cur_hhmm = now.strftime("%H:%M")
-        start_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
-        end_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+    now = get_uzb_now()
+    cur_hhmm = now.strftime("%H:%M")
+    start_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+    end_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
 
-        if is_in_night_lock_interval(cur_hhmm, start_t, end_t):
-            # Foydalanuvchi xabarini darhol o'chirish
+    # A) ТУНГИ ЧЕКЛОВ — расмий гуруҳда белгиланган соатларда ишлайди:
+    if settings.get("night_lock_enabled", True) and is_official_group and is_in_night_lock_interval(cur_hhmm, start_t, end_t):
+        # Adminlarga tegilmaydi
+        if not (await is_group_admin_or_exempt(message.chat.id, message.from_user, message)):
             try:
                 await message.delete()
             except Exception:
@@ -2391,13 +2428,13 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
             user_name = message.from_user.first_name if message.from_user else "Фойдаланувчи"
             user_mention = f"[{user_name}](tg://user?id={message.from_user.id})" if message.from_user else user_name
 
+            user_tpl = settings.get("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
             warn_text = (
-                f"🌙 **Ҳурматли {user_mention}!**\n\n"
-                f"Ҳозирда ушбу гуруҳ автоматик қулфланган (соат **{start_t}** дан **{end_t}** гача).\n\n"
-                f"Сиз соат **{end_t}** дан кейин гуруҳга ёзишингиз ёки бирор маълумот жўнатишингиз мумкин. "
-                f"Ҳозирда ушбу гуруҳ автоматик қулфланганлиги сабабли юборилган хабарингиз ўчирилди.\n\n"
-                f"⏳ **Пожалуйста, подождите [ {remaining_str} ], пока блокировка группы не будет снята.**\n\n"
-                f"⏳ *Ушбу огоҳлантириш 30 сониядан сўнг автоматик ўчириб ташланади.*"
+                user_tpl
+                .replace("{user_mention}", user_mention)
+                .replace("{start}", start_t)
+                .replace("{end}", end_t)
+                .replace("{remaining_time}", remaining_str)
             )
             try:
                 warn_msg = await bot.send_message(
@@ -2406,18 +2443,29 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
                     parse_mode="Markdown"
                 )
                 asyncio.create_task(delete_after_delay(bot, message.chat.id, warn_msg.message_id, 30))
-            except Exception:
-                pass
+            except Exception as e:
+                logging.error(f"Error sending night lock user warning: {e}")
             return
 
-    # 3. Кундузги вақтда агар расм, видео ёки медиа юборилса, кунлик 3 талик медиа чеклови текширилади:
-    if message.photo or message.video or message.animation or message.video_note or message.document:
+    # B) КУНДУЗГИ ВАҚТДА — МЕДИА ЛИМИТИ НАЗОРАТИ:
+    is_media = bool(
+        message.photo or 
+        message.video or 
+        message.animation or 
+        message.video_note or 
+        (message.document and (message.document.mime_type or "").startswith(("image/", "video/")))
+    )
+    if is_media:
         await group_media_limiter_handler(message)
 
 # 13. KANAL VA GURUHLARDA POSTLARGA AVTOMATIK TUGMALAR QO'YISH
 # ==============================================================================
 @dp.channel_post()
 async def on_channel_post(message: types.Message):
+    # Тест ва викторина сўровномалари остига ортиқча реакция (овоз бериш) ва тугмалар қўйилмайди:
+    if message.poll:
+        return
+
     settings = get_settings()
     if not settings.get("auto_reactions", True):
         return
@@ -2565,18 +2613,11 @@ async def send_quiz_poll_to_chat(chat_id: Any, quiz: dict, poll_mode: Optional[s
     if correct_id < 0 or correct_id >= len(options):
         correct_id = 0
 
-    # Тўғри жавоб фақат 1-қаторда бўлиб қолмасин — 1-қатор, 2-қатор ва 3-қаторларга тасодифий аралаштириш (shuffle):
-    if len(options) >= 2:
-        indexed_options = list(enumerate(options))
-        random.shuffle(indexed_options)
-        new_options = []
-        new_correct_id = 0
-        for new_idx, (orig_idx, opt_text) in enumerate(indexed_options):
-            new_options.append(opt_text)
-            if orig_idx == correct_id:
-                new_correct_id = new_idx
-        options = new_options
-        correct_id = new_correct_id
+    # Тўғри жавоб ҳеч қачон битта А бўлиб қолмаслиги учун A, B, C, D, E вариантлари бўйича мувозанатли тарқатиш:
+    if len(options_raw) >= 2:
+        shuffled_opts, new_corr = prepare_balanced_shuffled_options(quiz, target_slot=random.randint(0, min(4, len(options_raw) - 1)))
+        options = [apply_script(opt, script)[:100] for opt in shuffled_opts[:5]]
+        correct_id = new_corr
 
     is_chan = str(chat_id) == get_official_channel() or (str(chat_id).startswith("@") and "guruh" not in str(chat_id).lower())
     s_title = f"{'🐝 Кун викторинаси' if mode == 'quiz' else '📊 Сўровнома'}: {q_text}"
@@ -5273,9 +5314,11 @@ async def is_group_admin_or_exempt(chat_id: int, user: Optional[types.User], mes
             return True
     except Exception:
         pass
-    if getattr(message, "is_automatic_forward", False) or bool(getattr(message, "forward_from_chat", None)):
+    # Faqat rasmiy kanalning avtomatik forward postlari daxlsiz:
+    if getattr(message, "is_automatic_forward", False) or (message.sender_chat and message.sender_chat.id in (-1001261575171, -1002360538600)):
         return True
-    if message.sender_chat is not None:
+    # Rasmiy guruh kanal administratorlari daxlsiz:
+    if message.sender_chat and message.sender_chat.id == chat_id:
         return True
     try:
         member = await bot.get_chat_member(chat_id, user.id)
@@ -5293,10 +5336,6 @@ async def auto_delete_message_after_delay(chat_id: int, message_id: int, delay_s
     except Exception as e:
         logging.warning(f"[MEDIA LIMIT] Ogohlantirish xabarini o'chirishda xatolik {message_id}: {e}")
 
-@dp.message(
-    F.chat.type.in_({"group", "supergroup"}) &
-    (F.photo | F.video | F.animation | F.video_note | F.document)
-)
 async def group_media_limiter_handler(message: types.Message):
     chat_id = message.chat.id
     user = message.from_user
@@ -5602,9 +5641,9 @@ async def daily_scheduler_loop():
                 log[key_n] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {news_target}")
-                asyncio.create_task(notify_owner_success(bot, "Асаларичилик янгиликлари", f"Янгилик: {news.get('title', '')[:60]}"))
                 targets = get_destinations_for_target(news_target)
                 news = get_next_sequential_news()
+                asyncio.create_task(notify_owner_success(bot, "Асаларичилик янгиликлари", f"Янгилик: {news.get('title', '')[:60]}"))
                 script = settings.get("script_mode", "cyrillic")
                 text = format_news_post_text(news, script, is_admin=False)
                 for cid in targets:
@@ -5637,10 +5676,10 @@ async def daily_scheduler_loop():
                 log[key_q] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {quiz_target}")
-                asyncio.create_task(notify_owner_success(bot, "Викторина ва сўровнома", f"Савол: {quiz.get('question', '')[:60]}"))
                 targets = get_destinations_for_target(quiz_target)
                 poll_type = settings.get("poll_type", "quiz")
                 quiz = get_next_sequential_quiz(poll_type=poll_type)
+                asyncio.create_task(notify_owner_success(bot, "Викторина ва сўровнома", f"Савол: {quiz.get('question', '')[:60]}"))
                 for cid in targets:
                     try:
                         await send_quiz_poll_to_chat(cid, quiz, poll_mode=poll_type)
@@ -5660,9 +5699,10 @@ async def daily_scheduler_loop():
                 log[key_a] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {api_target}")
-                asyncio.create_task(notify_owner_success(bot, "Апитерапия янгиликлари", f"Мавзу: {item.get('title', '')[:60]}"))
                 targets = get_destinations_for_target(api_target)
                 item = get_next_sequential_apitherapy()
+                if item:
+                    asyncio.create_task(notify_owner_success(bot, "Апитерапия янгиликлари", f"Мавзу: {item.get('title', '')[:60]}"))
                 if item:
                     script = settings.get("script_mode", "cyrillic")
                     text = format_apitherapy_post_text(item, 0, 1000, script=script)
@@ -5693,9 +5733,10 @@ async def daily_scheduler_loop():
                 log[key_v] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
                 logging.info(f"⏰ Avto-video vaqti keldi ({cur_hhmm})! Target: {vid_target}")
-                asyncio.create_task(notify_owner_success(bot, "Асаларичилик жаҳон видеолари", f"Видео: {v.get('title', '')[:60]}"))
                 targets = get_destinations_for_target(vid_target)
                 v = get_next_sequential_video()
+                if v:
+                    asyncio.create_task(notify_owner_success(bot, "Асаларичилик жаҳон видеолари", f"Видео: {v.get('title', '')[:60]}"))
                 if v:
                     script = settings.get("script_mode", "cyrillic")
                     text = format_video_card_text(v, script)
@@ -5759,6 +5800,77 @@ async def daily_scheduler_loop():
                     await broadcast_scientific_results(bot)
                     log[key_sci_award] = True
                     save_json_file(SCHEDULER_LOG_FILE, log)
+
+            # 6. Avtomatik Guruh Tunggi Cheklovi (Night Lock - 3 minut oldin ogohlantirish, qulflash, ochish)
+            if settings.get("night_lock_enabled", True):
+                try:
+                    nl_start = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+                    nl_end = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+                    
+                    # A) 3 minut oldingi ogohlantirish (masalan 22:57 da)
+                    s_m = hhmm_to_minutes(nl_start)
+                    pre_m = (s_m - 3) % 1440
+                    pre_hhmm = f"{pre_m // 60:02d}:{pre_m % 60:02d}"
+                    key_nl_pre = f"night_pre_{today_str}_{pre_hhmm}"
+                    
+                    if (cur_hhmm == pre_hhmm or (cur_hhmm > pre_hhmm and is_within_minutes(cur_hhmm, pre_hhmm, 5))) and not log.get(key_nl_pre) and (key_nl_pre not in ALREADY_SENT_SCHEDULE_KEYS):
+                        ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_pre)
+                        log[key_nl_pre] = True
+                        save_json_file(SCHEDULER_LOG_FILE, log)
+                        pre_text = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+                        sent_msg = await bot.send_message(chat_id=OFFICIAL_GROUP_ID, text=pre_text)
+                        st = load_night_lock_state()
+                        st["pre_warning_msg_id"] = sent_msg.message_id
+                        st["last_pre_warn_date"] = today_str
+                        save_night_lock_state(st)
+                        asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (3 дақиқа олдин)", "Гуруҳга 3 дақиқа қолганда огоҳлантириш юборилди."))
+                        logging.info("🌙 [NIGHT LOCK] 3 minut oldingi ogohlantirish guruhi yuborildi")
+
+                    # B) Cheklov boshlanishi (masalan 23:00 da)
+                    key_nl_start = f"night_start_{today_str}_{nl_start}"
+                    if (cur_hhmm == nl_start or (cur_hhmm > nl_start and is_within_minutes(cur_hhmm, nl_start, 5))) and not log.get(key_nl_start) and (key_nl_start not in ALREADY_SENT_SCHEDULE_KEYS):
+                        ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_start)
+                        log[key_nl_start] = True
+                        save_json_file(SCHEDULER_LOG_FILE, log)
+                        st = load_night_lock_state()
+                        if st.get("pre_warning_msg_id"):
+                            try:
+                                await bot.delete_message(chat_id=OFFICIAL_GROUP_ID, message_id=st["pre_warning_msg_id"])
+                            except Exception:
+                                pass
+                            st["pre_warning_msg_id"] = None
+                        start_tpl = settings.get("night_msg_lock_start", DEFAULT_NIGHT_MSG_LOCK_START)
+                        start_text = start_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
+                        sent_lock = await bot.send_message(chat_id=OFFICIAL_GROUP_ID, text=start_text)
+                        st["active_lock_msg_id"] = sent_lock.message_id
+                        st["last_lock_start_date"] = today_str
+                        save_night_lock_state(st)
+                        asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (Бошланди)", f"Гуруҳда тунги чеклов бошланди ({nl_start} дан {nl_end} гача)."))
+                        logging.info("🌙 [NIGHT LOCK] Cheklov boshlanganligi guruhi yuborildi")
+
+                    # C) Cheklov tugashi (masalan 06:30 da)
+                    key_nl_end = f"night_end_{today_str}_{nl_end}"
+                    if (cur_hhmm == nl_end or (cur_hhmm > nl_end and is_within_minutes(cur_hhmm, nl_end, 5))) and not log.get(key_nl_end) and (key_nl_end not in ALREADY_SENT_SCHEDULE_KEYS):
+                        ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_end)
+                        log[key_nl_end] = True
+                        save_json_file(SCHEDULER_LOG_FILE, log)
+                        st = load_night_lock_state()
+                        if st.get("active_lock_msg_id"):
+                            try:
+                                await bot.delete_message(chat_id=OFFICIAL_GROUP_ID, message_id=st["active_lock_msg_id"])
+                            except Exception:
+                                pass
+                            st["active_lock_msg_id"] = None
+                            save_night_lock_state(st)
+                        end_tpl = settings.get("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
+                        end_text = end_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
+                        sent_end = await bot.send_message(chat_id=OFFICIAL_GROUP_ID, text=end_text)
+                        asyncio.create_task(delete_after_delay(bot, OFFICIAL_GROUP_ID, sent_end.message_id, 3600))
+                        asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (Якунланди)", f"Гуруҳда тунги чеклов якунланди ва очилди."))
+                        logging.info("☀️ [NIGHT LOCK] Cheklov yakunlanganligi guruhi yuborildi")
+
+                except Exception as nle:
+                    logging.error(f"Night lock scheduler loop error: {nle}")
 
             # 4. Kunlik yangi ilmiy yangilik zaxirasini tekshirish (asinxron fon rejimida)
             key_curate = f"auto_news_curate_{today_str}"
@@ -7578,6 +7690,42 @@ def build_dtm_leaderboard_view():
     ])
     return chr(10).join(lines), kb
 
+
+def prepare_balanced_shuffled_options(q_item: dict, target_slot: Optional[int] = None) -> tuple[list[str], int]:
+    """
+    Савол вариантларини A, B, C, D, E бўйича илмий, мураккаб ва чалғитувчи қилиб тайёрлайди.
+    Тўғри жавоб ҳеч қачон фақат битта 'A' бўлиб қолмайди, балки A, B, C, D, E ҳарфлари бўйича
+    аниқ мувозанатли (ҳар бир ҳарф тенг тақсимланган) тарзда жойлаштирилади.
+    """
+    raw_opts = q_item.get("options", [])
+    if not raw_opts:
+        return ["A) Ҳа", "B) Йўқ"], 0
+
+    clean_opts = []
+    for opt in raw_opts:
+        c = re.sub(r"^[A-Ea-e0-9][\)\.\:\s\-]+", "", str(opt)).strip()
+        clean_opts.append(c)
+
+    orig_corr = int(q_item.get("correct_option_id", 0)) % len(clean_opts)
+    correct_text = clean_opts[orig_corr]
+    distractors = [opt for i, opt in enumerate(clean_opts) if i != orig_corr]
+    random.shuffle(distractors)
+
+    total_opts = len(clean_opts)
+    if target_slot is not None:
+        new_slot = int(target_slot) % total_opts
+    else:
+        new_slot = random.randint(0, total_opts - 1)
+
+    final_opts = distractors[:new_slot] + [correct_text] + distractors[new_slot:]
+    letters = ["A", "B", "C", "D", "E"]
+    labeled_opts = []
+    for i, opt in enumerate(final_opts):
+        lbl = letters[i] if i < len(letters) else str(i+1)
+        labeled_opts.append(f"{lbl}) {opt}")
+
+    return labeled_opts, new_slot
+
 async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]:
     import time
     import urllib.parse
@@ -7698,6 +7846,11 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
             is_channel_dest = (str(cid) in ["@uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)]) or (chat_type == "channel") or (eff_target == "channel" and str(cid) not in ["@asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)])
             poll_anon = True if is_channel_dest else False
 
+            # 10 талик тест саволлари учун A, B, C, D, E мувозанатли тарқатиш шаблони
+            # Ҳар бир ҳарф роппа-роса 2 марта тўғри жавоб бўлади (битта A бўлиб қолмайди!)
+            balanced_slots = [2, 0, 3, 1, 4, 1, 3, 0, 4, 2]
+            random.shuffle(balanced_slots)
+
             for q_idx, q_item in enumerate(test_set, start=1):
                 try:
                     q_raw = q_item.get("question", "")
@@ -7705,15 +7858,16 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     if len(q_text) > 300:
                         q_text = q_text[:297] + "..."
 
-                    raw_opts = q_item.get("options", [])
+                    target_slot = balanced_slots[(q_idx - 1) % len(balanced_slots)]
+                    shuffled_opts, correct_id = prepare_balanced_shuffled_options(q_item, target_slot=target_slot)
+
                     poll_opts = []
-                    for opt in raw_opts[:5]:
+                    for opt in shuffled_opts[:5]:
                         opt_c = apply_script(opt, script)
                         if len(opt_c) > 100:
                             opt_c = opt_c[:97] + "..."
                         poll_opts.append(opt_c)
 
-                    correct_id = q_item.get("correct_option_id", 0)
                     raw_expl = q_item.get("explanation", "")
                     expl = apply_script(raw_expl, script)
                     if len(expl) > 200:
@@ -7857,17 +8011,22 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     save_sci_session(session)
 
     targets = get_destinations_for_target(settings.get("target", "both"))
+    bot_user = get_settings().get("official_bot", "@Asalarichilikuz_bot").replace("@", "")
+    ch_user = get_official_channel_clean()
+    grp_user = get_official_group_clean()
+
+    # Тест якунида ортиқча овоз бериш ва фикр билдириш тугмалари олиб ташланиб, фақат расмий натижа ва улашиш тугмалари қўйилади:
+    clean_award_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏆 Расмий онлайн рейтинг ва натижалар", url=f"https://t.me/{bot_user}?start=sci_rank")],
+        [
+            InlineKeyboardButton(text="📢 Расмий Канал", url=f"https://t.me/{ch_user}"),
+            InlineKeyboardButton(text="👥 Расмий Гуруҳ", url=f"https://t.me/{grp_user}")
+        ]
+    ])
+
     for cid in targets:
         try:
-            markup = build_post_markup(
-                chat_id=cid,
-                message_id=999999,
-                reactions_list=["🥇", "👏", "🔥", "🐝", "❤️"],
-                is_channel_post=(cid == get_official_channel()),
-                share_title="🏆 Илмий тест ғолиблари ва медал соҳиблари эълон қилинди!",
-                share_text="Билимни синовдан ўтказган барча асаларичиларни табриклаймиз!"
-            )
-            sent = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=results_text, reply_markup=markup, parse_mode=None)
+            sent = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=results_text, reply_markup=clean_award_markup, parse_mode=None)
             try:
                 await bot_instance.pin_chat_message(chat_id=cid, message_id=sent.message_id, both_silent=True)
             except Exception:
@@ -8417,7 +8576,18 @@ async def on_dtm_start_cb(call: types.CallbackQuery):
     if not set_questions:
         set_questions = questions[:10]
 
-    test_set = set_questions[:10]
+    # Ҳар бир тест учун A, B, C, D, E вариантлари мувозанатли тарзда аралаштирилади
+    balanced_slots = [2, 0, 3, 1, 4, 1, 3, 0, 4, 2]
+    random.shuffle(balanced_slots)
+
+    shuffled_test_set = []
+    for i, q in enumerate(set_questions[:10]):
+        slot = balanced_slots[i % len(balanced_slots)]
+        s_opts, s_corr = prepare_balanced_shuffled_options(q, target_slot=slot)
+        q_copy = dict(q)
+        q_copy["options"] = s_opts
+        q_copy["correct_option_id"] = s_corr
+        shuffled_test_set.append(q_copy)
 
     exam = {
         "user_id": user_id,
@@ -8425,7 +8595,7 @@ async def on_dtm_start_cb(call: types.CallbackQuery):
         "username": call.from_user.username or "",
         "category": cat,
         "set_id": set_id,
-        "questions": test_set,
+        "questions": shuffled_test_set,
         "q_idx": 0,
         "answers": [],
         "score": 0,
@@ -9264,85 +9434,357 @@ async def on_quiz_auto_add_10_btn(call: types.CallbackQuery):
 
 
 # ==============================================================================
-# ТУНГИ ЧЕКЛОВ ВА РЕЖАЛАР МЕНЮСИ
+# ТУНГИ ЧЕКЛОВ ВА РЕЖАЛАР МЕНЮСИ (МУКАММАЛ ТАҲРИРЛАШ ТИЗИМИ)
 # ==============================================================================
+
 def build_night_lock_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     settings = get_settings()
     en = settings.get("night_lock_enabled", True)
     start_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
     end_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
     
-    st_icon = "🟢 ЁҚИЛГАН (Фаол)" if en else "🔴 ЎЧИРИЛГАН"
+    st_icon = "🟢 Ёқилган" if en else "⚪ Ўчирилган"
     
-    text = (
-        "🌙 **ГУРУҲ ТУНГИ ЧЕКЛОВИ СОЗЛАМАЛАРИ**\n\n"
-        f"• 📡 **Ҳолати:** {st_icon}\n"
-        f"• ⏰ **Чеклов бошланиш вақти:** **{start_t}** (22:57 да 3 минутлик огоҳлантириш юборилади)\n"
-        f"• ⏰ **Чеклов тугаш вақти:** **{end_t}** (Тунги чеклов якунланиб гуруҳ очилади)\n"
-        "• 📍 **Гуруҳ:** @asalarichilik_uzbekistan\n\n"
-        "📋 **ТИЗИМ ҚОИДАЛАРИ:**\n"
-        f"1️⃣ Соат {start_t} дан 3 минут олдин гуруҳга огоҳлантириш берилади ва то чеклов бошлангунча туради.\n"
-        f"2️⃣ Соат {start_t} да «Тунги чеклов ўрнатилди» хабари чиқади ва то эрталабки {end_t} гача туради.\n"
-        "3️⃣ Чеклов вақтида ёзилган ҳар қандай хабар дарҳол ўчирилиб, қолган вақт ҳақида 30 сониялик огоҳлантириш берилади.\n"
-        f"4️⃣ Соат {end_t} да «Тунги чеклов якунланди» хабари чиқади ва 1 соатдан сўнг автоматик ўчирилади."
+    # 4-хабар (фойдаланувчига 30 сониялик огоҳлантириш намунаси)
+    user_tpl = settings.get("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+    sample_warn = (
+        user_tpl
+        .replace("{user_mention}", "Фойдаланувчи")
+        .replace("{start}", start_t)
+        .replace("{end}", end_t)
+        .replace("{remaining_time}", "07 соат 30 дақиқа")
     )
     
-    btn_toggle = "🔴 Чекловни ўчириш" if en else "🟢 Чекловни ёқиш"
+    text = (
+        f"Ҳолати: {st_icon}\n"
+        f"• Бошланиш вақти: **{start_t}**\n"
+        f"• Тугаш вақти: **{end_t}**\n\n"
+        "Тунги вақтда юборилган барча хабарлар бот томонидан автоматик ўчирилади ва "
+        "фойдаланувчига созланадиган огоҳлантириш берилади (30 сониядан сўнг ўчирилади).\n\n"
+        "💬 **Ҳозирги огоҳлантириш матни:**\n"
+        f"❝ {sample_warn} ❞"
+    )
+    
+    btn_status = f"Ҳолати / Status: {st_icon}"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=btn_toggle, callback_data="night_lock:toggle")],
+        [InlineKeyboardButton(text=btn_status, callback_data="night_lock:toggle")],
         [
-            InlineKeyboardButton(text="⏰ Бошланиш: 23:00", callback_data="night_lock:start:23:00"),
-            InlineKeyboardButton(text="⏰ Бошланиш: 00:00", callback_data="night_lock:start:00:00")
+            InlineKeyboardButton(text=f"🔒 Бошланиш: {start_t}", callback_data="night_lock:choose_start"),
+            InlineKeyboardButton(text=f"🔓 Тугаш: {end_t}", callback_data="night_lock:choose_end")
         ],
         [
-            InlineKeyboardButton(text="⏰ Тугаш: 06:00", callback_data="night_lock:end:06:00"),
-            InlineKeyboardButton(text="⏰ Тугаш: 06:30", callback_data="night_lock:end:06:30")
+            InlineKeyboardButton(text="✏️ Огоҳлантириш матнини ўзгартириш", callback_data="night_lock:texts_menu")
         ],
         [
             InlineKeyboardButton(text="🚀 Ҳозироқ синов эълонини юбориш", callback_data="night_lock:test_warn")
         ],
         [
-            InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
+            InlineKeyboardButton(text="◀️ Гуруҳ Созламалари", callback_data="grp_lim_menu:from_night"),
+            InlineKeyboardButton(text="◀️ Асосий Меню", callback_data="main_menu")
         ]
     ])
     return text, kb
 
+
+def build_night_lock_start_picker_kb(cur_start: str) -> InlineKeyboardMarkup:
+    presets = [
+        ["21:00", "21:30"],
+        ["22:00", "22:30"],
+        ["23:00", "23:30"],
+        ["00:00", "00:30"]
+    ]
+    rows = []
+    for pair in presets:
+        row = []
+        for p in pair:
+            prefix = "✅ " if p == cur_start else "⏰ "
+            row.append(InlineKeyboardButton(text=f"{prefix}{p}", callback_data=f"night_lock:set_start:{p}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="✏️ Бошқа вақтни ёзиш (М-н: 22:45)", callback_data="night_lock:custom_start")])
+    rows.append([InlineKeyboardButton(text="🔙 Ортга (Тунги чеклов)", callback_data="night_lock_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_night_lock_end_picker_kb(cur_end: str) -> InlineKeyboardMarkup:
+    presets = [
+        ["05:00", "05:30"],
+        ["06:00", "06:30"],
+        ["07:00", "07:30"],
+        ["08:00", "08:30"]
+    ]
+    rows = []
+    for pair in presets:
+        row = []
+        for p in pair:
+            prefix = "✅ " if p == cur_end else "⏰ "
+            row.append(InlineKeyboardButton(text=f"{prefix}{p}", callback_data=f"night_lock:set_end:{p}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="✏️ Бошқа вақтни ёзиш (М-н: 06:15)", callback_data="night_lock:custom_end")])
+    rows.append([InlineKeyboardButton(text="🔙 Ортга (Тунги чеклов)", callback_data="night_lock_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_night_lock_texts_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 1. 3 минут олдинги хабар", callback_data="night_lock:edit_text:pre_warn")],
+        [InlineKeyboardButton(text="🌙 2. Чеклов бошланди эълони", callback_data="night_lock:edit_text:lock_start")],
+        [InlineKeyboardButton(text="☀️ 3. Чеклов тугади эълони", callback_data="night_lock:edit_text:lock_end")],
+        [InlineKeyboardButton(text="💬 4. Фойдаланувчига 30 сек огоҳлантириш", callback_data="night_lock:edit_text:user_warn")],
+        [InlineKeyboardButton(text="🔄 Барчасини стандарт ҳолига қайтариш", callback_data="night_lock:reset_all_texts")],
+        [InlineKeyboardButton(text="🔙 Ортга (Тунги чеклов)", callback_data="night_lock_menu")]
+    ])
+
+
 @dp.callback_query(F.data == "night_lock_menu")
-async def on_night_lock_menu_cb(call: types.CallbackQuery):
+async def on_night_lock_menu_cb(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     if call.from_user.id != OWNER_ID:
         return
+    await state.clear()
     text, kb = build_night_lock_dashboard()
     await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
 
+
 @dp.callback_query(F.data.startswith("night_lock:"))
-async def on_night_lock_actions(call: types.CallbackQuery):
+async def on_night_lock_actions(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     if call.from_user.id != OWNER_ID:
         return
-    act = call.data.split(":")[1]
-    settings = get_settings()
     
+    parts = call.data.split(":")
+    act = parts[1]
+    settings = get_settings()
+
     if act == "toggle":
         cur = settings.get("night_lock_enabled", True)
         update_setting("night_lock_enabled", not cur)
-    elif act == "start":
-        val = call.data.split(":")[2]
-        update_setting("night_lock_start", val)
-    elif act == "end":
-        val = call.data.split(":")[2]
-        update_setting("night_lock_end", val)
-    elif act == "test_warn":
-        msg = await bot.send_message(
-            chat_id=-1001275726275,
-            text="📢 @Asalarichilik_Uzbekistan Группасида 3 минутдан кейин ёзишга чеклов ўрнатилади ва барча ёзишмаларингиз ўчирилиб ташланади. Эртагача яхши дам олинг.\n\nҲурмат билан админ 👨‍💼"
+        text, kb = build_night_lock_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "choose_start":
+        cur_start = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+        kb = build_night_lock_start_picker_kb(cur_start)
+        prompt = (
+            "⏰ **ТУНГИ ЧЕКЛОВ БОШЛАНИШ (ЁҚИШ 🟢) ВАҚТИНИ ТАНЛАНГ:**\n\n"
+            f"• Ҳозирги бошланиш вақти: **{cur_start}**\n\n"
+            "Тайёр вақтлардан бирини танланг ёки «Бошқа вақтни ёзиш» тугмасини босиб исталган соат ва дақиқани киритинг:"
         )
-        await call.answer("✅ Гуруҳга 3 минутлик огоҳлантириш синов тариқасида юборилди!", show_alert=True)
+        await safe_edit_text(call, prompt, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "choose_end":
+        cur_end = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+        kb = build_night_lock_end_picker_kb(cur_end)
+        prompt = (
+            "⏰ **ТУНГИ ЧЕКЛОВ ТУГАШ (ЎЧИРИЛГАН 🔴) ВАҚТИНИ ТАНЛАНГ:**\n\n"
+            f"• Ҳозирги тугаш вақти: **{cur_end}**\n\n"
+            "Тайёр вақтлардан бирини танланг ёки «Бошқа вақтни ёзиш» тугмасини босиб исталган соат ва дақиқани киритинг:"
+        )
+        await safe_edit_text(call, prompt, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "set_start":
+        val = normalize_hhmm(parts[2])
+        update_setting("night_lock_start", val)
+        await call.answer(f"✅ Бошланиш вақти {val} га созланди!", show_alert=True)
+        text, kb = build_night_lock_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "set_end":
+        val = normalize_hhmm(parts[2])
+        update_setting("night_lock_end", val)
+        await call.answer(f"✅ Тугаш вақти {val} га созланди!", show_alert=True)
+        text, kb = build_night_lock_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "custom_start":
+        await state.set_state(NightLockEditStates.waiting_for_start_time)
+        prompt = (
+            "✏️ **Тунги чеклов бошланиш (Ёқиш 🟢) вақтини киритинг:**\n\n"
+            "Илтимос, вақтни `HH:MM` шаклида ёзиб юборинг (Масалан: `22:30` ёки `23:15`):"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="night_lock_menu")]
+        ])
+        await safe_edit_text(call, prompt, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "custom_end":
+        await state.set_state(NightLockEditStates.waiting_for_end_time)
+        prompt = (
+            "✏️ **Тунги чеклов тугаш (Ўчириш 🔴) вақтини киритинг:**\n\n"
+            "Илтимос, вақтни `HH:MM` шаклида ёзиб юборинг (Масалан: `06:15` ёки `07:00`):"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="night_lock_menu")]
+        ])
+        await safe_edit_text(call, prompt, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "texts_menu":
+        kb = build_night_lock_texts_menu_kb()
+        prompt = (
+            "📝 **ТУНГИ ЧЕКЛОВ ОГОҲЛАНТИРИШ ХАБАРЛАРИНИ ТАҲРИРЛАШ**\n\n"
+            "Қуйидаги 4 хил хабарнинг исталганини ўзгартиришингиз мумкин:\n\n"
+            "1️⃣ 📢 **3 минут олдинги хабар:** Чеклов бошланишидан 3 дақиқа олдин гуруҳга юбориладиган огоҳлантириш\n"
+            "2️⃣ 🌙 **Чеклов бошланди эълони:** Соат белгиланган бошланиш вақтида гуруҳга юборилади\n"
+            "3️⃣ ☀️ **Чеклов тугади эълони:** Эрталабки тугаш вақтида гуруҳ очилгани ҳақида эълон\n"
+            "4️⃣ 💬 **Фойдаланувчига 30 сек огоҳлантириш:** Чеклов пайтида гуруҳга хабар ёзган фойдаланувчига бериладиган ва 30 сонияда ўчадиган жавоб\n\n"
+            "Ўзгартирмоқчи бўлган хабарингизни танланг:"
+        )
+        await safe_edit_text(call, prompt, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "edit_text":
+        t_type = parts[2]
+        if t_type == "pre_warn":
+            await state.set_state(NightLockEditStates.waiting_for_pre_warn_text)
+            cur = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+            title = "1️⃣ 📢 3 минут олдин гуруҳга юбориладиган эълон"
+        elif t_type == "lock_start":
+            await state.set_state(NightLockEditStates.waiting_for_lock_start_text)
+            cur = settings.get("night_msg_lock_start", DEFAULT_NIGHT_MSG_LOCK_START)
+            title = "2️⃣ 🌙 Чеклов бошланганда гуруҳга юбориладиган эълон"
+        elif t_type == "lock_end":
+            await state.set_state(NightLockEditStates.waiting_for_lock_end_text)
+            cur = settings.get("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
+            title = "3️⃣ ☀️ Чеклов тугаб гуруҳ очилганда юбориладиган эълон"
+        else: # user_warn
+            await state.set_state(NightLockEditStates.waiting_for_user_warn_text)
+            cur = settings.get("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+            title = "4️⃣ 💬 Чеклов пайтида ёзган фойдаланувчига 30 сониялик жавоб хабари"
+
+        prompt = (
+            f"✏️ **{title} МАТНИНИ ТАҲРИРЛАШ**\n\n"
+            "📋 **Ҳозирги матн:**\n"
+            f"❝ {cur} ❞\n\n"
+            "✍️ *Янги матнни ёзиб юборинг.*\n"
+            "💡 Изоҳ: Хабарда `{start}`, `{end}`, `{user_mention}`, `{remaining_time}` белгиларини ишлатсангиз, бот уларни реал вақт билан автоматик алмаштиради."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Стандарт ҳолига қайтариш", callback_data=f"night_lock:reset_text:{t_type}")],
+            [InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="night_lock:texts_menu")]
+        ])
+        await safe_edit_text(call, prompt, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "reset_text":
+        t_type = parts[2]
+        await state.clear()
+        if t_type == "pre_warn":
+            update_setting("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+        elif t_type == "lock_start":
+            update_setting("night_msg_lock_start", DEFAULT_NIGHT_MSG_LOCK_START)
+        elif t_type == "lock_end":
+            update_setting("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
+        else:
+            update_setting("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+        await call.answer("✅ Хабар матни стандарт ҳолига қайтарилди!", show_alert=True)
+        text, kb = build_night_lock_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "reset_all_texts":
+        await state.clear()
+        update_setting("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+        update_setting("night_msg_lock_start", DEFAULT_NIGHT_MSG_LOCK_START)
+        update_setting("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
+        update_setting("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+        await call.answer("✅ Барча 4 та хабар стандарт ҳолига қайтарилди!", show_alert=True)
+        text, kb = build_night_lock_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+    elif act == "test_warn":
+        pre_text = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+        try:
+            await bot.send_message(
+                chat_id=-1001275726275,
+                text=pre_text
+            )
+            await call.answer("✅ @Asalarichilik_Uzbekistan гуруҳига синов эълони муваффақиятли юборилди!", show_alert=True)
+        except Exception as te:
+            await call.answer(f"⚠️ Хатолик: {te}", show_alert=True)
         return
-        
-    text, kb = build_night_lock_dashboard()
-    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+
+@dp.message(NightLockEditStates.waiting_for_start_time)
+async def on_night_lock_custom_start_time_msg(message: types.Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        return
+    text = message.text.strip()
+    if not re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", text):
+        await message.reply(
+            "⚠️ **Нотўғри вақт формати!**\n\n"
+            "Илтимос, вақтни `HH:MM` шаклида ёзинг (Масалан: `22:30` ёки `23:00`):"
+        )
+        return
+    val = normalize_hhmm(text)
+    update_setting("night_lock_start", val)
+    await state.clear()
+    await message.reply(f"✅ **Тунги чеклов бошланиш (Ёқиш 🟢) вақти муваффақиятли {val} га созланди!**", parse_mode="Markdown")
+    dash_text, kb = build_night_lock_dashboard()
+    await message.answer(dash_text, reply_markup=kb, parse_mode="Markdown")
+
+
+@dp.message(NightLockEditStates.waiting_for_end_time)
+async def on_night_lock_custom_end_time_msg(message: types.Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        return
+    text = message.text.strip()
+    if not re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", text):
+        await message.reply(
+            "⚠️ **Нотўғри вақт формати!**\n\n"
+            "Илтимос, вақтни `HH:MM` шаклида ёзинг (Масалан: `06:15` ёки `06:30`):"
+        )
+        return
+    val = normalize_hhmm(text)
+    update_setting("night_lock_end", val)
+    await state.clear()
+    await message.reply(f"✅ **Тунги чеклов тугаш (Ўчириш 🔴) вақти муваффақиятли {val} га созланди!**", parse_mode="Markdown")
+    dash_text, kb = build_night_lock_dashboard()
+    await message.answer(dash_text, reply_markup=kb, parse_mode="Markdown")
+
+
+@dp.message(NightLockEditStates.waiting_for_pre_warn_text)
+async def on_night_lock_pre_warn_text_msg(message: types.Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        return
+    new_text = message.text.strip()
+    update_setting("night_msg_pre_warn", new_text)
+    await state.clear()
+    await message.reply("✅ **3 минут олдинги огоҳлантириш хабари муваффақиятли янгиланди!**", parse_mode="Markdown")
+    dash_text, kb = build_night_lock_dashboard()
+    await message.answer(dash_text, reply_markup=kb, parse_mode="Markdown")
+
+
+@dp.message(NightLockEditStates.waiting_for_lock_start_text)
+async def on_night_lock_start_text_msg(message: types.Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        return
+    new_text = message.text.strip()
+    update_setting("night_msg_lock_start", new_text)
+    await state.clear()
+    await message.reply("✅ **Чеклов бошланди эълони муваффақиятли янгиланди!**", parse_mode="Markdown")
+    dash_text, kb = build_night_lock_dashboard()
+    await message.answer(dash_text, reply_markup=kb, parse_mode="Markdown")
+
+
+@dp.message(NightLockEditStates.waiting_for_lock_end_text)
+async def on_night_lock_end_text_msg(message: types.Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        return
+    new_text = message.text.strip()
+    update_setting("night_msg_lock_end", new_text)
+    await state.clear()
+    await message.reply("✅ **Чеклов тугади эълони муваффақиятли янгиланди!**", parse_mode="Markdown")
+    dash_text, kb = build_night_lock_dashboard()
+    await message.answer(dash_text, reply_markup=kb, parse_mode="Markdown")
+
+
+@dp.message(NightLockEditStates.waiting_for_user_warn_text)
+async def on_night_lock_user_warn_text_msg(message: types.Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        return
+    new_text = message.text.strip()
+    update_setting("night_msg_user_warn", new_text)
+    await state.clear()
+    await message.reply("✅ **Фойдаланувчига 30 сониялик огоҳлантириш матни муваффақиятли янгиланди!**", parse_mode="Markdown")
+    dash_text, kb = build_night_lock_dashboard()
+    await message.answer(dash_text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "sched_dashboard_menu")
 async def on_sched_dashboard_menu(call: types.CallbackQuery):
