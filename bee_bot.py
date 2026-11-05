@@ -2613,9 +2613,14 @@ async def send_quiz_poll_to_chat(chat_id: Any, quiz: dict, poll_mode: Optional[s
     if correct_id < 0 or correct_id >= len(options):
         correct_id = 0
 
-    # Тўғри жавоб ҳеч қачон битта А бўлиб қолмаслиги учун A, B, C, D, E вариантлари бўйича мувозанатли тарқатиш:
+    # Викторина созламаларига қараб жавобларни ҳар хил (Аралаш) ёки бир хил тарқатиш:
+    q_shuffle_en = settings.get("quiz_shuffle_answers", True)
     if len(options_raw) >= 2:
-        shuffled_opts, new_corr = prepare_balanced_shuffled_options(quiz, target_slot=random.randint(0, min(4, len(options_raw) - 1)))
+        shuffled_opts, new_corr = prepare_balanced_shuffled_options(
+            quiz, 
+            target_slot=random.randint(0, min(4, len(options_raw) - 1)) if q_shuffle_en else 0,
+            shuffle_enabled=q_shuffle_en
+        )
         options = [apply_script(opt, script)[:100] for opt in shuffled_opts[:5]]
         correct_id = new_corr
 
@@ -2811,6 +2816,9 @@ def build_quiz_preview_keyboard(idx: int, total: int, script: str = "cyrillic") 
             InlineKeyboardButton(text="⬅️ Олдингиси", callback_data=f"quiz_page:{idx - 1}"),
             InlineKeyboardButton(text=f"📄 {idx + 1} / {total}", callback_data=f"quiz_page_info:{idx}"),
             InlineKeyboardButton(text="Кейингиси ➡️", callback_data=f"quiz_page:{idx + 1}")
+        ],
+        [
+            InlineKeyboardButton(text="⚙️ Викторина созламалари", callback_data="quiz_settings")
         ],
         [
             InlineKeyboardButton(text="🔙 Орқага", callback_data="main_menu")
@@ -4094,6 +4102,7 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
     rows = [
         [InlineKeyboardButton(text=f"🎯 Жўнатиш манзили: {target_label}", callback_data=f"set_toggle:post_target_mode:{src}")],
         [InlineKeyboardButton(text=f"📊 Сўровнома режими: {poll_mode_label}", callback_data=f"set_toggle:poll_type:{src}")],
+        [InlineKeyboardButton(text=f"🔀 Викторина жавоблари: {'Ҳар хил (A,B,C,D,E) 🟢' if settings.get('quiz_shuffle_answers', True) else 'Бир хил (Фақат А) 🔴'}", callback_data=f"set_toggle:quiz_shuffle_answers:{src}")],
         [InlineKeyboardButton(text=f"🎲 Сўровнома тури: {anon_label}", callback_data=f"set_toggle:poll_is_anonymous:{src}")],
         [InlineKeyboardButton(text=f"🔄 Авто-реакциялар: {auto_r}", callback_data=f"set_toggle:auto_reactions:{src}")],
         [InlineKeyboardButton(text=f"↗️ Улашиш тугмаси: {auto_s}", callback_data=f"set_toggle:auto_share:{src}")],
@@ -4453,7 +4462,13 @@ async def on_setting_toggle(call: types.CallbackQuery):
         update_setting("poll_is_anonymous", not cur_anon)
         await call.message.edit_reply_markup(reply_markup=build_settings_inline(source_menu=src))
         lbl = "👤 Очиқ овоз" if cur_anon else "🕵️ Аноним овоз"
-        await call.answer(f"Сўровнома: {lbl}")
+    elif key == "quiz_shuffle_answers":
+        cur_shuf = settings.get("quiz_shuffle_answers", True)
+        new_shuf = not cur_shuf
+        update_setting("quiz_shuffle_answers", new_shuf)
+        await call.message.edit_reply_markup(reply_markup=build_settings_inline(source_menu=src))
+        lbl = "Ҳар хил (A, B, C, D, E) 🟢" if new_shuf else "Бир хил (Фақат А) 🔴"
+        await call.answer(f"Викторина жавоблари: {lbl}")
         return
 
     current_val = settings.get(key, True)
@@ -5355,6 +5370,30 @@ async def group_media_limiter_handler(message: types.Message):
 
     # 1. Admin, bot egasi, rasmiy kanallar va xizmat akkauntlariga to'liq daxlsizlik
     if await is_group_admin_or_exempt(chat_id, user, message):
+        settings = get_settings()
+        if settings.get("group_photo_reactions_enabled", True) and (message.photo or (message.document and (message.document.mime_type or "").startswith("image/"))):
+            mg_id = message.media_group_id
+            if mg_id:
+                if not hasattr(group_media_limiter_handler, "_seen_mg"):
+                    group_media_limiter_handler._seen_mg = set()
+                if mg_id in group_media_limiter_handler._seen_mg:
+                    return
+                group_media_limiter_handler._seen_mg.add(mg_id)
+                if len(group_media_limiter_handler._seen_mg) > 500:
+                    group_media_limiter_handler._seen_mg.clear()
+            try:
+                rx_kb = build_only_reactions_markup(
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    reactions_list=settings.get("reactions", ["👍", "❤️", "🔥", "👏", "🐝"])
+                )
+                await message.reply(
+                    text="👍 **Реакция қолдиринг:**",
+                    reply_markup=rx_kb,
+                    parse_mode="Markdown"
+                )
+            except Exception as re:
+                logging.warning(f"Error attaching reactions to admin photo: {re}")
         return
 
     if not is_chat_allowed(chat_id):
@@ -5394,6 +5433,32 @@ async def group_media_limiter_handler(message: types.Message):
     if cur_count <= daily_max_limit:
         save_group_media_limits(db)
         logging.info(f"[MEDIA LIMIT] Ruxsat etildi: {user.id} ({user.full_name}) media #{cur_count}/{daily_max_limit} (chat: {chat_id})")
+        
+        # Группа фойдаланувчилар юборган ҳар бир расмли маълумотлар остида фақат смайклар тўплами:
+        settings = get_settings()
+        if settings.get("group_photo_reactions_enabled", True) and (message.photo or (message.document and (message.document.mime_type or "").startswith("image/"))):
+            mg_id = message.media_group_id
+            if mg_id:
+                if not hasattr(group_media_limiter_handler, "_seen_mg"):
+                    group_media_limiter_handler._seen_mg = set()
+                if mg_id in group_media_limiter_handler._seen_mg:
+                    return
+                group_media_limiter_handler._seen_mg.add(mg_id)
+                if len(group_media_limiter_handler._seen_mg) > 500:
+                    group_media_limiter_handler._seen_mg.clear()
+            try:
+                rx_kb = build_only_reactions_markup(
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    reactions_list=settings.get("reactions", ["👍", "❤️", "🔥", "👏", "🐝"])
+                )
+                await message.reply(
+                    text="👍 **Реакция қолдиринг:**",
+                    reply_markup=rx_kb,
+                    parse_mode="Markdown"
+                )
+            except Exception as re:
+                logging.warning(f"Error attaching reactions to user photo: {re}")
         return
 
     # LIМИТДАН ОШДИ (QOIDABUZARLIK):
@@ -6797,7 +6862,8 @@ def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, Inli
         f"abc **Барча маълумотлар ёзув тури:** {script_display}\n"
         f"🔄 **Авто-реакциялар:** {react_status_txt} ({react_emojis_str})\n"
         f"↗️ **Улашиш тугмаси:** {share_status_txt}\n"
-        f"💬 **Мутахассис тугмаси:** {expert_status_txt} *(Барча ёзишмалар ботга йўналади)*\n\n"
+        f"💬 **Мутахассис тугмаси:** {expert_status_txt} *(Барча ёзишмалар ботга йўналади)*\n"
+        f"📷 **Гуруҳ расмларига фақат смайклар:** {'🟢 Ёқилган' if settings.get('group_photo_reactions_enabled', True) else '🔴 Ўчирилган'}\n\n"
         f"⏰ **Бўлимлар бўйича кунлик авто-жўнатиш вақтлари:**\n"
         f"• 📰 1-Асаларичилик янгиликлари: {news_status} ({news_time})\n"
         f"• 🌿 2-Апитерапия янгиликлари: {api_status} ({api_time})\n"
@@ -6827,6 +6893,9 @@ def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, Inli
         [
             InlineKeyboardButton(text=f"💬 Мутахассис тугмаси: {expert_icon}", callback_data="set_toggle:auto_comment"),
             InlineKeyboardButton(text=f"🔤 Ёзув тури: {script_display}", callback_data="set_toggle_script:group_settings")
+        ],
+        [
+            InlineKeyboardButton(text=f"📷 Расмларга смайклар: {'🟢 Ёқилган' if settings.get('group_photo_reactions_enabled', True) else '🔴 Ўчирилган'}", callback_data="grp_toggle:photo_reactions")
         ],
         [
             InlineKeyboardButton(text=f"📰 1-Янгилик: {news_btn_icon} {news_time}", callback_data="set_toggle_sched:news"),
@@ -7395,8 +7464,13 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
 
     notic_str = "✅ 1 соат олдин хабар: Ёқилган" if notic else "❌ 1 соат олдин хабар: Ўчирилган"
     scr_str = "🟢 Кирилл алифбоси" if scr == "cyrillic" else "🟢 Lotin alifbosi"
+    shuf = s.get("shuffle_answers", True)
+    shuf_str = "🔀 Жавоблар: Ҳар хил (A, B, C, D, E) 🟢" if shuf else "🔤 Жавоблар: Бир хил (Фақат А) 🔴"
 
     rows = [
+        [
+            InlineKeyboardButton(text=shuf_str, callback_data="sci_set:shuffle:toggle")
+        ],
         [
             InlineKeyboardButton(text=auto_btn, callback_data="sci_set:auto_toggle:now")
         ],
@@ -7691,11 +7765,11 @@ def build_dtm_leaderboard_view():
     return chr(10).join(lines), kb
 
 
-def prepare_balanced_shuffled_options(q_item: dict, target_slot: Optional[int] = None) -> tuple[list[str], int]:
+def prepare_balanced_shuffled_options(q_item: dict, target_slot: Optional[int] = None, shuffle_enabled: bool = True) -> tuple[list[str], int]:
     """
     Савол вариантларини A, B, C, D, E бўйича илмий, мураккаб ва чалғитувчи қилиб тайёрлайди.
-    Тўғри жавоб ҳеч қачон фақат битта 'A' бўлиб қолмайди, балки A, B, C, D, E ҳарфлари бўйича
-    аниқ мувозанатли (ҳар бир ҳарф тенг тақсимланган) тарзда жойлаштирилади.
+    • shuffle_enabled=True: Тўғри жавоблар A, B, C, D, E вариантлари бўйича мутаносиб тақсимланади (ҳар хил бўлади).
+    • shuffle_enabled=False: Тўғри жавоблар ва вариантлар ўзгаришсиз асл тартибида (фақат А ёки 0-ўринда) қолади.
     """
     raw_opts = q_item.get("options", [])
     if not raw_opts:
@@ -7707,6 +7781,15 @@ def prepare_balanced_shuffled_options(q_item: dict, target_slot: Optional[int] =
         clean_opts.append(c)
 
     orig_corr = int(q_item.get("correct_option_id", 0)) % len(clean_opts)
+    letters = ["A", "B", "C", "D", "E"]
+
+    if not shuffle_enabled:
+        labeled_opts = []
+        for i, opt in enumerate(clean_opts):
+            lbl = letters[i] if i < len(letters) else str(i+1)
+            labeled_opts.append(f"{lbl}) {opt}")
+        return labeled_opts, orig_corr
+
     correct_text = clean_opts[orig_corr]
     distractors = [opt for i, opt in enumerate(clean_opts) if i != orig_corr]
     random.shuffle(distractors)
@@ -7718,7 +7801,6 @@ def prepare_balanced_shuffled_options(q_item: dict, target_slot: Optional[int] =
         new_slot = random.randint(0, total_opts - 1)
 
     final_opts = distractors[:new_slot] + [correct_text] + distractors[new_slot:]
-    letters = ["A", "B", "C", "D", "E"]
     labeled_opts = []
     for i, opt in enumerate(final_opts):
         lbl = letters[i] if i < len(letters) else str(i+1)
@@ -7858,8 +7940,10 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     if len(q_text) > 300:
                         q_text = q_text[:297] + "..."
 
-                    target_slot = balanced_slots[(q_idx - 1) % len(balanced_slots)]
-                    shuffled_opts, correct_id = prepare_balanced_shuffled_options(q_item, target_slot=target_slot)
+                    sci_settings = get_sci_settings()
+                    shuffle_answers_en = sci_settings.get("shuffle_answers", True)
+                    target_slot = balanced_slots[(q_idx - 1) % len(balanced_slots)] if shuffle_answers_en else 0
+                    shuffled_opts, correct_id = prepare_balanced_shuffled_options(q_item, target_slot=target_slot, shuffle_enabled=shuffle_answers_en)
 
                     poll_opts = []
                     for opt in shuffled_opts[:5]:
@@ -7891,6 +7975,31 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     await asyncio.sleep(0.4)
                 except Exception as pe:
                     logging.warning(f"Scientific poll send error ({cid}, q {q_idx}): {pe}")
+
+            # 2-РАСМДАГИДЕК: Барча тест саволлари охирида битта смайклар тўплами ва поделится белгилари
+            try:
+                finish_text = (
+                    f"🏁 **{cat_title} ({active_set}-серия) бўйича барча 10 та синов тести саволлари юборилди!**\n\n"
+                    "📊 **Реакциялар ва расмий канал ҳаволалари:**\n"
+                    "Тестда иштирок этган барча асаларичиларимизга катта раҳмат! Қуйидаги смайклар орқали тестни баҳоланг ва дўстларингиз билан улашинг:"
+                )
+                end_markup = build_post_markup(
+                    chat_id=real_chat_id,
+                    message_id=0,
+                    reactions_list=["👍", "❤️", "🔥", "👏", "🐝"],
+                    channel_username="uz_asalarichilik",
+                    is_channel_post=is_channel_dest,
+                    share_title=f"Asalarichilik илмий тести: {cat_title}",
+                    share_text=f"Асаларичилик бўйича {cat_title} ({active_set}-серия) тест саволлари якунланди! 🐝🇺🇿"
+                )
+                await bot_instance.send_message(
+                    chat_id=real_chat_id,
+                    text=finish_text,
+                    reply_markup=end_markup,
+                    parse_mode="Markdown"
+                )
+            except Exception as ee:
+                logging.warning(f"Error sending test end reactions block ({cid}): {ee}")
 
         except Exception as e:
             logging.error(f"Test launch broadcast error ({cid}): {e}")
@@ -8581,9 +8690,11 @@ async def on_dtm_start_cb(call: types.CallbackQuery):
     random.shuffle(balanced_slots)
 
     shuffled_test_set = []
+    sci_settings = get_sci_settings()
+    shuffle_answers_en = sci_settings.get("shuffle_answers", True)
     for i, q in enumerate(set_questions[:10]):
-        slot = balanced_slots[i % len(balanced_slots)]
-        s_opts, s_corr = prepare_balanced_shuffled_options(q, target_slot=slot)
+        slot = balanced_slots[i % len(balanced_slots)] if shuffle_answers_en else 0
+        s_opts, s_corr = prepare_balanced_shuffled_options(q, target_slot=slot, shuffle_enabled=shuffle_answers_en)
         q_copy = dict(q)
         q_copy["options"] = s_opts
         q_copy["correct_option_id"] = s_corr
@@ -8776,10 +8887,14 @@ def get_scientific_settings_text() -> str:
     dur = s.get("duration_limit_sec", 60)
     dur_lbl = "Чекловсиз" if dur == 0 else f"{dur} сония"
 
+    shuf = s.get("shuffle_answers", True)
+    shuf_lbl = "Ҳар хил (A, B, C, D, E) 🟢" if shuf else "Бир хил (Фақат А) 🔴"
+
     lines = [
         "⚙️ **АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТЛАРИ СОЗЛАМАЛАРИ:**",
         "",
         f"• **Автоматик тест ҳолати:** {status_str}",
+        f"• **Жавоблар тартиби:** {shuf_lbl}",
         f"• **Жўнатиш манзили:** {tgt_name}",
         f"• **Синов вақти:** {start_t} дан то {end_t} гача",
         f"• **Ҳар бир савол вақти:** {dur_lbl}",
@@ -8789,6 +8904,7 @@ def get_scientific_settings_text() -> str:
         "• **Бошланиш ва Тақдирлаш:** Тест қайси соатда бошланиши ва қачон автоматик якунланиб ғолиблар тақдирланиши.",
         "• **Манзил:** Тест саволлари фақат Канал, фақат Гуруҳ ёки бир вақтнинг ўзида иккаласига юборилишини белгилаш.",
         "• **Савол вақти:** Ҳар бир савол учун Telegram сўровнома вақти (30с, 60с, 2дақ, 5дақ ёки Чекловсиз).",
+        "• **Жавоблар:** Аралаш (1-6 сериялардаги жавобларни A, B, C, D, E бўйлаб тарқатиш) ёки Бир хил (фақат А).",
         "• **1 соат олдин хабар:** Тест бошланишидан 1 соат аввал огоҳлантириш тарқатиш.",
         "• **Ёзув тури:** Саволларни Ўзбекча Крил ёки Ўзбекча Лотин ёзувида юбориш."
     ]
@@ -8836,6 +8952,12 @@ async def on_sci_settings_action(call: types.CallbackQuery):
         new_mode = "latin" if cur == "cyrillic" else "cyrillic"
         update_sci_setting("script_mode", new_mode)
         await call.answer(f"Ёзув тури: {'Лотинча' if new_mode == 'latin' else 'Крилча'}")
+    elif param == "shuffle":
+        cur = get_sci_settings().get("shuffle_answers", True)
+        new_val = not cur
+        update_sci_setting("shuffle_answers", new_val)
+        status_txt = "Жавоблар: Ҳар хил (A, B, C, D, E) 🟢" if new_val else "Жавоблар: Бир хил (Фақат А) 🔴"
+        await call.answer(status_txt)
     elif param == "start_time":
         options = ["16:00", "17:00", "18:00", "19:00", "20:00"]
         cur = normalize_hhmm(get_sci_settings().get("start_time", "18:00"))
@@ -9060,6 +9182,26 @@ async def on_sci_set_select_btn(call: types.CallbackQuery):
 # ==============================================================================
 # UNIFIED GROUP SETTINGS & MULTI-SECTION DIRECT ACTION HANDLERS
 # ==============================================================================
+@dp.callback_query(F.data == "grp_toggle:photo_reactions")
+async def on_grp_toggle_photo_reactions(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID and not (await is_group_admin_or_exempt(call.message.chat.id, call.from_user, call.message)):
+        await call.answer("Рухсат йўқ!", show_alert=True)
+        return
+    settings = get_settings()
+    cur = settings.get("group_photo_reactions_enabled", True)
+    new_val = not cur
+    update_setting("group_photo_reactions_enabled", new_val)
+    status_str = "Ёқилди 🟢" if new_val else "Ўчирилди 🔴"
+    await call.answer(f"Расмларга фақат смайклар: {status_str}")
+    text, kb = build_group_settings_dashboard()
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        try:
+            await call.message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+
 @dp.callback_query(F.data == "grp_cycle_dest")
 async def on_grp_cycle_dest_unified(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
