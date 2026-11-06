@@ -499,7 +499,7 @@ def format_video_card_text(v: dict, script: str = "cyrillic") -> str:
         channel = v.get("channel", "Asalarichilik.Uz TV")
         dur = v.get("duration", "15 дақиқа")
         desc = v.get("description", "")
-    url = v.get("url", "https://youtube.com/@asalarichilikuztv?feature=shared")
+    url = v.get("url", "https://www.youtube.com/watch?v=WbMV9qYIXqM")
     tags = v.get("tags", "#Асаларичилик #ВидеоДарс")
 
     lines = [
@@ -2417,8 +2417,9 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
     if message.from_user and (message.from_user.id in (777000, 1087968824, OWNER_ID) or message.from_user.is_bot):
         return
 
-    # 3. Rasmiy guruh tekshiruvi
-    is_official_group = (
+    # 3. Guruh tekshiruvi (rasmiy guruh yoki bot ulangan har qanday guruh / superguruh):
+    is_group = (
+        message.chat.type in ("group", "supergroup") or 
         message.chat.id in (-1001275726275, -1002377038139) or 
         str(message.chat.username or "").lower() == "asalarichilik_uzbekistan"
     )
@@ -2429,8 +2430,8 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
     start_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
     end_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
 
-    # A) ТУНГИ ЧЕКЛОВ — расмий гуруҳда белгиланган соатларда ишлайди:
-    if settings.get("night_lock_enabled", True) and is_official_group and is_in_night_lock_interval(cur_hhmm, start_t, end_t):
+    # A) ТУНГИ ЧЕКЛОВ — гуруҳларда белгиланган соатларда қатъий ишлайди:
+    if settings.get("night_lock_enabled", True) and is_group and is_in_night_lock_interval(cur_hhmm, start_t, end_t):
         # Adminlarga tegilmaydi
         if not (await is_group_admin_or_exempt(message.chat.id, message.from_user, message)):
             try:
@@ -5423,6 +5424,10 @@ async def auto_delete_message_after_delay(chat_id: int, message_id: int, delay_s
     except Exception as e:
         logging.warning(f"[MEDIA LIMIT] Ogohlantirish xabarini o'chirishda xatolik {message_id}: {e}")
 
+GLOBAL_MEDIA_LIMIT_LOCK = asyncio.Lock()
+ACTIVE_DAILY_MEDIA_COUNTS: dict = {}
+ALREADY_WARNED_MEDIA_BATCHES: set = set()
+
 async def group_media_limiter_handler(message: types.Message):
     chat_id = message.chat.id
     user = message.from_user
@@ -5471,182 +5476,185 @@ async def group_media_limiter_handler(message: types.Message):
     if not is_chat_allowed(chat_id):
         save_allowed_chat(chat_id, message.chat.title or "Guruh", "group")
 
-    db = load_group_media_limits()
-    u_data = get_user_group_media_record(db, chat_id, user.id)
-
-    # Foydalanuvchining bugungi media sonini oshirish
-    cur_count = u_data.get("media_count", 0) + 1
-    u_data["media_count"] = cur_count
-
-    # Xabar ID sini yozib borish
-    msg_ids = u_data.get("message_ids", [])
-    if message.message_id not in msg_ids:
-        msg_ids.append(message.message_id)
-        if len(msg_ids) > 100:
-            msg_ids = msg_ids[-100:]
-        u_data["message_ids"] = msg_ids
-
     cfg = get_media_limits_settings()
     if not cfg.get("enabled", True):
-        # Admin tomonidan guruh uchun limit o'chirilgan
-        save_group_media_limits(db)
         return
 
     daily_max_limit = max(1, int(cfg.get("daily_limit", 3)))
-    custom_warn_template = cfg.get("warn_text", "").strip()
-    if not custom_warn_template:
-        custom_warn_template = (
-            "Огоҳлантириш ‼️\n"
-            "Ассалому алейкум {user_mention} \n"
-            "Асаларичилик группага фақат бир кунда {limit} та расм ёки видео юборишга рухсат бор. акс ҳолда сизга чеклов ўрнатилади ‼️"
-        )
 
-    # RUXSAT ETILGAN: Bir kunda daily_max_limit tagacha rasm yoki video ruxsat etiladi
-    if cur_count <= daily_max_limit:
-        save_group_media_limits(db)
-        logging.info(f"[MEDIA LIMIT] Ruxsat etildi: {user.id} ({user.full_name}) media #{cur_count}/{daily_max_limit} (chat: {chat_id})")
-        
-        # Группа фойдаланувчилар юборган ҳар бир расмли маълумотлар остида фақат смайклар тўплами:
-        settings = get_settings()
-        if settings.get("group_photo_reactions_enabled", True) and (message.photo or (message.document and (message.document.mime_type or "").startswith("image/"))):
-            mg_id = message.media_group_id
-            if mg_id:
-                if not hasattr(group_media_limiter_handler, "_seen_mg"):
-                    group_media_limiter_handler._seen_mg = set()
-                if mg_id in group_media_limiter_handler._seen_mg:
-                    return
-                group_media_limiter_handler._seen_mg.add(mg_id)
-                if len(group_media_limiter_handler._seen_mg) > 500:
-                    group_media_limiter_handler._seen_mg.clear()
-            try:
-                rx_kb = build_only_reactions_markup(
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    reactions_list=settings.get("reactions", ["👍", "❤️", "🔥", "👏", "🐝"])
-                )
-                await message.reply(
-                    text="👍 **Реакция қолдиринг:**",
-                    reply_markup=rx_kb,
-                    parse_mode="Markdown"
-                )
-            except Exception as re:
-                logging.warning(f"Error attaching reactions to user photo: {re}")
-        return
+    # Albom (media group) va bir vaqtning o'zida bir nechta rasm yuborishda
+    # poyga (race condition) xatoligini bartaraf etish uchun GLOBAL_MEDIA_LIMIT_LOCK bilan atomik hisoblash:
+    global GLOBAL_MEDIA_LIMIT_LOCK, ACTIVE_DAILY_MEDIA_COUNTS, ALREADY_WARNED_MEDIA_BATCHES
+    async with GLOBAL_MEDIA_LIMIT_LOCK:
+        today_str = get_tashkent_today_str()
+        user_key = f"{chat_id}:{user.id}:{today_str}"
 
-    # LIМИТДАН ОШДИ (QOIDABUZARLIK):
-    # O'sha zahotiyoq oshiqcha yuborilgan rasmni o'chirish
-    try:
-        await message.delete()
-        logging.info(f"[MEDIA LIMIT] {daily_max_limit} tadan oshiqcha rasm/video o'chirildi: msg {message.message_id} (user: {user.id})")
-    except Exception as de:
-        logging.error(f"[MEDIA LIMIT] Xabarni o'chirishda xatolik: {de}")
+        db = load_group_media_limits()
+        u_data = get_user_group_media_record(db, chat_id, user.id)
 
-    now = time.time()
-    last_violation_time = u_data.get("last_violation_time", 0.0)
-    active_mg_id = u_data.get("active_media_group_id")
-    current_mg_id = message.media_group_id
+        if user_key not in ACTIVE_DAILY_MEDIA_COUNTS:
+            ACTIVE_DAILY_MEDIA_COUNTS[user_key] = int(u_data.get("media_count", 0))
 
-    # Bitta albom (media_group_id) yoki bir vaqtda ketma-ket yuborilgan burst to'plamini aniqlash
-    is_same_batch = False
-    if current_mg_id and active_mg_id and current_mg_id == active_mg_id:
-        is_same_batch = True
-    elif (now - last_violation_time) < 45.0:
-        is_same_batch = True
+        ACTIVE_DAILY_MEDIA_COUNTS[user_key] += 1
+        cur_count = ACTIVE_DAILY_MEDIA_COUNTS[user_key]
+        u_data["media_count"] = cur_count
 
-    if not is_same_batch:
-        u_data["violations"] = u_data.get("violations", 0) + 1
-        u_data["last_violation_time"] = now
-        if current_mg_id:
-            u_data["active_media_group_id"] = current_mg_id
+        msg_ids = u_data.get("message_ids", [])
+        if message.message_id not in msg_ids:
+            msg_ids.append(message.message_id)
+            if len(msg_ids) > 100:
+                msg_ids = msg_ids[-100:]
+            u_data["message_ids"] = msg_ids
 
-    violations = u_data.get("violations", 1)
+        # A) RUXSAT ETILGAN: kunlik ruxsat etilgan limit doirasida (1, 2, 3-rasmlar)
+        if cur_count <= daily_max_limit:
+            save_group_media_limits(db)
+            logging.info(f"[MEDIA LIMIT] Ruxsat etildi: {user.id} ({user.full_name}) media #{cur_count}/{daily_max_limit} (chat: {chat_id})")
 
-    # Qoidabuzarlik choralarini qo'llash:
-    if violations == 1:
-        # 1-marta limitdan oshganda: 2 soatlik mut
-        until_date = int(now) + 2 * 3600
+            # Foydalanuvchi yuborgan har bir rasm ostiga faqat bitta reaksiyalar to'plami
+            settings = get_settings()
+            if settings.get("group_photo_reactions_enabled", True) and (message.photo or (message.document and (message.document.mime_type or "").startswith("image/"))):
+                mg_id = message.media_group_id
+                if mg_id:
+                    if not hasattr(group_media_limiter_handler, "_seen_mg"):
+                        group_media_limiter_handler._seen_mg = set()
+                    if mg_id in group_media_limiter_handler._seen_mg:
+                        return
+                    group_media_limiter_handler._seen_mg.add(mg_id)
+                    if len(group_media_limiter_handler._seen_mg) > 500:
+                        group_media_limiter_handler._seen_mg.clear()
+                try:
+                    rx_kb = build_only_reactions_markup(
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        reactions_list=settings.get("reactions", ["👍", "❤️", "🔥", "👏", "🐝"])
+                    )
+                    await message.reply(
+                        text="👍 **Реакция қолдиринг:**",
+                        reply_markup=rx_kb,
+                        parse_mode="Markdown"
+                    )
+                except Exception as re:
+                    logging.warning(f"Error attaching reactions to user photo: {re}")
+            return
+
+        # B) ЛИМИТДАН ОШДИ (4-чи, 5-чи ва ундан кейинги барча расмлар):
+        # 1. Дарҳол ушбу ортиқча расмни гуруҳдан ўчириш!
         try:
-            await bot.restrict_chat_member(
-                chat_id=chat_id,
-                user_id=user.id,
-                permissions=ChatPermissions(
-                    can_send_messages=False,
-                    can_send_media_messages=False,
-                    can_send_other_messages=False,
-                    can_add_web_page_previews=False
-                ),
-                until_date=until_date
-            )
-            logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} 2 soatga mut qilindi (1-qoidabuzarlik)")
-        except Exception as re:
-            logging.error(f"[MEDIA LIMIT] 2 soatlik mut o'rnatishda xatolik: {re}")
-    else:
-        # 2-marta (takroriy) yuborganda: 24 soatlik (1 kunlik) mut va barcha xabarlarini avtomatik o'chirish
-        until_date = int(now) + 24 * 3600
-        try:
-            await bot.restrict_chat_member(
-                chat_id=chat_id,
-                user_id=user.id,
-                permissions=ChatPermissions(
-                    can_send_messages=False,
-                    can_send_media_messages=False,
-                    can_send_other_messages=False,
-                    can_add_web_page_previews=False
-                ),
-                until_date=until_date
-            )
-            logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} 24 soatga mut qilindi (takroriy qoidabuzarlik)")
-        except Exception as re:
-            logging.error(f"[MEDIA LIMIT] 24 soatlik mut o'rnatishda xatolik: {re}")
+            await message.delete()
+            logging.info(f"[MEDIA LIMIT] {daily_max_limit} tadan oshiqcha rasm o'chirildi: msg {message.message_id} (user: {user.id}, count: {cur_count})")
+        except Exception as de:
+            logging.error(f"[MEDIA LIMIT] Xabarni o'chirishda xatolik: {de}")
 
-        # Guruhdagi bugungi barcha yozishmalarini avtomatik o'chirish
-        all_mids = list(u_data.get("message_ids", []))
-        u_data["message_ids"] = []
-        for mid in all_mids:
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=mid)
-                await asyncio.sleep(0.04)
-            except Exception:
-                pass
-        logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} ning {len(all_mids)} ta yozishmasi o'chirildi")
+        now_ts = time.time()
+        last_violation_time = u_data.get("last_violation_time", 0.0)
+        active_mg_id = u_data.get("active_media_group_id")
+        current_mg_id = message.media_group_id
 
-    # Guruhda ogohlantirish xabari yuborish (bitta albom uchun har bir rasmda spam bo'lmasligi uchun 25 soniya debounce)
-    last_warn_time = u_data.get("last_warn_time", 0.0)
-    if (now - last_warn_time) > 25.0:
-        u_data["last_warn_time"] = now
-        save_group_media_limits(db)
+        is_same_batch = False
+        if current_mg_id and active_mg_id and current_mg_id == active_mg_id:
+            is_same_batch = True
+        elif (now_ts - last_violation_time) < 45.0:
+            is_same_batch = True
 
-        user_mention = user.mention_html()
-        base_warn = custom_warn_template.replace("{user_mention}", user_mention).replace("{limit}", str(daily_max_limit))
-        if user_mention not in base_warn and "{user_mention}" not in custom_warn_template:
-            base_warn = f"{user_mention}\n{base_warn}"
+        if not is_same_batch:
+            u_data["violations"] = u_data.get("violations", 0) + 1
+            u_data["last_violation_time"] = now_ts
+            if current_mg_id:
+                u_data["active_media_group_id"] = current_mg_id
 
+        violations = u_data.get("violations", 1)
+
+        # 2. Фойдаланувчига мут (ёзиш чеклови) ўрнатиш:
         if violations == 1:
-            warn_text = (
-                f"{base_warn}\n\n"
-                f"⚠️ <b>Сиз бир кунлик {daily_max_limit} талик расм ва видео лимитидан ошдингиз!</b>\n"
-                "⏳ <b>Сизга 2 соатлик мут (ёзиш чеклови) ўрнатилди ва ортиқча медиа ўчирилди.</b>\n\n"
-                "<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
-            )
+            until_date = int(now_ts) + 2 * 3600  # 1-қонунбузарлик: 2 соатлик мут
+            try:
+                await bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user.id,
+                    permissions=ChatPermissions(
+                        can_send_messages=False,
+                        can_send_media_messages=False,
+                        can_send_other_messages=False,
+                        can_add_web_page_previews=False
+                    ),
+                    until_date=until_date
+                )
+                logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} 2 soatga mut qilindi (1-qoidabuzarlik)")
+            except Exception as re:
+                logging.error(f"[MEDIA LIMIT] 2 soatlik mut o'rnatishda xatolik: {re}")
         else:
-            warn_text = (
-                f"{base_warn}\n\n"
-                "⛔️ <b>Сиз қоидани такроран буздингиз!</b>\n"
-                "🚫 <b>Сизга 1 кунлик (24 соат) мут белгиланди ва гуруҳдаги барча ёзишмаларингиз автоматик ўчириб ташланди!</b>\n\n"
-                "<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
-            )
+            until_date = int(now_ts) + 24 * 3600  # Такрорий: 24 соатлик мут
+            try:
+                await bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user.id,
+                    permissions=ChatPermissions(
+                        can_send_messages=False,
+                        can_send_media_messages=False,
+                        can_send_other_messages=False,
+                        can_add_web_page_previews=False
+                    ),
+                    until_date=until_date
+                )
+                logging.info(f"[MEDIA LIMIT] Foydalanuvchi {user.id} 24 soatga mut qilindi (takroriy)")
+            except Exception as re:
+                logging.error(f"[MEDIA LIMIT] 24 soatlik mut o'rnatishda xatolik: {re}")
 
-        try:
-            warn_msg = await bot.send_message(
-                chat_id=chat_id,
-                text=warn_text,
-                parse_mode="HTML"
-            )
-            # 1 дақиқадан (60 сония) сўнг огоҳлантиришни автоматик ўчириб юбориш
-            asyncio.create_task(auto_delete_message_after_delay(chat_id, warn_msg.message_id, 60))
-        except Exception as we:
-            logging.error(f"[MEDIA LIMIT] Ogohlantirish yuborishda xatolik: {we}")
-    else:
+            all_mids = list(u_data.get("message_ids", []))
+            u_data["message_ids"] = []
+            for mid in all_mids:
+                try:
+                    await bot.delete_message(chat_id=chat_id, message_id=mid)
+                    await asyncio.sleep(0.04)
+                except Exception:
+                    pass
+
+        # 3. Гуруҳда 60 сониялик огоҳлантириш хабари (битта альбомда 5 марта такрорланмаслиги учун debounce):
+        batch_key = f"{chat_id}:{user.id}:{current_mg_id}" if current_mg_id else f"{chat_id}:{user.id}:{int(now_ts // 30)}"
+        if batch_key not in ALREADY_WARNED_MEDIA_BATCHES:
+            ALREADY_WARNED_MEDIA_BATCHES.add(batch_key)
+            if len(ALREADY_WARNED_MEDIA_BATCHES) > 500:
+                ALREADY_WARNED_MEDIA_BATCHES.clear()
+
+            user_mention = user.mention_html()
+            custom_warn_template = cfg.get("warn_text", "").strip()
+            if not custom_warn_template:
+                custom_warn_template = (
+                    "Огоҳлантириш ‼️\n"
+                    "Ассалому алейкум {user_mention}\n"
+                    "Асаларичилик группага фақат бир кунда {limit} та расм ёки видео юборишга рухсат бор. Акс ҳолда сизга чеклов ўрнатилади ‼️"
+                )
+
+            base_warn = custom_warn_template.replace("{user_mention}", user_mention).replace("{limit}", str(daily_max_limit))
+            if user_mention not in base_warn and "{user_mention}" not in custom_warn_template:
+                base_warn = f"{user_mention}\n{base_warn}"
+
+            if violations == 1:
+                warn_text = (
+                    f"{base_warn}\n\n"
+                    f"⚠️ <b>Сиз бир кунлик {daily_max_limit} талик расм ва видео лимитидан ошдингиз!</b>\n"
+                    f"⏳ <b>Сизга 2 соатлик мут (ёзиш чеклови) ўрнатилди ва ортиқча медиа ўчирилди.</b>\n\n"
+                    f"<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
+                )
+            else:
+                warn_text = (
+                    f"{base_warn}\n\n"
+                    f"⛔️ <b>Сиз қоидани такроран буздингиз!</b>\n"
+                    f"🚫 <b>Сизга 1 кунлик (24 соат) мут белгиланди ва гуруҳдаги барча ортиқча ёзишмаларингиз автоматик ўчириб ташланди!</b>\n\n"
+                    f"<i>⏱ Бу огоҳлантириш 1 дақиқадан сўнг автоматик ўчирилади.</i>"
+                )
+
+            try:
+                warn_msg = await bot.send_message(
+                    chat_id=chat_id,
+                    text=warn_text,
+                    parse_mode="HTML"
+                )
+                asyncio.create_task(auto_delete_message_after_delay(chat_id, warn_msg.message_id, 60))
+            except Exception as we:
+                logging.error(f"[MEDIA LIMIT] Ogohlantirish yuborishda xatolik: {we}")
+
         save_group_media_limits(db)
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}) & F.text)
@@ -5955,7 +5963,7 @@ async def daily_scheduler_loop():
                         log[key_nl_pre] = True
                         save_json_file(SCHEDULER_LOG_FILE, log)
                         pre_text = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
-                        sent_msg = await bot.send_message(chat_id=OFFICIAL_GROUP_ID, text=pre_text)
+                        sent_msg = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=pre_text, parse_mode=None)
                         st = load_night_lock_state()
                         st["pre_warning_msg_id"] = sent_msg.message_id
                         st["last_pre_warn_date"] = today_str
@@ -5978,7 +5986,7 @@ async def daily_scheduler_loop():
                             st["pre_warning_msg_id"] = None
                         start_tpl = settings.get("night_msg_lock_start", DEFAULT_NIGHT_MSG_LOCK_START)
                         start_text = start_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
-                        sent_lock = await bot.send_message(chat_id=OFFICIAL_GROUP_ID, text=start_text)
+                        sent_lock = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=start_text, parse_mode=None)
                         st["active_lock_msg_id"] = sent_lock.message_id
                         st["last_lock_start_date"] = today_str
                         save_night_lock_state(st)
@@ -6001,7 +6009,7 @@ async def daily_scheduler_loop():
                             save_night_lock_state(st)
                         end_tpl = settings.get("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
                         end_text = end_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
-                        sent_end = await bot.send_message(chat_id=OFFICIAL_GROUP_ID, text=end_text)
+                        sent_end = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=end_text, parse_mode=None)
                         asyncio.create_task(delete_after_delay(bot, OFFICIAL_GROUP_ID, sent_end.message_id, 3600))
                         asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (Якунланди)", f"Гуруҳда тунги чеклов якунланди ва очилди."))
                         logging.info("☀️ [NIGHT LOCK] Cheklov yakunlanganligi guruhi yuborildi")
@@ -8304,13 +8312,13 @@ def get_current_video(idx: int) -> dict:
     vids = load_video_db()
     if not vids:
         return {
-            "id": 1,
-            "title": "Асаларичиликда баҳорги парвариш ва оилаларни ривожлантириш",
-            "channel": "Asalarichilik.Uz TV",
-            "duration": "18 дақиқа",
-            "description": "Баҳор фаслида асалари оилаларини тўғри кўрикдан ўтказиш ва кучайтириш сирлари.",
-            "url": "https://youtube.com/@asalarichilikuztv?feature=shared",
-            "tags": "#БаҳоргиПарвариш #Асаларичилик"
+            "id": "vid_1",
+            "title": "Flow Hive — Автоматик жўмракли асалари уяси: Асал соғиш ихтироси (Австралия ва АҚШ)",
+            "channel": "Flow Hive Official (Австралия)",
+            "duration": "14 дақиқа",
+            "description": "Дунё асаларичилигида катта шов-шувга сабаб бўлган инновацион «Flow Hive» уялари. Бу тизимда уяни очмасдан махсус тутқични бураш орқали соф асални тўғридан-тўғри шиша банкага олиш технологияси кўрсатилган.",
+            "url": "https://www.youtube.com/watch?v=WbMV9qYIXqM",
+            "tags": "#FlowHive #Инновация #АсалСоғиш #ЖаҳонАсаларичилиги"
         }
     return vids[idx % len(vids)]
 
