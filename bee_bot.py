@@ -100,6 +100,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, StateFilter
 from aiogram.types import (
+    BotCommand,
     BotCommandScopeDefault, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators, BotCommandScopeAllPrivateChats,
     ChatPermissions,
     InlineKeyboardButton,
@@ -107,6 +108,7 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    WebAppInfo,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -288,10 +290,13 @@ def get_settings() -> dict:
         data["official_group"] = "@asalarichilik_uzbekistan"
     return data
 
+def save_settings(data: dict):
+    save_json_file(SETTINGS_FILE, data)
+
 def update_setting(key: str, value: Any):
     settings = get_settings()
     settings[key] = value
-    save_json_file(SETTINGS_FILE, settings)
+    save_settings(settings)
 
 def get_official_channel() -> str:
     val = str(get_settings().get("official_channel", "@uz_asalarichilik")).strip()
@@ -2070,6 +2075,7 @@ def load_night_lock_state() -> dict:
     return load_json_file(NIGHT_LOCK_STATE_FILE, {
         "pre_warning_msg_id": None,
         "active_lock_msg_id": None,
+        "is_currently_locked": False,
         "last_pre_warn_date": "",
         "last_lock_start_date": "",
         "last_lock_end_date": ""
@@ -2077,6 +2083,15 @@ def load_night_lock_state() -> dict:
 
 def save_night_lock_state(state: dict):
     save_json_file(NIGHT_LOCK_STATE_FILE, state)
+
+def hhmm_to_minutes(hhmm: str) -> int:
+    try:
+        parts = str(hhmm).strip().split(":")
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        return (h * 60 + m) % 1440
+    except Exception:
+        return 0
 
 def is_in_night_lock_interval(cur_hhmm: str, start_hhmm: str, end_hhmm: str) -> bool:
     try:
@@ -2434,11 +2449,18 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
     if settings.get("night_lock_enabled", True) and is_group and is_in_night_lock_interval(cur_hhmm, start_t, end_t):
         # Adminlarga tegilmaydi
         if not (await is_group_admin_or_exempt(message.chat.id, message.from_user, message)):
+            # 1. Ноқонуний тунги хабарни дарҳол ўчириш:
             try:
                 await message.delete()
+                logging.info(f"[NIGHT LOCK] Guruhdagi tungi xabar o'chirildi: msg {message.message_id} (chat {message.chat.id})")
             except Exception:
-                pass
+                try:
+                    await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+                    logging.info(f"[NIGHT LOCK] bot.delete_message orqali xabar o'chirildi: msg {message.message_id}")
+                except Exception as de:
+                    logging.warning(f"[NIGHT LOCK] Xabarni o'chirishda xatolik: {de}")
 
+            # 2. Фойдаланувчига огоҳлантириш юбориш:
             remaining_str = get_remaining_time_to_unlock(cur_hhmm, end_t)
             user_name = message.from_user.first_name if message.from_user else "Фойдаланувчи"
             user_mention = f"[{user_name}](tg://user?id={message.from_user.id})" if message.from_user else user_name
@@ -5543,8 +5565,12 @@ async def group_media_limiter_handler(message: types.Message):
         try:
             await message.delete()
             logging.info(f"[MEDIA LIMIT] {daily_max_limit} tadan oshiqcha rasm o'chirildi: msg {message.message_id} (user: {user.id}, count: {cur_count})")
-        except Exception as de:
-            logging.error(f"[MEDIA LIMIT] Xabarni o'chirishda xatolik: {de}")
+        except Exception:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+                logging.info(f"[MEDIA LIMIT] bot.delete_message orqali {daily_max_limit} tadan oshiqcha rasm o'chirildi: msg {message.message_id}")
+            except Exception as de:
+                logging.error(f"[MEDIA LIMIT] Xabarni o'chirishda xatolik: {de}")
 
         now_ts = time.time()
         last_violation_time = u_data.get("last_violation_time", 0.0)
@@ -5946,38 +5972,17 @@ async def daily_scheduler_loop():
                     log[key_sci_award] = True
                     save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # 6. Avtomatik Guruh Tunggi Cheklovi (Night Lock - 3 minut oldin ogohlantirish, qulflash, ochish)
-            if settings.get("night_lock_enabled", True):
-                try:
-                    nl_start = normalize_hhmm(settings.get("night_lock_start", "23:00"))
-                    nl_end = normalize_hhmm(settings.get("night_lock_end", "06:30"))
-                    
-                    # A) 3 minut oldingi ogohlantirish (masalan 22:57 da)
-                    s_m = hhmm_to_minutes(nl_start)
-                    pre_m = (s_m - 3) % 1440
-                    pre_hhmm = f"{pre_m // 60:02d}:{pre_m % 60:02d}"
-                    key_nl_pre = f"night_pre_{today_str}_{pre_hhmm}"
-                    
-                    if (cur_hhmm == pre_hhmm or (cur_hhmm > pre_hhmm and is_within_minutes(cur_hhmm, pre_hhmm, 5))) and not log.get(key_nl_pre) and (key_nl_pre not in ALREADY_SENT_SCHEDULE_KEYS):
-                        ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_pre)
-                        log[key_nl_pre] = True
-                        save_json_file(SCHEDULER_LOG_FILE, log)
-                        pre_text = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
-                        sent_msg = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=pre_text, parse_mode=None)
-                        st = load_night_lock_state()
-                        st["pre_warning_msg_id"] = sent_msg.message_id
-                        st["last_pre_warn_date"] = today_str
-                        save_night_lock_state(st)
-                        asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (3 дақиқа олдин)", "Гуруҳга 3 дақиқа қолганда огоҳлантириш юборилди."))
-                        logging.info("🌙 [NIGHT LOCK] 3 minut oldingi ogohlantirish guruhi yuborildi")
+            # 6. Avtomatik Guruh Tunggi Cheklovi (Night Lock - to tongacha turuvchi e'lon, 1 soatlik ochilish xabari)
+            try:
+                nl_enabled = settings.get("night_lock_enabled", True)
+                nl_start = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+                nl_end = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+                is_now_night = nl_enabled and is_in_night_lock_interval(cur_hhmm, nl_start, nl_end)
+                st = load_night_lock_state()
 
-                    # B) Cheklov boshlanishi (masalan 23:00 da)
-                    key_nl_start = f"night_start_{today_str}_{nl_start}"
-                    if (cur_hhmm == nl_start or (cur_hhmm > nl_start and is_within_minutes(cur_hhmm, nl_start, 5))) and not log.get(key_nl_start) and (key_nl_start not in ALREADY_SENT_SCHEDULE_KEYS):
-                        ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_start)
-                        log[key_nl_start] = True
-                        save_json_file(SCHEDULER_LOG_FILE, log)
-                        st = load_night_lock_state()
+                if is_now_night:
+                    # Tun rejimi faol! Guruhda ogohlantirish xabari turishi kerak (to tongacha o'chmasdan)
+                    if not st.get("is_currently_locked") or not st.get("active_lock_msg_id"):
                         if st.get("pre_warning_msg_id"):
                             try:
                                 await bot.delete_message(chat_id=OFFICIAL_GROUP_ID, message_id=st["pre_warning_msg_id"])
@@ -5987,35 +5992,65 @@ async def daily_scheduler_loop():
                         start_tpl = settings.get("night_msg_lock_start", DEFAULT_NIGHT_MSG_LOCK_START)
                         start_text = start_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
                         sent_lock = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=start_text, parse_mode=None)
-                        st["active_lock_msg_id"] = sent_lock.message_id
+                        if sent_lock and getattr(sent_lock, "message_id", None):
+                            try:
+                                await bot.pin_chat_message(chat_id=OFFICIAL_GROUP_ID, message_id=sent_lock.message_id, both_silent=True)
+                            except Exception as pe:
+                                logging.warning(f"Pin night lock message error: {pe}")
+                            st["active_lock_msg_id"] = sent_lock.message_id
+                        st["is_currently_locked"] = True
                         st["last_lock_start_date"] = today_str
                         save_night_lock_state(st)
-                        asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (Бошланди)", f"Гуруҳда тунги чеклов бошланди ({nl_start} дан {nl_end} гача)."))
-                        logging.info("🌙 [NIGHT LOCK] Cheklov boshlanganligi guruhi yuborildi")
+                        asyncio.create_task(notify_owner_success(bot, "🌙 Тунги чеклов бошланди", f"Гуруҳда тунги чеклов бошланди ({nl_start} дан {nl_end} гача). Эълон гуруҳда то эрталабгача ўчмасдан туради."))
+                        logging.info("🌙 [NIGHT LOCK] Cheklov boshlanganligi e'loni joylashtirildi va qulflash yoqildi")
+                else:
+                    # Tun rejimi hozir faol emas (kunduzgi vaqt yoki tun rejimi o'chirilgan)
+                    # A) 3 minut oldingi ogohlantirish (faqat tun rejimi yoqilgan bo'lsa):
+                    if nl_enabled:
+                        s_m = hhmm_to_minutes(nl_start)
+                        pre_m = (s_m - 3) % 1440
+                        pre_hhmm = f"{pre_m // 60:02d}:{pre_m % 60:02d}"
+                        key_nl_pre = f"night_pre_{today_str}_{pre_hhmm}"
+                        if (cur_hhmm == pre_hhmm or (cur_hhmm > pre_hhmm and is_within_minutes(cur_hhmm, pre_hhmm, 4))) and not log.get(key_nl_pre) and (key_nl_pre not in ALREADY_SENT_SCHEDULE_KEYS):
+                            ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_pre)
+                            log[key_nl_pre] = True
+                            save_json_file(SCHEDULER_LOG_FILE, log)
+                            pre_text = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+                            sent_msg = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=pre_text, parse_mode=None)
+                            if sent_msg and getattr(sent_msg, "message_id", None):
+                                st["pre_warning_msg_id"] = sent_msg.message_id
+                                st["last_pre_warn_date"] = today_str
+                                save_night_lock_state(st)
+                            asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (3 дақиқа олдин)", "Гуруҳга 3 дақиқа қолганда огоҳлантириш юборилди."))
+                            logging.info("🌙 [NIGHT LOCK] 3 minut oldingi ogohlantirish guruhi yuborildi")
 
-                    # C) Cheklov tugashi (masalan 06:30 da)
-                    key_nl_end = f"night_end_{today_str}_{nl_end}"
-                    if (cur_hhmm == nl_end or (cur_hhmm > nl_end and is_within_minutes(cur_hhmm, nl_end, 5))) and not log.get(key_nl_end) and (key_nl_end not in ALREADY_SENT_SCHEDULE_KEYS):
-                        ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_end)
-                        log[key_nl_end] = True
-                        save_json_file(SCHEDULER_LOG_FILE, log)
-                        st = load_night_lock_state()
+                    # B) Agar avval tun qulfida bo'lgan bo'lsa va endi ochilish vaqti kelgan bo'lsa:
+                    if st.get("is_currently_locked") or st.get("active_lock_msg_id"):
                         if st.get("active_lock_msg_id"):
+                            try:
+                                await bot.unpin_chat_message(chat_id=OFFICIAL_GROUP_ID, message_id=st["active_lock_msg_id"])
+                            except Exception:
+                                pass
                             try:
                                 await bot.delete_message(chat_id=OFFICIAL_GROUP_ID, message_id=st["active_lock_msg_id"])
                             except Exception:
                                 pass
                             st["active_lock_msg_id"] = None
-                            save_night_lock_state(st)
-                        end_tpl = settings.get("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
-                        end_text = end_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
-                        sent_end = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=end_text, parse_mode=None)
-                        asyncio.create_task(delete_after_delay(bot, OFFICIAL_GROUP_ID, sent_end.message_id, 3600))
-                        asyncio.create_task(notify_owner_success(bot, "Тунги чеклов (Якунланди)", f"Гуруҳда тунги чеклов якунланди ва очилди."))
-                        logging.info("☀️ [NIGHT LOCK] Cheklov yakunlanganligi guruhi yuborildi")
 
-                except Exception as nle:
-                    logging.error(f"Night lock scheduler loop error: {nle}")
+                        if nl_enabled:
+                            end_tpl = settings.get("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
+                            end_text = end_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
+                            sent_end = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=end_text, parse_mode=None)
+                            if sent_end and getattr(sent_end, "message_id", None):
+                                asyncio.create_task(delete_after_delay(bot, OFFICIAL_GROUP_ID, sent_end.message_id, 3600))
+                            asyncio.create_task(notify_owner_success(bot, "☀️ Тунги чеклов якунланди", "Гуруҳда тунги чеклов якунланди ва очилди. Очилиш хабари 1 соатдан сўнг автоматик ўчирилади."))
+                            logging.info("☀️ [NIGHT LOCK] Cheklov yakunlandi, 1 soatlik ochilish xabari yuborildi")
+
+                        st["is_currently_locked"] = False
+                        st["last_lock_end_date"] = today_str
+                        save_night_lock_state(st)
+            except Exception as nle:
+                logging.error(f"Night lock scheduler loop error: {nle}")
 
             # 4. Kunlik yangi ilmiy yangilik zaxirasini tekshirish (asinxron fon rejimida)
             key_curate = f"auto_news_curate_{today_str}"
@@ -7388,7 +7423,9 @@ DEFAULT_SCIENTIFIC_SETTINGS = {
     "auto_time": "19:00",
     "script_mode": "cyrillic",
     "reactions_enabled": True,
-    "selected_set_id": 1
+    "selected_set_id": 1,
+    "format_mode": "dtm_poll",
+    "shuffle_answers": True
 }
 
 def load_scientific_tests_db() -> dict:
@@ -7623,8 +7660,13 @@ def build_scientific_settings_keyboard() -> InlineKeyboardMarkup:
     scr_str = "🟢 Кирилл алифбоси" if scr == "cyrillic" else "🟢 Lotin alifbosi"
     shuf = s.get("shuffle_answers", True)
     shuf_str = "🔀 Жавоблар: Ҳар хил (A, B, C, D, E) 🟢" if shuf else "🔤 Жавоблар: Бир хил (Фақат А) 🔴"
+    fmt = s.get("format_mode", "dtm_poll")
+    fmt_str = "📝 Тест формати: Гуруҳ ичида ДТМ сўровнома (Тавсия этилади — Группадан чиқмайди!) 🟢" if fmt == "dtm_poll" else "📱 Тест формати: Алоҳида серияли Мини-илова (Web App) ⚪️"
 
     rows = [
+        [
+            InlineKeyboardButton(text=fmt_str, callback_data="sci_set:format_toggle:now")
+        ],
         [
             InlineKeyboardButton(text=shuf_str, callback_data="sci_set:shuffle:toggle")
         ],
@@ -8019,28 +8061,11 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
         "pre_notice_sent": True
     }
 
-    banner_lines = [
-        "🏛 **«АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ЎЗ БИЛИМИНГИЗНИ СИНАБ КЎРИНГ!»** 🚀",
-        "",
-        "Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот марказлари расмий Давлат стандарти синов тести.",
-        "",
-        f"🔬 **Йўналиш:** {cat_title}",
-        f"📑 **Серия рақами:** #{active_set}-серия (10 та расмий тест саволи)",
-        f"⏰ **Синов вақти:** {start_time} дан то {end_time} гача",
-        f"⏱ **Вақт чеклови:** Ҳар бир савол учун {dur} сония",
-        "📊 **Формат:** 5 та вариант (A, B, C, D, E)",
-        "🏆 **Мукофотлар:** 1-2-3-ўрин эгаларига Олтин, Кумуш ва Бронза фахрий медаллар!",
-        "",
-        "📋 **СИНОВДА ҚАТНАШИШ ТАРТИБИ:**",
-        "1️⃣ **Гуруҳда бевосита ечиш:** Гуруҳга жойланган 10 та саволга шу ернинг ўзида жавоб белгиланг (ботга ўтиш шарт эмас).",
-        "2️⃣ **Шахсий ДТМ тест (Ботда):** Саволларни бирма-бир вақт чеклови ва онлайн саноқ билан ечиш учун пастдаги тугмани босинг.",
-        f"3️⃣ **Автоматик тақдирлаш:** Соат {end_time} да тест тўхтатилади ва барча қатнашган асаларичилар натижаси эълон қилиниб, ғолиблар тақдирланади!",
-        "",
-        "👇 **Қатнашиш учун қуйидаги тугмалардан бирини танланг:**"
-    ]
-    banner_text = chr(10).join(banner_lines)
-
+    format_mode = settings.get("format_mode", "dtm_poll")
+    webapp_base = settings.get("webapp_url", "https://ais-dev-3kuhdcrgzlxwjavmcfvmsc-952096399350.asia-southeast1.run.app")
+    webapp_url = f"{webapp_base}?cat={cat}&series={active_set}"
     bot_username = "Asalarichilikuz_bot"
+
     sci_share_body = (
         f"🏛 «АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ЎЗ БИЛИМИНГИЗНИ СИНАБ КЎРИНГ!» 🚀\n\n"
         f"🔬 Йўналиш: {cat_title}\n"
@@ -8053,113 +8078,177 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     )
     share_url = f"https://t.me/share/url?url={urllib.parse.quote(f'https://t.me/{bot_username}?start=sci_test_{active_set}')}&text={urllib.parse.quote(sci_share_body)}"
 
-    post_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👉 Ҳа, розиман! Шахсий тестни бошлаш 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
-        [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5-ўринлар)", url=f"https://t.me/{bot_username}?start=sci_rank")],
-        [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
-    ])
+    if format_mode == "webapp":
+        banner_lines = [
+            "🏛 **«АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ИЛМИЙ СИНОВ ТЕСТИ»** 🚀",
+            "",
+            "Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот марказлари расмий Давлат стандарти синов тести.",
+            "",
+            f"🔬 **Йўналиш:** {cat_title}",
+            f"📑 **Серия рақами:** #{active_set}-серия (10 та расмий тест саволи)",
+            f"⏰ **Синов вақти:** {start_time} дан то {end_time} гача",
+            "📱 **Формат:** Янгича Telegram Мини-илова (Web App)",
+            "📊 **Вариантлар:** A, B, C, D, E мураккаб илмий саволлар",
+            "🏆 **Мукофотлар:** 1-2-3-ўрин эгаларига Олтин, Кумуш ва Бронза фахрий дипломлар!",
+            "",
+            "📋 **СИНОВДА ҚАТНАШИШ ТАРТИБИ:**",
+            "1️⃣ Барча қатнашчилар бир вақтда битта умумий синов саволларини ечадилар.",
+            "2️⃣ Пастдаги «📱 Илмий тестни бошлаш (Мини-илова)» тугмасини босиб, 10 та саволга жавоб белгиланг ва якунланг.",
+            f"3️⃣ Соат {end_time} да тест тўхтатилади ва барча қатнашган асаларичилар натижаси эълон қилиниб, ғолиблар тақдирланади!",
+            "",
+            "👇 **Тестни бошлаш учун қуйидаги тугмани босинг:**"
+        ]
+        banner_text = chr(10).join(banner_lines)
 
-    sent_cnt = 0
-    poll_map = {}
+        post_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📱 Илмий тестни бошлаш (Мини-илова) 🚀", web_app=WebAppInfo(url=webapp_url))],
+            [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (Рўйхат)", url=f"https://t.me/{bot_username}?start=sci_rank")],
+            [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
+        ])
 
-    for cid in targets:
-        try:
-            sent_msg = await safe_send_to_destination(
-                bot_inst=bot_instance,
-                destination=cid,
-                text=banner_text,
-                reply_markup=post_markup,
-                parse_mode="Markdown"
-            )
-            sent_cnt += 1
-            real_chat_id = sent_msg.chat.id
+        sent_cnt = 0
+        poll_map = {}
+        for cid in targets:
             try:
-                await bot_instance.pin_chat_message(chat_id=real_chat_id, message_id=sent_msg.message_id, both_silent=True)
-            except Exception:
-                pass
-
-            # Канал ва Гуруҳларга 10 та ДТМ синов тести саволларини сўровнома сифатида юбориш
-            # Telegram қоидаси: Каналларда сўровнома аноним (is_anonymous=True) бўлиши шарт.
-            # Гуруҳларда эса қатнашчиларни рўйхатга олиш ва ғолибларни аниқлаш учун очиқ (is_anonymous=False) юборилади.
-            chat_type = getattr(sent_msg.chat, "type", "")
-            is_channel_dest = (str(cid) in ["@uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)]) or (chat_type == "channel") or (eff_target == "channel" and str(cid) not in ["@asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)])
-            poll_anon = True if is_channel_dest else False
-
-            # 10 талик тест саволлари учун A, B, C, D, E мувозанатли тарқатиш шаблони
-            # Ҳар бир ҳарф роппа-роса 2 марта тўғри жавоб бўлади (битта A бўлиб қолмайди!)
-            balanced_slots = [2, 0, 3, 1, 4, 1, 3, 0, 4, 2]
-            random.shuffle(balanced_slots)
-
-            for q_idx, q_item in enumerate(test_set, start=1):
-                try:
-                    q_raw = q_item.get("question", "")
-                    q_text = f"[{q_idx}/10] {apply_script(q_raw, script)}"
-                    if len(q_text) > 300:
-                        q_text = q_text[:297] + "..."
-
-                    sci_settings = get_sci_settings()
-                    shuffle_answers_en = sci_settings.get("shuffle_answers", True)
-                    target_slot = balanced_slots[(q_idx - 1) % len(balanced_slots)] if shuffle_answers_en else 0
-                    shuffled_opts, correct_id = prepare_balanced_shuffled_options(q_item, target_slot=target_slot, shuffle_enabled=shuffle_answers_en)
-
-                    poll_opts = []
-                    for opt in shuffled_opts[:5]:
-                        opt_c = apply_script(opt, script)
-                        if len(opt_c) > 100:
-                            opt_c = opt_c[:97] + "..."
-                        poll_opts.append(opt_c)
-
-                    raw_expl = q_item.get("explanation", "")
-                    expl = apply_script(raw_expl, script)
-                    if len(expl) > 200:
-                        expl = expl[:197] + "..."
-
-                    poll_msg = await bot_instance.send_poll(
-                        chat_id=real_chat_id,
-                        question=q_text,
-                        options=poll_opts,
-                        type="quiz",
-                        correct_option_id=correct_id,
-                        explanation=expl,
-                        is_anonymous=poll_anon
-                    )
-                    if not is_channel_dest:
-                        poll_map[poll_msg.poll.id] = {
-                            "q_idx": q_idx - 1,
-                            "correct_id": correct_id,
-                            "set_id": active_set
-                        }
-                    await asyncio.sleep(0.4)
-                except Exception as pe:
-                    logging.warning(f"Scientific poll send error ({cid}, q {q_idx}): {pe}")
-
-            # 2-РАСМДАГИДЕК: Барча тест саволлари охирида битта смайклар тўплами ва поделится белгилари
-            try:
-                finish_text = (
-                    f"🏁 **{cat_title} ({active_set}-серия) бўйича барча 10 та синов тести саволлари юборилди!**\n\n"
-                    "📊 **Реакциялар ва расмий канал ҳаволалари:**\n"
-                    "Тестда иштирок этган барча асаларичиларимизга катта раҳмат! Қуйидаги смайклар орқали тестни баҳоланг ва дўстларингиз билан улашинг:"
-                )
-                end_markup = build_post_markup(
-                    chat_id=real_chat_id,
-                    message_id=0,
-                    reactions_list=["👍", "❤️", "🔥", "👏", "🐝"],
-                    channel_username="uz_asalarichilik",
-                    is_channel_post=is_channel_dest,
-                    share_title=f"Asalarichilik илмий тести: {cat_title}",
-                    share_text=f"Асаларичилик бўйича {cat_title} ({active_set}-серия) тест саволлари якунланди! 🐝🇺🇿"
-                )
-                await bot_instance.send_message(
-                    chat_id=real_chat_id,
-                    text=finish_text,
-                    reply_markup=end_markup,
+                sent_msg = await safe_send_to_destination(
+                    bot_inst=bot_instance,
+                    destination=cid,
+                    text=banner_text,
+                    reply_markup=post_markup,
                     parse_mode="Markdown"
                 )
-            except Exception as ee:
-                logging.warning(f"Error sending test end reactions block ({cid}): {ee}")
+                sent_cnt += 1
+                try:
+                    await bot_instance.pin_chat_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id, both_silent=True)
+                except Exception:
+                    pass
+            except Exception as e:
+                logging.error(f"Scientific webapp card error ({cid}): {e}")
 
-        except Exception as e:
-            logging.error(f"Test launch broadcast error ({cid}): {e}")
+    else:
+        # DTM сўровнома режими (Telegram Polls)
+        banner_lines = [
+            "🏛 **«АСАЛАРИЧИЛИК МУТАХАССИСЛИГИ БЎЙИЧА ЎЗ БИЛИМИНГИЗНИ СИНАБ КЎРИНГ!»** 🚀",
+            "",
+            "Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот марказлари расмий Давлат стандарти синов тести.",
+            "",
+            f"🔬 **Йўналиш:** {cat_title}",
+            f"📑 **Серия рақами:** #{active_set}-серия (10 та расмий тест саволи)",
+            f"⏰ **Синов вақти:** {start_time} дан то {end_time} гача",
+            f"⏱ **Вақт чеклови:** Ҳар бир савол учун {dur} сония",
+            "📊 **Формат:** 5 та вариант (A, B, C, D, E)",
+            "🏆 **Мукофотлар:** 1-2-3-ўрин эгаларига Олтин, Кумуш ва Бронза фахрий медаллар!",
+            "",
+            "📋 **СИНОВДА ҚАТНАШИШ ТАРТИБИ:**",
+            "1️⃣ **Гуруҳда бевосита ечиш:** Гуруҳга жойланган 10 та саволга шу ернинг ўзида жавоб белгиланг (ботга ўтиш шарт эмас).",
+            "2️⃣ **Шахсий ДТМ тест (Ботда):** Саволларни бирма-бир вақт чеклови ва онлайн саноқ билан ечиш учун пастдаги тугмани босинг.",
+            f"3️⃣ **Автоматик тақдирлаш:** Соат {end_time} да тест тўхтатилади ва барча қатнашган асаларичилар натижаси эълон қилиниб, ғолиблар тақдирланади!",
+            "",
+            "👇 **Қатнашиш учун қуйидаги тугмалардан бирини танланг:**"
+        ]
+        banner_text = chr(10).join(banner_lines)
+
+        post_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👉 Ҳа, розиман! Шахсий тестни бошлаш 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
+            [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5-ўринлар)", url=f"https://t.me/{bot_username}?start=sci_rank")],
+            [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
+        ])
+
+        sent_cnt = 0
+        poll_map = {}
+
+        for cid in targets:
+            try:
+                sent_msg = await safe_send_to_destination(
+                    bot_inst=bot_instance,
+                    destination=cid,
+                    text=banner_text,
+                    reply_markup=post_markup,
+                    parse_mode="Markdown"
+                )
+                sent_cnt += 1
+                real_chat_id = sent_msg.chat.id
+                try:
+                    await bot_instance.pin_chat_message(chat_id=real_chat_id, message_id=sent_msg.message_id, both_silent=True)
+                except Exception:
+                    pass
+
+                chat_type = getattr(sent_msg.chat, "type", "")
+                is_channel_dest = (str(cid) in ["@uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)]) or (chat_type == "channel") or (eff_target == "channel" and str(cid) not in ["@asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)])
+                poll_anon = True if is_channel_dest else False
+
+                balanced_slots = [2, 0, 3, 1, 4, 1, 3, 0, 4, 2]
+                random.shuffle(balanced_slots)
+
+                for q_idx, q_item in enumerate(test_set, start=1):
+                    try:
+                        q_raw = q_item.get("question", "")
+                        q_text = f"[{q_idx}/10] {apply_script(q_raw, script)}"
+                        if len(q_text) > 300:
+                            q_text = q_text[:297] + "..."
+
+                        sci_settings = get_sci_settings()
+                        shuffle_answers_en = sci_settings.get("shuffle_answers", True)
+                        target_slot = balanced_slots[(q_idx - 1) % len(balanced_slots)] if shuffle_answers_en else 0
+                        shuffled_opts, correct_id = prepare_balanced_shuffled_options(q_item, target_slot=target_slot, shuffle_enabled=shuffle_answers_en)
+
+                        poll_opts = []
+                        for opt in shuffled_opts[:5]:
+                            opt_c = apply_script(opt, script)
+                            if len(opt_c) > 100:
+                                opt_c = opt_c[:97] + "..."
+                            poll_opts.append(opt_c)
+
+                        raw_expl = q_item.get("explanation", "")
+                        expl = apply_script(raw_expl, script)
+                        if len(expl) > 200:
+                            expl = expl[:197] + "..."
+
+                        poll_msg = await bot_instance.send_poll(
+                            chat_id=real_chat_id,
+                            question=q_text,
+                            options=poll_opts,
+                            type="quiz",
+                            correct_option_id=correct_id,
+                            explanation=expl,
+                            is_anonymous=poll_anon
+                        )
+                        if not is_channel_dest:
+                            poll_map[poll_msg.poll.id] = {
+                                "q_idx": q_idx - 1,
+                                "correct_id": correct_id,
+                                "set_id": active_set
+                            }
+                        await asyncio.sleep(0.4)
+                    except Exception as pe:
+                        logging.warning(f"Scientific poll send error ({cid}, q {q_idx}): {pe}")
+
+                try:
+                    finish_text = (
+                        f"🏁 **{cat_title} ({active_set}-серия) бўйича барча 10 та синов тести саволлари юборилди!**\n\n"
+                        "📊 **Реакциялар ва расмий канал ҳаволалари:**\n"
+                        "Тестда иштирок этган барча асаларичиларимизга катта раҳмат! Қуйидаги смайклар орқали тестни баҳоланг ва дўстларингиз билан улашинг:"
+                    )
+                    end_markup = build_post_markup(
+                        chat_id=real_chat_id,
+                        message_id=0,
+                        reactions_list=["👍", "❤️", "🔥", "👏", "🐝"],
+                        channel_username="uz_asalarichilik",
+                        is_channel_post=is_channel_dest,
+                        share_title=f"Asalarichilik илмий тести: {cat_title}",
+                        share_text=f"Асаларичилик бўйича {cat_title} ({active_set}-серия) тест саволлари якунланди! 🐝🇺🇿"
+                    )
+                    await bot_instance.send_message(
+                        chat_id=real_chat_id,
+                        text=finish_text,
+                        reply_markup=end_markup,
+                        parse_mode="Markdown"
+                    )
+                except Exception as ee:
+                    logging.warning(f"Error sending test end reactions block ({cid}): {ee}")
+
+            except Exception as e:
+                logging.error(f"Test launch broadcast error ({cid}): {e}")
 
     session["poll_map"] = poll_map
     save_sci_session(session)
@@ -8216,32 +8305,44 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
         lines.append("")
         lines.append("Ҳозирча қатнашчилар жавоблари қайд этилмаган. Тест якунланди.")
     else:
+        def format_user_mention(p: dict) -> str:
+            name_raw = str(p.get("name", "Асаларичи")).replace("[", "").replace("]", "").replace("*", "")
+            uname = str(p.get("username", "")).replace("@", "").strip()
+            uid = p.get("user_id")
+            if uname and uid:
+                return f"[{name_raw}](tg://user?id={uid}) (@{uname})"
+            elif uname:
+                return f"@{uname} ({name_raw})"
+            elif uid:
+                return f"[{name_raw}](tg://user?id={uid})"
+            return f"**{name_raw}**"
+
         w1 = leaderboard[0]
-        u1_str = f"(@{w1['username']})" if w1['username'] else ""
+        u1_str = format_user_mention(w1)
         t1_str = f"{int(w1['time_taken'])} сония" if w1['time_taken'] < 9000 else ""
         lines.append("")
         lines.append("🥇 **1-ЎРИН — ОЛТИН МЕДАЛ ВА «ОЛИЙ ДАРАЖАЛИ АСАЛАРИЧИ» НОМИ:** 🥇")
-        lines.append(f"👤 **{w1['name']}** {u1_str}")
+        lines.append(f"👤 Ғолиб: {u1_str}")
         lines.append(f"🎯 **Натижа:** **{w1['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t1_str})")
         lines.append("🏆 Юқори илмий савия, тезкор тафаккур ва юксак касбий маҳоратингизни чин қалбдан қутлаймиз! 🎖⭐️🍯")
         lines.append("")
 
         if len(leaderboard) > 1:
             w2 = leaderboard[1]
-            u2_str = f"(@{w2['username']})" if w2['username'] else ""
+            u2_str = format_user_mention(w2)
             t2_str = f"{int(w2['time_taken'])} сония" if w2['time_taken'] < 9000 else ""
             lines.append("🥈 **2-ЎРИН — КУМУШ МЕДАЛ ВА «ТАЖРИБАЛИ МУТАХАССИС» НОМИ:** 🥈")
-            lines.append(f"👤 **{w2['name']}** {u2_str}")
+            lines.append(f"👤 Ғолиб: {u2_str}")
             lines.append(f"🎯 **Натижа:** **{w2['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t2_str})")
             lines.append("👏 Чин кўнгилдан муборакбод этамиз! Сизга омад ва зафарлар тилаймиз! 🥈🎉")
             lines.append("")
 
         if len(leaderboard) > 2:
             w3 = leaderboard[2]
-            u3_str = f"(@{w3['username']})" if w3['username'] else ""
+            u3_str = format_user_mention(w3)
             t3_str = f"{int(w3['time_taken'])} сония" if w3['time_taken'] < 9000 else ""
             lines.append("🥉 **3-ЎРИН — БРОНЗА МЕДАЛ ВА «ИЛМИЙ БИЛИМДОН» НОМИ:** 🥉")
-            lines.append(f"👤 **{w3['name']}** {u3_str}")
+            lines.append(f"👤 Ғолиб: {u3_str}")
             lines.append(f"🎯 **Натижа:** **{w3['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t3_str})")
             lines.append("🎉 Фахрий натижа ва медал муборак бўлсин! 🥉✨")
             lines.append("")
@@ -8250,8 +8351,8 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
             lines.append("══════════════════════════════════════")
             lines.append("🎖 **ТОП-10 ТАЛИККА КИРГАН ФАОЛ АСАЛАРИЧИЛАР:**")
             for rank_idx, p in enumerate(leaderboard[3:10], start=4):
-                p_user = f"(@{p['username']})" if p['username'] else ""
-                lines.append(f"🏅 {rank_idx}-ўрин: **{p['name']}** {p_user} — {p['score']}/10 та тўғри")
+                p_mention = format_user_mention(p)
+                lines.append(f"🏅 {rank_idx}-ўрин: {p_mention} — **{p['score']}/10 та тўғри**")
 
     lines.append("")
     lines.append("══════════════════════════════════════")
@@ -9046,10 +9147,13 @@ def get_scientific_settings_text() -> str:
 
     shuf = s.get("shuffle_answers", True)
     shuf_lbl = "Ҳар хил (A, B, C, D, E) 🟢" if shuf else "Бир хил (Фақат А) 🔴"
+    fmt = s.get("format_mode", "dtm_poll")
+    fmt_name = "📝 Гуруҳ ичида ДТМ квиз сўровнома (Тавсия этилади — Группадан чиқмайди!) 🟢" if fmt == "dtm_poll" else "📱 Алоҳида серияли Мини-илова (Web App) ⚪️"
 
     lines = [
         "⚙️ **АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТЛАРИ СОЗЛАМАЛАРИ:**",
         "",
+        f"• **Тест ўтказиш формати:** {fmt_name}",
         f"• **Автоматик тест ҳолати:** {status_str}",
         f"• **Жавоблар тартиби:** {shuf_lbl}",
         f"• **Жўнатиш манзили:** {tgt_name}",
@@ -9057,6 +9161,7 @@ def get_scientific_settings_text() -> str:
         f"• **Ҳар бир савол вақти:** {dur_lbl}",
         "",
         "📋 **БЎЛИМЛАР ВА ВАЗИФАЛАРИ:**",
+        "• **Тест формати:** «📝 Гуруҳ ичида ДТМ сўровнома» (Фойдаланувчилар гуруҳдан чиқмасдан, регистрациясиз тўғридан-тўғри гуруҳда ечадилар) ёки «📱 Алоҳида серияли Мини-илова» (Web App).",
         "• **Авто-тест режими:** Кунлик тестни канал ва гуруҳга автоматик юборишни ёқиш ёки ўчириш.",
         "• **Бошланиш ва Тақдирлаш:** Тест қайси соатда бошланиши ва қачон автоматик якунланиб ғолиблар тақдирланиши.",
         "• **Манзил:** Тест саволлари фақат Канал, фақат Гуруҳ ёки бир вақтнинг ўзида иккаласига юборилишини белгилаш.",
@@ -9087,7 +9192,14 @@ async def on_sci_settings_action(call: types.CallbackQuery):
     param = parts[1]
     val = parts[2] if len(parts) > 2 else ""
 
-    if param == "auto_toggle":
+    if param == "format_toggle":
+        s = get_sci_settings()
+        cur = s.get("format_mode", "dtm_poll")
+        new_mode = "webapp" if cur == "dtm_poll" else "dtm_poll"
+        update_sci_setting("format_mode", new_mode)
+        status_txt = "Тест формати: 📝 Гуруҳ ичида ДТМ квиз сўровнома (Группанинг ўзида ечилади, регистрация йўқ!) 🟢" if new_mode == "dtm_poll" else "Тест формати: 📱 Алоҳида серияли Мини-илова (Web App) ⚪️"
+        await call.answer(status_txt, show_alert=True)
+    elif param == "auto_toggle":
         s = get_sci_settings()
         cur = s.get("auto_enabled", True)
         new_state = not cur
@@ -9200,6 +9312,113 @@ async def on_scientific_poll_answer(poll_answer: types.PollAnswer):
         save_sci_session(session)
     except Exception as e:
         logging.error(f"on_scientific_poll_answer error: {e}")
+
+@dp.message(F.web_app_data)
+async def on_scientific_web_app_data(message: types.Message):
+    """
+    Telegram Web App (Мини-илова) орқали ечилган тест натижаларини қабул қилиш:
+    - Қатнашчини фаол сессия рейтингига қўшади;
+    - Фойдаланувчига фахрий сертификат ва ҳисоботни тақдим этади;
+    - Гуруҳга янги иштирокчи қўшилгани тўғрисида тезкор хабар беради.
+    """
+    try:
+        raw_data = message.web_app_data.data if message.web_app_data else "{}"
+        data = json.loads(raw_data)
+    except Exception as e:
+        logging.error(f"Error parsing web_app_data: {e}")
+        return
+
+    user = message.from_user
+    uid = str(user.id)
+    name = user.full_name or "Асаларичи"
+    username = user.username or ""
+
+    score = int(data.get("score", 0))
+    total = int(data.get("total", 10))
+    pct = int(data.get("percentage", round((score / max(total, 1)) * 100)))
+    time_spent = float(data.get("time_spent", 60.0))
+    cat = data.get("category", "young_beekeepers")
+    set_id = int(data.get("set_id", 1))
+
+    session = get_sci_session()
+    participants = session.setdefault("participants", {})
+    participants[uid] = {
+        "name": name,
+        "username": username,
+        "score": score,
+        "total": total,
+        "percentage": pct,
+        "time_taken": time_spent,
+        "answers": data.get("answers", {}),
+        "started_at": time.time() - time_spent,
+        "finished": True,
+        "category": cat,
+        "set_id": set_id,
+        "source": "webapp"
+    }
+    save_sci_session(session)
+
+    if score >= 9:
+        medal = "🥇"
+        status_title = "ОЛТИН ДАРАЖАЛИ МУТАХАССИС"
+    elif score >= 7:
+        medal = "🥈"
+        status_title = "КУМУШ ДАРАЖАЛИ МУТАХАССИС"
+    elif score >= 5:
+        medal = "🥉"
+        status_title = "БРОНЗА ДАРАЖАЛИ МУТАХАССИС"
+    else:
+        medal = "📜"
+        status_title = "ФАОЛ СИНОВ ИШТИРОКЧИСИ"
+
+    cat_title = "👶 Ёш асаларичилар" if cat == "young_beekeepers" else "🎓 Устоз асаларичилар"
+    time_str = f"{int(time_spent // 60)} дақ {int(time_spent % 60)} сония" if time_spent >= 60 else f"{int(time_spent)} сония"
+
+    cert_lines = [
+        f"{medal} **«АСАЛАРИЧИЛИК ИЛМИЙ СИНОВИ НАТИЖАСИ ВА СЕРТИФИКАТИ»** {medal}",
+        "══════════════════════════════════════",
+        f"👤 **Иштирокчи:** {name} " + (f"(@{username})" if username else ""),
+        f"🔬 **Йўналиш:** {cat_title}",
+        f"📑 **Серия:** #{set_id}-серия (10 та синов саволи)",
+        f"🎯 **Тўғри жавоблар:** **{score} / {total} та** ({pct}%)",
+        f"⚡️ **Сарфланган вақт:** {time_str}",
+        f"🎖 **Даража:** **{status_title}**",
+        "══════════════════════════════════════",
+        "✅ Сизнинг барча жавобларингиз қабул қилинди ва расмий мусобақа рейтингига киритилди!",
+        "",
+        "⏰ **Тантанали тақдирлаш ва медалларни топшириш:**",
+        f"Соат {session.get('end_time', '19:00')} да расмий гуруҳ ва каналда эълон қилинади!",
+        "",
+        get_official_footer('cyrillic')
+    ]
+    cert_text = chr(10).join(cert_lines)
+
+    webapp_url = get_sci_settings().get("webapp_url", "https://ais-dev-3kuhdcrgzlxwjavmcfvmsc-952096399350.asia-southeast1.run.app")
+    bot_user = get_settings().get("official_bot", "@Asalarichilikuz_bot").replace("@", "")
+
+    cert_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Тестни қайта очиш (Мини-илова)", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг", url=f"https://t.me/{bot_user}?start=sci_rank")],
+        [InlineKeyboardButton(text="👥 Расмий Гуруҳ", url=f"https://t.me/{get_official_group_clean()}")]
+    ])
+
+    try:
+        await message.answer(cert_text, reply_markup=cert_kb, parse_mode="Markdown")
+    except Exception:
+        await message.answer(cert_text, reply_markup=cert_kb, parse_mode=None)
+
+    try:
+        if session.get("is_active"):
+            grp_id = get_official_group()
+            user_mention = f"@{username}" if username else name
+            live_msg = (
+                f"🔔 **ЯНГИ НАТИЖА (Мини-илова):**\n"
+                f"👤 {user_mention} илмий тестни **{score}/{total}** ({pct}%) натижа билан якунлади! ⚡️ ({time_str})\n"
+                f"🏆 Сиз ҳам мини-илова орқали қатнашинг ва фахрий ўринларга даъвогар бўлинг!"
+            )
+            await bot.send_message(chat_id=grp_id, text=live_msg, parse_mode="Markdown")
+    except Exception as e:
+        logging.warning(f"Failed to post webapp live result to group: {e}")
 
 @dp.callback_query(F.data == "sci_act:new_test")
 async def on_sci_new_test_builder(call: types.CallbackQuery):
@@ -9408,6 +9627,19 @@ async def on_set_toggle_sched_unified(call: types.CallbackQuery):
             "video": "4-Видеолар"
         }
         await call.answer(f"{sec_names.get(section, section)} авто-жўнатиш {state_txt}")
+    text, kb = build_group_settings_dashboard()
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "night_lock_set:toggle_enabled")
+async def on_night_lock_set_toggle_enabled(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    settings = get_settings()
+    cur = settings.get("night_lock_enabled", True)
+    new_state = not cur
+    update_setting("night_lock_enabled", new_state)
+    state_txt = "ёқилди 🟢" if new_state else "ўчирилди 🔴"
+    await call.answer(f"Тунги чеклов {state_txt}")
     text, kb = build_group_settings_dashboard()
     await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
 
