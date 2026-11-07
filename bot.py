@@ -6,20 +6,13 @@
 Бот: @Asalarichilikuztv_bot
 
 Render.com ва Серверлар учун тўлиқ мослаштирилган:
-1. 🌐 Render.com HTTP Health-Check сервери (Port Binding) қўшилган:
-   - Render'даги "No open ports detected" ва 50 сониялик қайта юкланиш муаммосини 100% ҳал қилади.
-2. 🌙 ТУНГИ РЕЖИМ (Night Mode):
-   - Соат 23:00 дан 06:00 гача (Тошкент вақти билан UTC+5) гуруҳда хабар ёзиш қатъиян чекланади.
-   - Тунда ёзилган барча хабарлар (матн, расм, видео, овоз, стикерлар) автоматик ўчирилади.
-   - Админлар: /tungi on, /tungi off, /tungi 22 7
-3. 📸 3 ТАДАН ОРТИҚ РАСМ ВА ВИДЕО НАЗОРАТИ:
-   - Биттада (альбом) ёки кетма-кет 3 тадан кўп расм/видео юборилса:
-   - Барча ташланган расм/видеолар бир зумда гуруҳдан ўчирилади!
-   - Фойдаланувчига автоматик 24 соатлик (1 кунлик) МУТ берилади.
-4. 🚫 Реклама ва спам линкларни дарҳол ўчириш.
-5. 🧹 Сервис хабарларини (кирди-чиқди) тозалаш.
-6. 👮‍♂️ Админ буйруқлари: /mut, /unmute, /warn, /del, /stat, /tungi.
-7. 😊 Канал ва илова постларидаги смайлик реакциялари (👍 ❤️ 🔥 👏 🐝).
+1. 🌐 Render.com HTTP Health-Check сервери (Port Binding)
+2. 🌙 ТУНГИ РЕЖИМ (Night Mode) тўлиқ интерактив менюси ва онлайн ҳолати
+3. 📸 3 ТАДАН ОРТИҚ РАСМ ВА ВИДЕО НАЗОРАТИ (24 соатлик МУТ)
+4. 🚫 Реклама ва спам линкларни дарҳол ўчириш
+5. 🧹 Сервис хабарларини тозалаш
+6. 👮‍♂️ Админ буйруқлари: /start, /settings, /menu, /tungi, /mut, /unmute, /stat, /del
+7. 😊 Смайлик реакциялари (👍 ❤️ 🔥 👏 🐝)
 """
 
 import os
@@ -64,10 +57,9 @@ class RenderHealthServer(BaseHTTPRequestHandler):
         self.end_headers()
 
     def log_message(self, format, *args):
-        pass  # Render логларини ортиқча тўлдирмаслик
+        pass
 
 def start_render_http():
-    """Render.com Web Service порт талаби учун содда HTTP сервер"""
     port = int(os.environ.get("PORT", 10000))
     try:
         server = HTTPServer(("0.0.0.0", port), RenderHealthServer)
@@ -76,7 +68,6 @@ def start_render_http():
     except Exception as e:
         logging.error(f"Render HTTP server xatolik: {e}")
 
-# HTTP серверни фонда ишга туширамиз
 threading.Thread(target=start_render_http, daemon=True).start()
 
 # ==================== ДАТАБАЗА ====================
@@ -117,15 +108,16 @@ def init_db():
             value TEXT
         )
     """)
+    # 2-расмдаги стандарт вақтлар: 00:00 дан 06:30 гача
     cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_mode', '1')")
-    cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_start', '23')")
-    cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_end', '6')")
+    cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_start', '00:00')")
+    cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_end', '06:30')")
+    cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_warn_text', '')")
     conn.commit()
     conn.close()
 
 init_db()
 
-# ==================== ТУНГИ РЕЖИМ СОЗЛАМАЛАРИ ====================
 def get_setting(key, default=""):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -133,7 +125,7 @@ def get_setting(key, default=""):
         cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = cur.fetchone()
         conn.close()
-        return row[0] if row else default
+        return row[0] if (row and row[0] is not None) else default
     except Exception:
         return default
 
@@ -147,27 +139,76 @@ def set_setting(key, value):
     except Exception:
         pass
 
+# ==================== ТУНГИ РЕЖИМ ВА ВАҚТ ҲИСОБ-КИТОБИ ====================
+def parse_time_to_minutes(time_str):
+    try:
+        parts = time_str.strip().split(":")
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        return h * 60 + m
+    except Exception:
+        return 0
+
 def is_night_mode_now():
-    """Тошкент вақти (UTC+5) билан тунги режим фаоллигини аниқлаш"""
+    """Тошкент вақти (UTC+5) билан тунги режим фаоллигини дақиқасигача аниқлаш"""
     enabled = get_setting("night_mode", "1") == "1"
     if not enabled:
         return False
 
-    try:
-        start_hour = int(get_setting("night_start", "23"))
-        end_hour = int(get_setting("night_end", "6"))
-    except ValueError:
-        start_hour, end_hour = 23, 6
+    start_str = get_setting("night_start", "00:00")
+    end_str = get_setting("night_end", "06:30")
+
+    start_min = parse_time_to_minutes(start_str)
+    end_min = parse_time_to_minutes(end_str)
 
     now_dt = datetime.now(TASHKENT_TZ)
-    current_hour = now_dt.hour
+    now_min = now_dt.hour * 60 + now_dt.minute
 
-    if start_hour > end_hour:  # Масалан 23:00 дан 06:00 гача
-        return current_hour >= start_hour or current_hour < end_hour
+    if start_min > end_min:  # Масалан 23:00 дан 06:30 гача
+        return now_min >= start_min or now_min < end_min
+    elif start_min < end_min:  # Масалан 00:00 дан 06:30 гача
+        return start_min <= now_min < end_min
     else:
-        return start_hour <= current_hour < end_hour
+        return True
 
-# ==================== КЭШ ВА ҲИМОЯ ====================
+def get_remaining_night_time_str():
+    """Қулф очилгунча қолган вақтни ҳисоблаш (соат ва дақиқа)"""
+    end_str = get_setting("night_end", "06:30")
+    end_min = parse_time_to_minutes(end_str)
+
+    now_dt = datetime.now(TASHKENT_TZ)
+    now_min = now_dt.hour * 60 + now_dt.minute
+
+    if now_min < end_min:
+        diff = end_min - now_min
+    else:
+        diff = (24 * 60 - now_min) + end_min
+
+    rem_h = diff // 60
+    rem_m = diff % 60
+    return f"{rem_h:02d} соат {rem_m:02d} дақиқа"
+
+def get_night_warn_text():
+    """2-расмдагидек аниқ огоҳлантириш матни"""
+    custom = get_setting("night_warn_text", "").strip()
+    if custom:
+        return custom
+
+    start_str = get_setting("night_start", "00:00")
+    end_str = get_setting("night_end", "06:30")
+    rem_time = get_remaining_night_time_str()
+
+    return f"""❝ 🌙 Ҳурматли Фойдаланувчи!
+
+Ҳозирда ушбу гуруҳ автоматик қулфланган (соат {start_str} дан {end_str} гача).
+
+Сиз соат {end_str} дан кейин гуруҳга ёзишингиз ёки бирор маълумот жўнатишингиз мумкин. Ҳозирда ушбу гуруҳ автоматик қулфланганлиги сабабли юборилган хабарингиз ўчирилди.
+
+⏳ Пожалуйста, подождите {rem_time} , пока блокировка группы не будет снята.
+
+⏳ Ушбу огоҳлантириш 30 сониядан сўнг автоматик ўчириб ташланади. ❞"""
+
+# ==================== КЭШ ВА АДМИН ТЕКШИРУВИ ====================
 _user_media_history = defaultdict(list)
 _album_messages = defaultdict(list)
 _user_msg_times = defaultdict(list)
@@ -204,14 +245,13 @@ def safe_delete_message(chat_id, message_id):
     except Exception:
         pass
 
-def delete_later(chat_id, message_id, delay=45):
+def delete_later(chat_id, message_id, delay=30):
     def _worker():
         time.sleep(delay)
         safe_delete_message(chat_id, message_id)
     threading.Thread(target=_worker, daemon=True).start()
 
 def mute_user_24h(chat_id, user_id, user_mention, reason="3 тадан ортиқ расм/видео юборилди"):
-    """Фойдаланувчига 24 соатлик (1 кунлик) мут бериш"""
     until_date = int(time.time()) + 86400  # 24 соат
     try:
         bot.restrict_chat_member(
@@ -242,7 +282,6 @@ def mute_user_24h(chat_id, user_id, user_mention, reason="3 тадан орти�
         except Exception as e:
             logging.error(f"Mute error: {e}")
 
-    # ДБга ёзиш
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -272,12 +311,11 @@ def mute_user_24h(chat_id, user_id, user_mention, reason="3 тадан орти�
 
     try:
         sent = bot.send_message(chat_id, notice_text)
-        delete_later(chat_id, sent.message_id, delay=50)
+        delete_later(chat_id, sent.message_id, delay=45)
     except Exception:
         pass
 
 def unmute_user_fully(chat_id, user_id):
-    """Мутни олиб ташлаш"""
     try:
         bot.restrict_chat_member(
             chat_id=chat_id,
@@ -314,9 +352,8 @@ def unmute_user_fully(chat_id, user_id):
     except Exception:
         pass
 
-# ==================== ТУНГИ РЕЖИМДА ХАБАРНИ БЛОКЛАШ ====================
+# ==================== ТУНГИ РЕЖИМДА ХАБАР ЎЧИРИШ ====================
 def check_night_mode_violation(message):
-    """Тунги режимда хабар ёзилган бўлса, ўчириш ва огоҳлантириш бериш"""
     if message.chat.type == 'private':
         return False
     if is_admin(message.chat.id, message.from_user.id):
@@ -325,56 +362,129 @@ def check_night_mode_violation(message):
     if is_night_mode_now():
         safe_delete_message(message.chat.id, message.message_id)
 
-        # Бир аъзога қайта-қайта спам қилмаслик (3 дақиқада 1 марта огоҳлантириш)
         now = time.time()
         user_key = (message.chat.id, message.from_user.id)
         last_warn = _night_warn_cache.get(user_key, 0)
 
-        if now - last_warn > 180:
+        # Бир аъзога 2 дақиқада максимум 1 марта огоҳлантириш чиқарилади
+        if now - last_warn > 120:
             _night_warn_cache[user_key] = now
-            start_h = get_setting("night_start", "23")
-            end_h = get_setting("night_end", "6")
-            user_mention = get_mention(message.from_user)
-
-            night_text = f"""
-🌙 <b>ТУНГИ РЕЖИМ ФАОЛ!</b>
-━━━━━━━━━━━━━━━━━━━━
-👤 {user_mention}, гуруҳда соат <b>{start_h}:00 дан {end_h}:00 гача</b> (Тошкент вақти) тунги осойишталик режими амал қилмоқда.
-
-Гуруҳ аъзоларининг тинчлигини таъминлаш мақсадида ҳозир хабар ёзиш тўхтатилган.
-Илтимос, эрталаб соат <b>{end_h}:00</b> дан кейин ёзинг! 🐝
-""".strip()
+            warn_msg = get_night_warn_text()
             try:
-                sent = bot.send_message(message.chat.id, night_text)
-                delete_later(message.chat.id, sent.message_id, delay=35)
+                sent = bot.send_message(message.chat.id, warn_msg)
+                delete_later(message.chat.id, sent.message_id, delay=30)
             except Exception:
                 pass
         return True
     return False
 
-# ==================== СЕРВИС ХАБАРЛАР (КИРДИ-ЧИҚДИ) ====================
+# ==================== АСОСИЙ МЕНЮ ВА 2-РАСМ ТУНГИ РЕЖИМ МЕНЮЛАРИ ====================
+def build_main_menu_text():
+    now_dt = datetime.now(TASHKENT_TZ)
+    current_time_str = now_dt.strftime("%H:%M")
+    is_on = get_setting("night_mode", "1") == "1"
+    start_str = get_setting("night_start", "00:00")
+    end_str = get_setting("night_end", "06:30")
+    is_active_now = is_night_mode_now()
+
+    night_status_icon = "🟢 ЁҚИЛГАН" if is_on else "🔴 ЎЧИРИЛГАН"
+    active_now_text = "🌙 Ҳозир ТУНГИ РЕЖИМДА (Ёзиш чекланган)" if is_active_now else "☀️ Ҳозир КУНДУЗГИ РЕЖИМДА (Ёзиш мумкин)"
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM muted_users WHERE muted_until > ?", (int(time.time()),))
+    active_mutes = cur.fetchone()[0]
+    cur.execute("SELECT deleted_media, muted_count, deleted_links FROM group_stats WHERE chat_id = (SELECT chat_id FROM group_stats LIMIT 1)")
+    stat_row = cur.fetchone()
+    conn.close()
+
+    total_mutes = stat_row[1] if stat_row else 0
+
+    return f"""🐝 <b>ASALARICHILIK.UZ — БОШҚАРУВ ПАНЕЛИ</b>
+━━━━━━━━━━━━━━━━━━━━
+🟢 <b>Бот ҳолати:</b> ОНЛАЙН (Серверда узлуксиз ишламоқда)
+🕒 <b>Тошкент вақти:</b> {current_time_str} (UTC+5)
+⚡️ <b>Жорий режим:</b> <b>{active_now_text}</b>
+
+🛡 <b>ГУРУҲ ҲИМОЯ ВА ХАВФСИЗЛИК ҲОЛАТИ:</b>
+• 🌙 <b>Тунги режим:</b> <b>{night_status_icon}</b> ({start_str} дан {end_str} гача)
+• 📸 <b>Медиа назорат:</b> 🟢 <b>3 талик лимит</b> (4 та бўлса 24с МУТ)
+• 🚫 <b>Спам ва ҳаволалар:</b> 🟢 <b>Авто-тозалаш</b>
+• 🔇 <b>Ҳозир фаол мутда:</b> <b>{active_mutes} та аъзо</b> (Жами: {total_mutes})
+• 👥 <b>Гуруҳ:</b> {MAIN_GROUP}
+━━━━━━━━━━━━━━━━━━━━
+<i>Керакли бўлимни бошқариш учун қуйидаги тугмалардан бирини босинг:</i>"""
+
+def build_main_menu_markup():
+    markup = InlineKeyboardMarkup()
+    is_on = get_setting("night_mode", "1") == "1"
+    btn_night_text = "🌙 Тунги Режим Созламалари (🟢 Ёқилган)" if is_on else "🌙 Тунги Режим Созламалари (🔴 Ўчирилган)"
+    markup.row(InlineKeyboardButton(btn_night_text, callback_data="open_night_menu"))
+    markup.row(InlineKeyboardButton("📸 3 талик Медиа Назорат (Фаол)", callback_data="info_media_limit"))
+    markup.row(InlineKeyboardButton("📊 Гуруҳ Статистикаси", callback_data="open_stats"))
+    markup.row(
+        InlineKeyboardButton("📢 Расмий Канал", url="https://t.me/Uz_Asalarichilik"),
+        InlineKeyboardButton("👥 Расмий Гуруҳ", url="https://t.me/ASALARICHILIK_UZBEKISTAN")
+    )
+    markup.row(InlineKeyboardButton("🔄 Маълумотларни янгилаш", callback_data="refresh_main_menu"))
+    return markup
+
+def build_night_menu_text():
+    """2-расмдагидек кўриниш ва огоҳлантириш матни"""
+    start_str = get_setting("night_start", "00:00")
+    end_str = get_setting("night_end", "06:30")
+    is_on = get_setting("night_mode", "1") == "1"
+    now_dt = datetime.now(TASHKENT_TZ)
+    current_time_str = now_dt.strftime("%H:%M")
+
+    warn_text = get_night_warn_text()
+    status_str = "🟢 Ёқилган" if is_on else "🔴 Ўчирилган"
+
+    return f"""🌙 <b>ТУНГИ РЕЖИМ БОШҚАРУВИ</b>
+━━━━━━━━━━━━━━━━━━━━
+• Тошкент вақти: <b>{current_time_str}</b>
+• Ҳолати: <b>{status_str}</b>
+• Блокировка вақти: <b>соат {start_str} дан {end_str} гача</b>
+
+Тунги вақтда юборилган барча хабарлар бот томонидан автоматик ўчирилади (30 сониядан сўнг тозаланади).
+
+💬 <b>Ҳозирги огоҳлантириш матни:</b>
+{warn_text}"""
+
+def build_night_menu_markup():
+    """2-расмдаги тугмалар билан 100% бир хил тузилиш"""
+    is_on = get_setting("night_mode", "1") == "1"
+    status_label = "Ҳолати / Status: 🟢 Ёқилган" if is_on else "Ҳолати / Status: 🔴 Ўчирилган"
+    start_str = get_setting("night_start", "00:00")
+    end_str = get_setting("night_end", "06:30")
+
+    markup = InlineKeyboardMarkup()
+    # 1-қатор: Ҳолати (босганда дарҳол ўчиб-ёнади)
+    markup.row(InlineKeyboardButton(status_label, callback_data="toggle_night_status"))
+    # 2-қатор: Бошланиш ва Тугаш вақтлари
+    markup.row(
+        InlineKeyboardButton(f"🔓 Бошланиш: {start_str}", callback_data="pick_night_start"),
+        InlineKeyboardButton(f"🔓 Тугаш: {end_str}", callback_data="pick_night_end")
+    )
+    # 3-қатор: Огоҳлантириш матнини ўзгартириш
+    markup.row(InlineKeyboardButton("✏️ Огоҳлантириш матнини ўзгартириш", callback_data="edit_night_warn_prompt"))
+    # 4-қатор: Синов эълонини юбориш
+    markup.row(InlineKeyboardButton("🚀 Ҳозироқ синов эълонини юбориш", callback_data="send_night_test_now"))
+    # 5-қатор: Ортга қайтиш тугмалари
+    markup.row(
+        InlineKeyboardButton("◀️ Гуруҳ Созламалари", callback_data="open_main_menu"),
+        InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu")
+    )
+    return markup
+
+# ==================== ХАБАРЛАР ВА БУЙРУҚЛАР ҲАНДЛЕРЛАРИ ====================
+
+# 1. Кирди-чиқди сервис хабарлари
 @bot.message_handler(content_types=['new_chat_members', 'left_chat_member'])
 def handle_service_messages(message):
     safe_delete_message(message.chat.id, message.message_id)
 
-    if message.content_type == 'new_chat_members':
-        for member in message.new_chat_members:
-            if member.is_bot:
-                continue
-            mention = get_mention(member)
-            welcome_text = f"👋 Ассалому алайкум, {mention}! <b>Asalarichilik.Uz</b> гуруҳига хуш келибсиз!\n\n🐝 <i>Гуруҳда бир вақтда 3 тадан ортиқ расм/видео юбориш тақиқланади. Тунги режим: 23:00 дан 06:00 гача.</i>"
-            markup = InlineKeyboardMarkup()
-            markup.row(
-                InlineKeyboardButton("📢 Расмий Канал", url="https://t.me/Uz_Asalarichilik"),
-                InlineKeyboardButton("👥 Қоидалар", url="https://t.me/Uz_Asalarichilik")
-            )
-            try:
-                msg = bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
-                delete_later(message.chat.id, msg.message_id, delay=60)
-            except Exception:
-                pass
-
-# ==================== КУЧАЙТИРИЛГАН РАСМ ВА ВИДЕО НАЗОРАТИ ====================
+# 2. Расм ва видеолар (3 талик қатъий назорат)
 @bot.message_handler(content_types=['photo', 'video'])
 def handle_media_control(message):
     if check_night_mode_violation(message):
@@ -384,7 +494,6 @@ def handle_media_control(message):
     user_id = message.from_user.id
 
     if message.chat.type == 'private':
-        bot.reply_to(message, "✅ Ҳурматли асаларичи, гуруҳ ёки каналга юбориш учун Asalarichilik иловасидан фойдаланинг.")
         return
 
     if is_admin(chat_id, user_id):
@@ -393,7 +502,7 @@ def handle_media_control(message):
     now = time.time()
     user_mention = get_mention(message.from_user)
 
-    # 1. АЛЬБОМ (Media Group) НАЗОРАТИ:
+    # Альбом назорати:
     if message.media_group_id:
         mg_id = message.media_group_id
         _album_messages[mg_id].append((message.message_id, user_id))
@@ -406,7 +515,7 @@ def handle_media_control(message):
                 mute_user_24h(chat_id, user_id, user_mention, reason="Альбомда 3 тадан ортиқ расм/видео")
             return
 
-    # 2. КЕТМА-КЕТ МЕДИА ЮБОРИШ НАЗОРАТИ (60 сония ичида):
+    # Кетма-кет 60 сонияда юбориш назорати:
     user_key = (chat_id, user_id)
     _user_media_history[user_key] = [
         (mid, ts) for mid, ts in _user_media_history[user_key] if now - ts < 60
@@ -423,13 +532,33 @@ def handle_media_control(message):
         _user_media_history[user_key].clear()
         return
 
-# ==================== БОШҚА БАРЧА МЕДИАЛАРНИ ТУНГИ НАЗОРАТИ ====================
+# 3. Бошқа барча медиа турлари (Тунги назорат)
 @bot.message_handler(content_types=['voice', 'audio', 'document', 'sticker', 'animation', 'video_note', 'contact', 'location', 'poll'])
 def handle_other_media(message):
     if check_night_mode_violation(message):
         return
 
-# ==================== АНТИ-СПАМ ВА МАТН НАЗОРАТИ ====================
+# 4. Барча матнли хабарлар ва буйруқлар
+@bot.message_handler(commands=['start', 'settings', 'menu', 'sozlamalar', 'help'])
+def cmd_main_settings(message):
+    user_id = message.from_user.id
+    if message.chat.type != 'private' and not is_admin(message.chat.id, user_id):
+        return
+
+    text = build_main_menu_text()
+    markup = build_main_menu_markup()
+    bot.send_message(message.chat.id, text, reply_markup=markup)
+
+@bot.message_handler(commands=['tungi', 'night', 'tungirejim'])
+def cmd_night_shortcut(message):
+    chat_id = message.chat.id
+    if message.chat.type != 'private' and not is_admin(chat_id, message.from_user.id):
+        return
+
+    text = build_night_menu_text()
+    markup = build_night_menu_markup()
+    bot.send_message(chat_id, text, reply_markup=markup)
+
 @bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['text'])
 def handle_group_text(message):
     if check_night_mode_violation(message):
@@ -445,7 +574,7 @@ def handle_group_text(message):
     now = time.time()
     user_key = (chat_id, user_id)
 
-    # 1. Anti-Flood (3 сония ичида 5 тадан кўп хабар)
+    # Anti-Flood (3 сонияда 5 та хабар)
     _user_msg_times[user_key] = [ts for ts in _user_msg_times[user_key] if now - ts < 3]
     _user_msg_times[user_key].append(now)
     if len(_user_msg_times[user_key]) > 5:
@@ -453,7 +582,7 @@ def handle_group_text(message):
         mute_user_24h(chat_id, user_id, get_mention(message.from_user), reason="Флуд (Тез-тез хабар ёзиш)")
         return
 
-    # 2. Реклама ва линклар назорати
+    # Реклама ва ҳаволалар
     if any(kw in text.lower() for kw in ["http://", "https://", "t.me/"]):
         if not any(allowed in text for allowed in ["t.me/Uz_Asalarichilik", "t.me/ASALARICHILIK_UZBEKISTAN", "t.me/JamshidjonDavronov"]):
             safe_delete_message(chat_id, message.message_id)
@@ -480,60 +609,6 @@ def warn_user(chat_id, user_id, user_obj):
         )
         delete_later(chat_id, msg.message_id, delay=35)
 
-# ==================== ТУНГИ РЕЖИМ БУЙРУҚЛАРИ ====================
-@bot.message_handler(commands=['tungi', 'night', 'tungirejim'])
-def cmd_night_mode(message):
-    chat_id = message.chat.id
-    if message.chat.type != 'private' and not is_admin(chat_id, message.from_user.id):
-        return
-
-    parts = message.text.split()
-    if len(parts) > 1 and parts[1].lower() in ["on", "yoq", "yoqish", "1", "start"]:
-        set_setting("night_mode", "1")
-        sh = get_setting("night_start", "23")
-        eh = get_setting("night_end", "6")
-        bot.reply_to(message, f"🌙 <b>Тунги режим ЁҚИЛДИ!</b>\n\n⏰ Вақти: соат <b>{sh}:00 дан {eh}:00 гача</b> (Тошкент вақти).\nУшбу вақт оралиғида оддий аъзолар хабар ёза олмайди.")
-        return
-
-    if len(parts) > 1 and parts[1].lower() in ["off", "ochir", "ochirish", "0", "stop"]:
-        set_setting("night_mode", "0")
-        bot.reply_to(message, "☀️ <b>Тунги режим ЎЧИРИЛДИ!</b>\nЭнди аъзолар 24 соат давомида эркин ёзишлари мумкин.")
-        return
-
-    if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
-        sh, eh = int(parts[1]), int(parts[2])
-        if 0 <= sh <= 23 and 0 <= eh <= 23:
-            set_setting("night_start", str(sh))
-            set_setting("night_end", str(eh))
-            set_setting("night_mode", "1")
-            bot.reply_to(message, f"✅ <b>Тунги режим вақти ўзгартирилди:</b>\n\n⏰ Янги вақт: <b>{sh}:00 дан {eh}:00 гача</b> (Тошкент вақти)")
-            return
-
-    is_on = get_setting("night_mode", "1") == "1"
-    sh = get_setting("night_start", "23")
-    eh = get_setting("night_end", "6")
-    now_dt = datetime.now(TASHKENT_TZ)
-    current_time_str = now_dt.strftime("%H:%M")
-    is_active_now = is_night_mode_now()
-
-    status_icon = "🟢 ЁҚИЛГАН" if is_on else "🔴 ЎЧИРИЛГАН"
-    active_now_text = "🌙 Ҳозир тунги режим ФАОЛ (ёзиш чекланган)" if is_active_now else "☀️ Ҳозир кундузги режим (ёзиш мумкин)"
-
-    msg = f"""
-🌙 <b>ТУНГИ РЕЖИМ БОШҚАРУВИ:</b>
-━━━━━━━━━━━━━━━━━━━━
-• Ҳолати: <b>{status_icon}</b>
-• Вақти: <b>{sh}:00 дан {eh}:00 гача</b>
-• Ҳозирги Тошкент вақти: <b>{current_time_str}</b>
-• Жорий ҳолат: <b>{active_now_text}</b>
-━━━━━━━━━━━━━━━━━━━━
-<b>Бошқариш буйруқлари:</b>
-• <code>/tungi on</code> — Ёқиш
-• <code>/tungi off</code> — Ўчириш
-• <code>/tungi 22 7</code> — Вақтини 22:00 дан 07:00 гача ўзгартириш
-""".strip()
-    bot.reply_to(message, msg)
-
 # ==================== АДМИН БУЙРУҚЛАРИ ====================
 @bot.message_handler(commands=['unmute', 'ochish'])
 def cmd_unmute(message):
@@ -556,17 +631,14 @@ def cmd_unmute(message):
 
     if target_user_id:
         unmute_user_fully(chat_id, target_user_id)
-        msg = bot.send_message(chat_id, f"✅ {target_name} мутдан муваффақиятли чиқарилди! Энди бемалол ёза олади.")
+        msg = bot.send_message(chat_id, f"✅ {target_name} мутдан чиқарилди! Энди бемалол ёза олади.")
         delete_later(chat_id, msg.message_id, delay=30)
-    else:
-        bot.reply_to(message, "Мутдан чиқариш учун фойдаланувчи хабарига reply қилиб /unmute деб ёзинг.")
 
 @bot.message_handler(commands=['mut', 'mute'])
 def cmd_mute(message):
     chat_id = message.chat.id
     if not is_admin(chat_id, message.from_user.id):
         return
-
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         mute_user_24h(chat_id, target_user.id, get_mention(target_user), reason="Админ буйруғи билан")
@@ -586,37 +658,17 @@ def cmd_stat(message):
     chat_id = message.chat.id
     if not is_admin(chat_id, message.from_user.id):
         return
+    bot.reply_to(message, build_main_menu_text(), reply_markup=build_main_menu_markup())
 
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT deleted_media, muted_count, deleted_links FROM group_stats WHERE chat_id = ?", (chat_id,))
-    row = cur.fetchone()
-    cur.execute("SELECT COUNT(*) FROM muted_users WHERE chat_id = ? AND muted_until > ?", (chat_id, int(time.time())))
-    active_mutes = cur.fetchone()[0]
-    conn.close()
-
-    m_count = row[1] if row else 0
-    sh = get_setting("night_start", "23")
-    eh = get_setting("night_end", "6")
-    n_on = "Фаол 🟢" if get_setting("night_mode", "1") == "1" else "Ўчирилган 🔴"
-
-    text = f"""
-📊 <b>ГУРУҲ ҲИМОЯ ВА НАЗОРАТ СТАТИСТИКАСИ:</b>
-━━━━━━━━━━━━━━━━━━━━
-🌙 Тунги режим: <b>{n_on} ({sh}:00 - {eh}:00)</b>
-🔇 Ҳозир фаол мутдагилар: <b>{active_mutes} та</b>
-🛡 Жами мут берилганлар: <b>{m_count} марта</b>
-📸 3 талик медиа лимит: <b>Фаол (24 соатлик мут)</b>
-🔗 Реклама ва спам фильтри: <b>Фаол</b>
-━━━━━━━━━━━━━━━━━━━━
-<i>Бот фаол ишламоқда ва гуруҳ хавфсизлигини 100% таъминламоқда!</i>
-""".strip()
-    bot.reply_to(message, text)
-
-# ==================== СМАЙЛИК РЕАКЦИЯЛАРИ ====================
+# ==================== CALLBACK QUERY ҲОДИСАЛАРИ ====================
 @bot.callback_query_handler(func=lambda call: True)
-def handle_callbacks(call):
+def handle_all_callbacks(call):
     data = call.data
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+    user_id = call.from_user.id
+
+    # 1. Пост реакциялари
     if data.startswith(("rx:", "rx_")):
         emoji_type = data.replace("rx:", "").replace("rx_", "")
         resp_msg = {
@@ -632,78 +684,194 @@ def handle_callbacks(call):
             pass
         return
 
-    if data == "toggle_night":
-        if call.from_user.id != OWNER_ID:
-            bot.answer_callback_query(call.id, "Фақат эгаси учун!")
-            return
+    # Админ текшируви
+    if user_id != OWNER_ID and not is_admin(chat_id, user_id):
+        bot.answer_callback_query(call.id, "⛔️ Бу бўлим фақат бот эгаси ва админлар учун!", show_alert=True)
+        return
+
+    # 2. Асосий менюни очиш ёки янгилаш
+    if data in ["open_main_menu", "refresh_main_menu"]:
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_main_menu_text(),
+                reply_markup=build_main_menu_markup()
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, "🔄 Асосий Меню янгиланди!")
+        return
+
+    # 3. Тунги режим бўлимини очиш (2-расм)
+    if data == "open_night_menu":
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_night_menu_text(),
+                reply_markup=build_night_menu_markup()
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, "🌙 Тунги Режим Созламалари")
+        return
+
+    # 4. Ҳолати (🟢 Ёқилган / 🔴 Ўчирилган) тугмаси босилганда
+    if data == "toggle_night_status":
         curr = get_setting("night_mode", "1")
         new_val = "0" if curr == "1" else "1"
         set_setting("night_mode", new_val)
-        txt = "🌙 Тунги режим ЁҚИЛДИ" if new_val == "1" else "☀️ Тунги режим ЎЧИРИЛДИ"
-        bot.answer_callback_query(call.id, txt, show_alert=True)
+
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_night_menu_text(),
+                reply_markup=build_night_menu_markup()
+            )
+        except Exception:
+            pass
+
+        alert_text = "🟢 Тунги режим муваффақиятли ЁҚИЛДИ!" if new_val == "1" else "🔴 Тунги режим ЎЧИРИЛДИ!"
+        bot.answer_callback_query(call.id, alert_text, show_alert=True)
+        return
+
+    # 5. Бошланиш вақтини танлаш
+    if data == "pick_night_start":
+        markup = InlineKeyboardMarkup()
+        markup.row(
+            InlineKeyboardButton("22:00", callback_data="set_start_22:00"),
+            InlineKeyboardButton("23:00", callback_data="set_start_23:00"),
+            InlineKeyboardButton("00:00", callback_data="set_start_00:00"),
+            InlineKeyboardButton("01:00", callback_data="set_start_01:00")
+        )
+        markup.row(InlineKeyboardButton("◀️ Ортга (Тунги режим)", callback_data="open_night_menu"))
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text="🔓 <b>Тунги режим бошланиш соатини танланг ёки босинг:</b>",
+                reply_markup=markup
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id)
+        return
+
+    if data.startswith("set_start_"):
+        val = data.replace("set_start_", "")
+        set_setting("night_start", val)
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_night_menu_text(),
+                reply_markup=build_night_menu_markup()
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, f"✅ Бошланиш вақти: {val} қилиб созланди!", show_alert=True)
+        return
+
+    # 6. Тугаш вақтини танлаш
+    if data == "pick_night_end":
+        markup = InlineKeyboardMarkup()
+        markup.row(
+            InlineKeyboardButton("05:00", callback_data="set_end_05:00"),
+            InlineKeyboardButton("06:00", callback_data="set_end_06:00"),
+            InlineKeyboardButton("06:30", callback_data="set_end_06:30"),
+            InlineKeyboardButton("07:00", callback_data="set_end_07:00")
+        )
+        markup.row(InlineKeyboardButton("◀️ Ортга (Тунги режим)", callback_data="open_night_menu"))
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text="🔓 <b>Тунги режим тугаш соатини танланг:</b>",
+                reply_markup=markup
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id)
+        return
+
+    if data.startswith("set_end_"):
+        val = data.replace("set_end_", "")
+        set_setting("night_end", val)
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_night_menu_text(),
+                reply_markup=build_night_menu_markup()
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, f"✅ Тугаш вақти: {val} қилиб созланди!", show_alert=True)
+        return
+
+    # 7. Ҳозироқ синов эълонини юбориш (2-расмдагидек)
+    if data == "send_night_test_now":
+        test_text = get_night_warn_text()
+        try:
+            sent = bot.send_message(MAIN_GROUP, f"🧪 <b>[СИНОВ ЭЪЛОНИ]:</b>\n\n{test_text}")
+            delete_later(MAIN_GROUP, sent.message_id, delay=30)
+            bot.answer_callback_query(call.id, "✅ Синов эълони гуруҳга юборилди ва 30 сониядан сўнг автоматик ўчирилади!", show_alert=True)
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"Гуруҳга юборишда хатолик: {e}", show_alert=True)
+        return
+
+    # 8. Огоҳлантириш матнини ўзгартириш
+    if data == "edit_night_warn_prompt":
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔄 Стандарт матнга қайтариш (Сброс)", callback_data="reset_night_warn"))
+        markup.row(InlineKeyboardButton("◀️ Ортга (Тунги режим)", callback_data="open_night_menu"))
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text="✏️ <b>Тунги режим огоҳлантириш матни:</b>\n\nМатнни ўзгартириш учун янги матнни ёзиб юборинг ёки стандарт матнга қайтариш тугмасини босинг:",
+                reply_markup=markup
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id)
+        return
+
+    if data == "reset_night_warn":
+        set_setting("night_warn_text", "")
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_night_menu_text(),
+                reply_markup=build_night_menu_markup()
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, "✅ Огоҳлантириш матни стандарт ҳолатга қайтарилди!", show_alert=True)
+        return
+
+    # 9. Бошқа бўлимлар
+    if data == "info_media_limit":
+        bot.answer_callback_query(call.id, "📸 3 тадан кўп расм/видео юборилса: барча расмлар ўчирилади ва 24 соатлик МУТ берилади!", show_alert=True)
+        return
+
+    if data == "open_stats":
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_main_menu_text(),
+                reply_markup=build_main_menu_markup()
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, "📊 Статистика янгиланди!")
         return
 
     bot.answer_callback_query(call.id, "✅ Қабул қилинди")
-
-# ==================== ШАХСИЙ ЧАТ /START (БОТ ЭГАСИ УЧУН) ====================
-@bot.message_handler(commands=['start', 'help'])
-def cmd_start(message):
-    user_id = message.from_user.id
-    if message.chat.type != 'private':
-        return
-
-    if user_id == OWNER_ID:
-        sh = get_setting("night_start", "23")
-        eh = get_setting("night_end", "6")
-        n_status = "ЁҚИЛГАН 🟢" if get_setting("night_mode", "1") == "1" else "ЎЧИРИЛГАН 🔴"
-        text = f"""
-🐝 <b>Ассалому алайкум, Ҳурматли Жамшиджон! (@JamshidjonDavronov)</b>
-
-Бот гуруҳни тўлиқ назорат қилмоқда:
-
-🌙 <b>1. ТУНГИ РЕЖИМ ({n_status}):</b>
-• Вақти: соат <b>{sh}:00 дан {eh}:00 гача</b> (Тошкент вақти)
-• Тунда ёзилган хабарлар автоматик ўчирилади ва огоҳлантириш берилади.
-• Бошқариш: <code>/tungi on</code> ёки <code>/tungi off</code> ёки <code>/tungi 22 7</code>
-
-📸 <b>2. 3 ТАДАН ОРТИҚ РАСМ/ВИДЕО НАЗОРАТИ:</b>
-• Биттада (альбом) ёки кетма-кет 3 тадан кўп расм/видео юборилса:
-• Барча ташланган расмлар бир зумда ўчирилади!
-• Фойдаланувчига автоматик <b>24 соатлик (1 кунлик) МУТ</b> берилади.
-
-⚙️ <b>3. АДМИН БУЙРУҚЛАРИ (Гуруҳда):</b>
-• <code>/unmute</code> — Мутдан чиқариш (хабарига reply қилиб)
-• <code>/mut</code> — 24 соатга мут қилиш
-• <code>/del</code> — Хабарни ўчириш
-• <code>/stat</code> — Ҳимоя статистикасини кўриш
-• <code>/tungi</code> — Тунги режимни кўриш ва созлаш
-""".strip()
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("🌙 Тунги режимни ёқиш/ўчириш", callback_data="toggle_night")
-        )
-        markup.row(
-            InlineKeyboardButton("📢 Расмий Канал", url="https://t.me/Uz_Asalarichilik"),
-            InlineKeyboardButton("👥 Расмий Гуруҳ", url="https://t.me/ASALARICHILIK_UZBEKISTAN")
-        )
-    else:
-        text = """
-🐝 <b>Asalarichilik.Uz Назорат Ботига хуш келибсиз!</b>
-
-Бот @Asalarichilik_Uzbekistan гуруҳида хавфсизлик ва тозаликни таъминлайди:
-• 🌙 Тунги режим: 23:00 дан 06:00 гача хабар ёзиш тақиқланади.
-• 📸 3 тадан ортиқ расм/видео юборганларга 24 соатлик мут берилади.
-• 🚫 Спам ва рекламалар тақиқланган.
-
-📢 Расмий канал: @Uz_Asalarichilik
-👥 Расмий гуруҳ: @Asalarichilik_Uzbekistan
-""".strip()
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("📢 Расмий Канал", url="https://t.me/Uz_Asalarichilik"),
-            InlineKeyboardButton("👥 Расмий Гуруҳ", url="https://t.me/ASALARICHILIK_UZBEKISTAN")
-        )
-    bot.send_message(message.chat.id, text, reply_markup=markup)
 
 # ==================== ИШГА ТУШИРИШ ====================
 def run_bot():
