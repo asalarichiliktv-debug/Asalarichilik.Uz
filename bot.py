@@ -5,18 +5,21 @@
 Муаллиф ва Бот эгаси: @JamshidjonDavronov (ID: 2047501151)
 Бот: @Asalarichilikuztv_bot
 
-Асосий вазифалар:
-1. 🌙 ТУНГИ РЕЖИМ (Night Mode):
-   - Соат 23:00 дан 06:00 гача (Тошкент вақти билан UTC+5) гуруҳда хабар ёзиш чекланади.
-   - Тунда ёзилган хабарлар автоматик ўчирилади ва огоҳлантириш берилади.
-   - Админлар /tungi on, /tungi off ёки /tungi 22 07 буйруғи орқали бошқара олади.
-2. 📸 КУЧАЙТИРИЛГАН МЕДИА НАЗОРАТ: 3 тадан ортиқ расм ёки видео юборилса:
-   - Барча юборилган расм/видеолар бир зумда ўчирилади!
-   - Фойдаланувчига 24 соатлик (1 кунлик) МУТ берилади.
-3. 🚫 Спам ва бегона реклама ҳаволаларини дарҳол ўчириш.
-4. 🧹 Кирди-чиқди (сервис) хабарларини тозалаш.
-5. 👮‍♂️ Админ буйруқлари: /mut, /unmute, /warn, /del, /stat, /tungi.
-6. 😊 Илова ва канал постларидаги смайлик реакциялари (👍 ❤️ 🔥 👏 🐝).
+Render.com ва Серверлар учун тўлиқ мослаштирилган:
+1. 🌐 Render.com HTTP Health-Check сервери (Port Binding) қўшилган:
+   - Render'даги "No open ports detected" ва 50 сониялик қайта юкланиш муаммосини 100% ҳал қилади.
+2. 🌙 ТУНГИ РЕЖИМ (Night Mode):
+   - Соат 23:00 дан 06:00 гача (Тошкент вақти билан UTC+5) гуруҳда хабар ёзиш қатъиян чекланади.
+   - Тунда ёзилган барча хабарлар (матн, расм, видео, овоз, стикерлар) автоматик ўчирилади.
+   - Админлар: /tungi on, /tungi off, /tungi 22 7
+3. 📸 3 ТАДАН ОРТИҚ РАСМ ВА ВИДЕО НАЗОРАТИ:
+   - Биттада (альбом) ёки кетма-кет 3 тадан кўп расм/видео юборилса:
+   - Барча ташланган расм/видеолар бир зумда гуруҳдан ўчирилади!
+   - Фойдаланувчига автоматик 24 соатлик (1 кунлик) МУТ берилади.
+4. 🚫 Реклама ва спам линкларни дарҳол ўчириш.
+5. 🧹 Сервис хабарларини (кирди-чиқди) тозалаш.
+6. 👮‍♂️ Админ буйруқлари: /mut, /unmute, /warn, /del, /stat, /tungi.
+7. 😊 Канал ва илова постларидаги смайлик реакциялари (👍 ❤️ 🔥 👏 🐝).
 """
 
 import os
@@ -27,6 +30,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import telebot
 from telebot import types
@@ -46,6 +50,34 @@ bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
 # Тошкент вақти (UTC+5)
 TASHKENT_TZ = timezone(timedelta(hours=5))
+
+# ==================== RENDER.COM HTTP HEALTH CHECK ====================
+class RenderHealthServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"OK - Asalarichilik Moderation Bot is active and running on Render!")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # Render логларини ортиқча тўлдирмаслик
+
+def start_render_http():
+    """Render.com Web Service порт талаби учун содда HTTP сервер"""
+    port = int(os.environ.get("PORT", 10000))
+    try:
+        server = HTTPServer(("0.0.0.0", port), RenderHealthServer)
+        logging.info(f"🌐 Render HTTP сервери {port}-портда ишга тушди.")
+        server.serve_forever()
+    except Exception as e:
+        logging.error(f"Render HTTP server xatolik: {e}")
+
+# HTTP серверни фонда ишга туширамиз
+threading.Thread(target=start_render_http, daemon=True).start()
 
 # ==================== ДАТАБАЗА ====================
 DB_PATH = "bot_moderation.db"
@@ -85,7 +117,6 @@ def init_db():
             value TEXT
         )
     """)
-    # Тунги режимни бошланғич созлаш (default: ёқилган, 23:00 - 06:00)
     cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_mode', '1')")
     cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_start', '23')")
     cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('night_end', '6')")
@@ -117,7 +148,7 @@ def set_setting(key, value):
         pass
 
 def is_night_mode_now():
-    """Ҳозир тунги режим вақтими ёки йўқми текшириш (Тошкент вақти UTC+5 билан)"""
+    """Тошкент вақти (UTC+5) билан тунги режим фаоллигини аниқлаш"""
     enabled = get_setting("night_mode", "1") == "1"
     if not enabled:
         return False
@@ -141,7 +172,7 @@ _user_media_history = defaultdict(list)
 _album_messages = defaultdict(list)
 _user_msg_times = defaultdict(list)
 _admin_cache = {}
-_night_warn_cache = {}  # (chat_id, user_id) -> last_warn_ts (тунги режимда спам бўлмаслиги учун)
+_night_warn_cache = {}
 
 def is_admin(chat_id, user_id):
     if user_id == OWNER_ID:
@@ -294,7 +325,7 @@ def check_night_mode_violation(message):
     if is_night_mode_now():
         safe_delete_message(message.chat.id, message.message_id)
 
-        # 3 дақиқа ичида битта фойдаланувчига қайта-қайта хабар ёзиб спам қилмаслик
+        # Бир аъзога қайта-қайта спам қилмаслик (3 дақиқада 1 марта огоҳлантириш)
         now = time.time()
         user_key = (message.chat.id, message.from_user.id)
         last_warn = _night_warn_cache.get(user_key, 0)
@@ -310,7 +341,7 @@ def check_night_mode_violation(message):
 ━━━━━━━━━━━━━━━━━━━━
 👤 {user_mention}, гуруҳда соат <b>{start_h}:00 дан {end_h}:00 гача</b> (Тошкент вақти) тунги осойишталик режими амал қилмоқда.
 
-Гуруҳ аъзоларининг тинчлигини бузмаслик мақсадида ҳозир хабар ёзиш вақтинча тўхтатилган.
+Гуруҳ аъзоларининг тинчлигини таъминлаш мақсадида ҳозир хабар ёзиш тўхтатилган.
 Илтимос, эрталаб соат <b>{end_h}:00</b> дан кейин ёзинг! 🐝
 """.strip()
             try:
@@ -346,7 +377,6 @@ def handle_service_messages(message):
 # ==================== КУЧАЙТИРИЛГАН РАСМ ВА ВИДЕО НАЗОРАТИ ====================
 @bot.message_handler(content_types=['photo', 'video'])
 def handle_media_control(message):
-    # 1. Аввал тунги режим текширилади:
     if check_night_mode_violation(message):
         return
 
@@ -357,14 +387,13 @@ def handle_media_control(message):
         bot.reply_to(message, "✅ Ҳурматли асаларичи, гуруҳ ёки каналга юбориш учун Asalarichilik иловасидан фойдаланинг.")
         return
 
-    # Админлар ва бот эгасига чеклов йўқ
     if is_admin(chat_id, user_id):
         return
 
     now = time.time()
     user_mention = get_mention(message.from_user)
 
-    # 1. АЛЬБОМ (Media Group) НАЗОРАТИ (Биттада 4, 5, 10 та расм/видео ташланса):
+    # 1. АЛЬБОМ (Media Group) НАЗОРАТИ:
     if message.media_group_id:
         mg_id = message.media_group_id
         _album_messages[mg_id].append((message.message_id, user_id))
@@ -394,8 +423,8 @@ def handle_media_control(message):
         _user_media_history[user_key].clear()
         return
 
-# ==================== ОВОЗ, АУДИО, ФАЙЛ, СТИКЕР ТУНГИ НАЗОРАТИ ====================
-@bot.message_handler(content_types=['voice', 'audio', 'document', 'sticker', 'animation'])
+# ==================== БОШҚА БАРЧА МЕДИАЛАРНИ ТУНГИ НАЗОРАТИ ====================
+@bot.message_handler(content_types=['voice', 'audio', 'document', 'sticker', 'animation', 'video_note', 'contact', 'location', 'poll'])
 def handle_other_media(message):
     if check_night_mode_violation(message):
         return
@@ -403,7 +432,6 @@ def handle_other_media(message):
 # ==================== АНТИ-СПАМ ВА МАТН НАЗОРАТИ ====================
 @bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['text'])
 def handle_group_text(message):
-    # Тунги режимни текшириш
     if check_night_mode_violation(message):
         return
 
@@ -460,7 +488,6 @@ def cmd_night_mode(message):
         return
 
     parts = message.text.split()
-    # /tungi on
     if len(parts) > 1 and parts[1].lower() in ["on", "yoq", "yoqish", "1", "start"]:
         set_setting("night_mode", "1")
         sh = get_setting("night_start", "23")
@@ -468,13 +495,11 @@ def cmd_night_mode(message):
         bot.reply_to(message, f"🌙 <b>Тунги режим ЁҚИЛДИ!</b>\n\n⏰ Вақти: соат <b>{sh}:00 дан {eh}:00 гача</b> (Тошкент вақти).\nУшбу вақт оралиғида оддий аъзолар хабар ёза олмайди.")
         return
 
-    # /tungi off
     if len(parts) > 1 and parts[1].lower() in ["off", "ochir", "ochirish", "0", "stop"]:
         set_setting("night_mode", "0")
         bot.reply_to(message, "☀️ <b>Тунги режим ЎЧИРИЛДИ!</b>\nЭнди аъзолар 24 соат давомида эркин ёзишлари мумкин.")
         return
 
-    # /tungi 22 07 (бошланиш ва тугаш соатини ўзгартириш)
     if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
         sh, eh = int(parts[1]), int(parts[2])
         if 0 <= sh <= 23 and 0 <= eh <= 23:
@@ -484,7 +509,6 @@ def cmd_night_mode(message):
             bot.reply_to(message, f"✅ <b>Тунги режим вақти ўзгартирилди:</b>\n\n⏰ Янги вақт: <b>{sh}:00 дан {eh}:00 гача</b> (Тошкент вақти)")
             return
 
-    # Ҳолатини кўрсатиш
     is_on = get_setting("night_mode", "1") == "1"
     sh = get_setting("night_start", "23")
     eh = get_setting("night_end", "6")
