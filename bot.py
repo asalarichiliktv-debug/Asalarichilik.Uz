@@ -69,13 +69,16 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         pass
 
 def start_http_health():
-    port = int(os.environ.get("PORT", 10000))
+    port_env = os.environ.get("PORT")
+    port = int(port_env) if port_env and port_env.isdigit() else 10000
+    if port == 8080:  # Sandbox container nginx uses 8080
+        port = 10000
     try:
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
         logging.info(f"🌐 HTTP Health сервер {port}-портда ишга тушди.")
         server.serve_forever()
     except Exception as e:
-        logging.error(f"HTTP server error: {e}")
+        logging.warning(f"HTTP server notice: {e}")
 
 threading.Thread(target=start_http_health, daemon=True).start()
 
@@ -86,6 +89,8 @@ _settings_cache = {
     "night_start": "00:00",
     "night_end": "06:30",
     "night_warn_text": "",
+    "lock_photos": "1",
+    "lock_videos": "1",
     "lock_links": "1",
     "lock_voice": "0",
     "lock_stickers": "0",
@@ -108,9 +113,14 @@ def init_db():
                 chat_id INTEGER,
                 muted_until INTEGER,
                 reason TEXT,
+                user_name TEXT DEFAULT '',
                 PRIMARY KEY (user_id, chat_id)
             )
         """)
+        try:
+            cur.execute("ALTER TABLE muted_users ADD COLUMN user_name TEXT DEFAULT ''")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS warnings (
                 user_id INTEGER,
@@ -272,8 +282,11 @@ def delete_later(chat_id, message_id, delay=30):
         safe_delete_message(chat_id, message_id)
     threading.Thread(target=_worker, daemon=True).start()
 
-def mute_user_24h(chat_id, user_id, user_mention, reason="3 тадан ортиқ расм/видео юборилди"):
+def mute_user_24h(chat_id, user_id, user_mention, user_name="", reason="3 тадан ортиқ расм/видео юборилди"):
     until_date = int(time.time()) + 86400  # 24 соат
+    if not user_name:
+        user_name = f"ID: {user_id}"
+
     try:
         bot.restrict_chat_member(
             chat_id=chat_id,
@@ -306,17 +319,20 @@ def mute_user_24h(chat_id, user_id, user_mention, reason="3 тадан орти�
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        cur.execute("INSERT OR REPLACE INTO muted_users (user_id, chat_id, muted_until, reason) VALUES (?, ?, ?, ?)", (user_id, chat_id, until_date, reason))
+        cur.execute("""
+            INSERT OR REPLACE INTO muted_users (user_id, chat_id, muted_until, reason, user_name)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user_id, chat_id, until_date, reason, user_name))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logging.error(f"Save mute db error: {e}")
 
     notice_text = f"""
 ⚠️ <b>ҚАТЪИЙ ОГОҲЛАНТИРИШ ВА ЖАЗО!</b>
 ━━━━━━━━━━━━━━━━━━━━
 👤 Фойдаланувчи: {user_mention}
-🚫 Сабаб: <b>3 тадан ортиқ расм ёки видео юборилди!</b>
+🚫 Сабаб: <b>{reason}!</b>
 🔇 Жазо тури: <b>24 соатлик МУТ (1 кун ёзиш чеклови)</b>
 ⏳ Муддати: 1 сутка (24 соат)
 ━━━━━━━━━━━━━━━━━━━━
@@ -330,41 +346,121 @@ def mute_user_24h(chat_id, user_id, user_mention, reason="3 тадан орти�
         pass
 
 def unmute_user_fully(chat_id, user_id):
-    try:
-        bot.restrict_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            permissions=ChatPermissions(
-                can_send_messages=True,
-                can_send_media_messages=True,
-                can_send_other_messages=True,
-                can_add_web_page_previews=True
-            ),
-            use_independent_chat_permissions=True
-        )
-    except Exception:
+    targets = [chat_id, MAIN_GROUP, -1001548174542]
+    for target in targets:
         try:
             bot.restrict_chat_member(
-                chat_id=chat_id,
+                chat_id=target,
                 user_id=user_id,
                 permissions=ChatPermissions(
                     can_send_messages=True,
                     can_send_media_messages=True,
                     can_send_other_messages=True,
                     can_add_web_page_previews=True
-                )
+                ),
+                use_independent_chat_permissions=True
             )
         except Exception:
-            pass
+            try:
+                bot.restrict_chat_member(
+                    chat_id=target,
+                    user_id=user_id,
+                    permissions=ChatPermissions(
+                        can_send_messages=True,
+                        can_send_media_messages=True,
+                        can_send_other_messages=True,
+                        can_add_web_page_previews=True
+                    )
+                )
+            except Exception:
+                pass
 
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        cur.execute("DELETE FROM muted_users WHERE user_id = ? AND chat_id = ?", (user_id, chat_id))
+        cur.execute("DELETE FROM muted_users WHERE user_id = ?", (user_id,))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logging.error(f"Delete mute db error: {e}")
+
+def get_active_muted_users():
+    now_ts = int(time.time())
+    users = []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT user_id, chat_id, muted_until, reason, user_name
+            FROM muted_users
+            WHERE muted_until > ?
+            ORDER BY muted_until DESC
+        """, (now_ts,))
+        rows = cur.fetchall()
+        conn.close()
+        for r in rows:
+            users.append({
+                "user_id": r[0],
+                "chat_id": r[1],
+                "muted_until": r[2],
+                "reason": r[3] or "Қоидабузарлик",
+                "user_name": r[4] or f"ID: {r[0]}"
+            })
+    except Exception as e:
+        logging.error(f"get_active_muted_users error: {e}")
+    return users
+
+def build_muted_list_text():
+    muted = get_active_muted_users()
+    count = len(muted)
+    now_ts = int(time.time())
+
+    if count == 0:
+        return """🔇 <b>МУТДАГИ АЪЗОЛАР РЎЙХАТИ</b>
+━━━━━━━━━━━━━━━━━━━━
+🎉 <b>Ҳозирда гуруҳда мутга тушган аъзолар йўқ!</b>
+Барча аъзолар эркин хабар ёзишлари мумкин.
+━━━━━━━━━━━━━━━━━━━━"""
+
+    lines = [
+        f"🔇 <b>МУТДАГИ АЪЗОЛАР РЎЙХАТИ ({count} та аъзо)</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "<i>Қуйидаги аъзолар гуруҳ қоидасини бузгани учун мутга тушган:</i>\n"
+    ]
+
+    for idx, u in enumerate(muted[:15], 1):
+        rem_sec = max(0, u["muted_until"] - now_ts)
+        rem_h = rem_sec // 3600
+        rem_m = (rem_sec % 3600) // 60
+        time_left = f"{rem_h} соат {rem_m} дақиқа" if rem_h > 0 else f"{rem_m} дақиқа"
+        name = u["user_name"]
+        lines.append(f"<b>{idx}. {name}</b> (ID: <code>{u['user_id']}</code>)")
+        lines.append(f"   🚫 Сабаб: <i>{u['reason']}</i>")
+        lines.append(f"   ⏳ Қолган вақт: <b>{time_left}</b>\n")
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append("<i>Фойдаланувчини мутдан чиқариш учун пастдаги тугмани босинг:</i>")
+    return "\n".join(lines)
+
+def build_muted_list_markup():
+    muted = get_active_muted_users()
+    markup = InlineKeyboardMarkup()
+
+    for u in muted[:8]:
+        u_name = u["user_name"]
+        if len(u_name) > 18:
+            u_name = u_name[:17] + ".."
+        btn_label = f"🔓 Озод қилиш: {u_name}"
+        markup.row(InlineKeyboardButton(btn_label, callback_data=f"unmute_uid_{u['user_id']}"))
+
+    if len(muted) > 0:
+        markup.row(InlineKeyboardButton(f"🔓 Барчасини мутдан озод қилиш ({len(muted)} та)", callback_data="unmute_all_users"))
+
+    markup.row(
+        InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu"),
+        InlineKeyboardButton("🔄 Янгилаш", callback_data="open_muted_list")
+    )
+    return markup
 
 def check_night_mode_violation(message):
     if message.chat.type == 'private':
@@ -412,6 +508,9 @@ def build_main_menu_text():
     except Exception:
         active_mutes = 0
 
+    l_photos_state = "🟢 Фаол" if get_setting("lock_photos", "1") == "1" else "🔴 Ўчирилган"
+    l_videos_state = "🟢 Фаол" if get_setting("lock_videos", "1") == "1" else "🔴 Ўчирилган"
+
     return f"""🐝 <b>ASALARICHILIK.UZ — БОШҚАРУВ МАРКАЗИ</b>
 ━━━━━━━━━━━━━━━━━━━━
 🟢 <b>Бот ҳолати:</b> ОНЛАЙН (Серверда узлуксиз ишламоқда)
@@ -420,8 +519,9 @@ def build_main_menu_text():
 
 🛡 <b>ГУРУҲ ҲИМОЯ ҲОЛАТИ:</b>
 • 🌙 <b>Тунги режим:</b> <b>{night_status_icon}</b> ({start_str} дан {end_str} гача)
-• 🔒 <b>Қулфлар (Чекловлар):</b> 🟢 <b>Фаол</b> (Расм, Видео, Спам)
-• 📸 <b>3 талик медиа лимит:</b> 🟢 <b>Фаол</b> (4 та бўлса 24с МУТ)
+• 📸 <b>Расмлар лимити (3 талик):</b> {l_photos_state}
+• 📹 <b>Видеолар лимити (3 талик):</b> {l_videos_state}
+• 🔒 <b>Қулфлар (Чекловлар):</b> 🟢 <b>Фаол</b> (Ҳавола, Овоз, Стикер, Форвард)
 • 🔇 <b>Ҳозир мутда:</b> <b>{active_mutes} та аъзо</b>
 • 👥 <b>Гуруҳ:</b> {MAIN_GROUP}
 ━━━━━━━━━━━━━━━━━━━━
@@ -432,20 +532,32 @@ def build_main_menu_markup():
     is_on = get_setting("night_mode", "1") == "1"
     btn_night_text = f"🌙 Тунги Режим ({'🟢 Ёқилган' if is_on else '🔴 Ўчирилган'})"
 
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM muted_users WHERE muted_until > ?", (int(time.time()),))
+        active_mutes = cur.fetchone()[0]
+        conn.close()
+    except Exception:
+        active_mutes = 0
+
     markup.row(InlineKeyboardButton("⚙️ Гуруҳ Созламалари", callback_data="open_group_settings"))
     markup.row(
         InlineKeyboardButton("🔒 Қулфлар (Чекловлар)", callback_data="open_locks_menu"),
         InlineKeyboardButton(btn_night_text, callback_data="open_night_menu")
     )
     markup.row(
-        InlineKeyboardButton("📢 Жўнатма юбориш", callback_data="open_broadcast_menu"),
+        InlineKeyboardButton(f"🔇 Мутдагилар рўйхати ({active_mutes} та)", callback_data="open_muted_list"),
         InlineKeyboardButton("📊 Статистика", callback_data="open_stats")
+    )
+    markup.row(
+        InlineKeyboardButton("📢 Жўнатма юбориш", callback_data="open_broadcast_menu"),
+        InlineKeyboardButton("🔄 Маълумотларни янгилаш", callback_data="refresh_main_menu")
     )
     markup.row(
         InlineKeyboardButton("📢 Расмий Канал", url="https://t.me/Uz_Asalarichilik"),
         InlineKeyboardButton("👥 Расмий Гуруҳ", url="https://t.me/ASALARICHILIK_UZBEKISTAN")
     )
-    markup.row(InlineKeyboardButton("🔄 Маълумотларни янгилаш", callback_data="refresh_main_menu"))
     return markup
 
 # ==================== 2. ГУРУҲ СОЗЛАМАЛАРИ (GROUP SETTINGS) ====================
@@ -457,15 +569,25 @@ def build_group_settings_text():
 Қуйидаги бўлимлардан кераклисини танланг:
 • 🔒 <b>Қулфлар (Чекловлар):</b> Расм, видео, ҳавола, овоз ва стикерлар чеклови.
 • 🌙 <b>Тунги режим:</b> Соат 00:00 дан 06:30 гача гуруҳни автоматик қулфлаш.
-• 📸 <b>3 талик медиа лимит:</b> Спам тарзида расм ташлаганларга 24 соатлик мут.
+• 📸 <b>3 талик медиа лимит:</b> Спам тарзида расм/видео ташлаганларга 24 соатлик мут.
+• 🔇 <b>Мутдагилар:</b> Мутга тушган аъзоларни кўриш ва уларни мутдан озод қилиш.
 • 🧹 <b>Сервис хабарлар:</b> Аъзолар кирди-чиқдисини автоматик тозалаш.
 ━━━━━━━━━━━━━━━━━━━━"""
 
 def build_group_settings_markup():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM muted_users WHERE muted_until > ?", (int(time.time()),))
+        active_mutes = cur.fetchone()[0]
+        conn.close()
+    except Exception:
+        active_mutes = 0
+
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🔒 Қулфлар ва Чекловлар бўлими", callback_data="open_locks_menu"))
     markup.row(InlineKeyboardButton("🌙 Тунги Режим Созламалари", callback_data="open_night_menu"))
-    markup.row(InlineKeyboardButton("📸 3 талик Медиа Назорат Ҳолати", callback_data="info_media_limit"))
+    markup.row(InlineKeyboardButton(f"🔇 Мутдагилар рўйхати ({active_mutes} та)", callback_data="open_muted_list"))
     markup.row(
         InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu"),
         InlineKeyboardButton("🔄 Янгилаш", callback_data="open_group_settings")
@@ -478,13 +600,15 @@ def build_locks_menu_text():
 ━━━━━━━━━━━━━━━━━━━━
 Керакли қулф устига босиб уни ёқишингиз (🟢) ёки ўчиришингиз (🔴) мумкин.
 
-🟢 = Қулфланган (гуруҳда тақиқланади)
-🔴 = Рухсат берилган (аъзолар ёза олади)
+🟢 = Қулфланган / Чеклов фаол (3 тадан ошса ёки ташланса жазоланади)
+🔴 = Рухсат берилган / Чеклов ўчирилган
 ━━━━━━━━━━━━━━━━━━━━"""
 
 def build_locks_menu_markup():
     markup = InlineKeyboardMarkup()
 
+    l_photos = "🟢" if get_setting("lock_photos", "1") == "1" else "🔴"
+    l_videos = "🟢" if get_setting("lock_videos", "1") == "1" else "🔴"
     l_links = "🟢" if get_setting("lock_links", "1") == "1" else "🔴"
     l_voice = "🟢" if get_setting("lock_voice", "0") == "1" else "🔴"
     l_stickers = "🟢" if get_setting("lock_stickers", "0") == "1" else "🔴"
@@ -493,7 +617,10 @@ def build_locks_menu_markup():
     l_service = "🟢" if get_setting("lock_service", "1") == "1" else "🔴"
     l_night = "🟢" if get_setting("night_mode", "1") == "1" else "🔴"
 
-    markup.row(InlineKeyboardButton("📸 Расмлар: 3 та лимит (24с МУТ)", callback_data="info_media_limit"))
+    markup.row(
+        InlineKeyboardButton(f"📸 Расмлар лимити (3 та): {l_photos}", callback_data="toggle_lock_photos"),
+        InlineKeyboardButton(f"📹 Видеолар лимити (3 та): {l_videos}", callback_data="toggle_lock_videos")
+    )
     markup.row(
         InlineKeyboardButton(f"🔗 Реклама/Ҳавола: {l_links}", callback_data="toggle_lock_links"),
         InlineKeyboardButton(f"🎙 Овозли хабар: {l_voice}", callback_data="toggle_lock_voice")
@@ -580,8 +707,22 @@ def handle_media_control(message):
     if message.chat.type == 'private' or is_admin(chat_id, user_id):
         return
 
+    is_photo = message.content_type == 'photo'
+    is_video = message.content_type == 'video'
+
+    # Текширамиз: чеклов ёқилганми ёки ўчирилганми
+    if is_photo and get_setting("lock_photos", "1") != "1":
+        return
+    if is_video and get_setting("lock_videos", "1") != "1":
+        return
+
     now = time.time()
     user_mention = get_mention(message.from_user)
+    raw_name = message.from_user.first_name or f"User_{user_id}"
+    if message.from_user.username:
+        raw_name = f"{raw_name} (@{message.from_user.username})"
+
+    media_type_label = "расм" if is_photo else "видео"
 
     # Альбом
     if message.media_group_id:
@@ -593,7 +734,7 @@ def handle_media_control(message):
                 safe_delete_message(chat_id, mid)
 
             if len(_album_messages[mg_id]) == 4:
-                mute_user_24h(chat_id, user_id, user_mention, reason="Альбомда 3 тадан ортиқ расм/видео")
+                mute_user_24h(chat_id, user_id, user_mention, user_name=raw_name, reason=f"Альбомда 3 тадан ортиқ {media_type_label}")
             return
 
     # Кетма-кет 60 сонияда
@@ -608,7 +749,7 @@ def handle_media_control(message):
         for mid, _ in _user_media_history[user_key]:
             safe_delete_message(chat_id, mid)
 
-        mute_user_24h(chat_id, user_id, user_mention, reason="Кетма-кет 3 тадан ортиқ расм/видео")
+        mute_user_24h(chat_id, user_id, user_mention, user_name=raw_name, reason=f"Кетма-кет 3 тадан ортиқ {media_type_label}")
         _user_media_history[user_key].clear()
         return
 
@@ -766,10 +907,32 @@ def cmd_stat(message):
         return
     bot.reply_to(message, build_main_menu_text(), reply_markup=build_main_menu_markup())
 
+def safe_edit_or_send(chat_id, message_id, text, markup):
+    """Xabar matnini xavfsiz o'zgartirish yoki yangi qilib yuborish."""
+    try:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=markup
+        )
+    except Exception as e:
+        err_str = str(e).lower()
+        if "not modified" in err_str:
+            return
+        logging.warning(f"edit_message_text warning ({e}), yangi xabar yuboriladi.")
+        try:
+            bot.send_message(chat_id, text, reply_markup=markup)
+        except Exception as e2:
+            logging.error(f"send_message also failed: {e2}")
+
 # ==================== CALLBACK QUERY ҲАНДЛЕРЛАРИ ====================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_callbacks(call):
-    data = call.data
+    if not call or not call.message:
+        return
+
+    data = call.data or ""
     chat_id = call.message.chat.id
     message_id = call.message.message_id
 
@@ -797,41 +960,17 @@ def handle_all_callbacks(call):
 
     # 1. Асосий меню
     if data in ["open_main_menu", "refresh_main_menu"]:
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_main_menu_text(),
-                reply_markup=build_main_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_main_menu_text(), build_main_menu_markup())
         return
 
     # 2. Гуруҳ созламалари
     if data == "open_group_settings":
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_group_settings_text(),
-                reply_markup=build_group_settings_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_group_settings_text(), build_group_settings_markup())
         return
 
     # 3. Қулфлар (Чекловлар) бўлими
     if data == "open_locks_menu":
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_locks_menu_text(),
-                reply_markup=build_locks_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_locks_menu_text(), build_locks_menu_markup())
         return
 
     # Қулфларни ўчириб-ёқиш
@@ -840,28 +979,12 @@ def handle_all_callbacks(call):
         curr = get_setting(key, "0")
         new_val = "0" if curr == "1" else "1"
         set_setting(key, new_val)
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_locks_menu_text(),
-                reply_markup=build_locks_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_locks_menu_text(), build_locks_menu_markup())
         return
 
     # 4. Тунги режим (2-расм)
     if data == "open_night_menu":
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_night_menu_text(),
-                reply_markup=build_night_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_night_menu_text(), build_night_menu_markup())
         return
 
     # Ҳолатини ўчириб-ёқиш (🟢 -> 🔴)
@@ -869,93 +992,86 @@ def handle_all_callbacks(call):
         curr = get_setting("night_mode", "1")
         new_val = "0" if curr == "1" else "1"
         set_setting("night_mode", new_val)
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_night_menu_text(),
-                reply_markup=build_night_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_night_menu_text(), build_night_menu_markup())
         return
 
     # Бошланиш вақти танлаш
     if data == "pick_night_start":
         markup = InlineKeyboardMarkup()
         markup.row(
+            InlineKeyboardButton("20:00", callback_data="set_start_20:00"),
+            InlineKeyboardButton("21:00", callback_data="set_start_21:00"),
             InlineKeyboardButton("22:00", callback_data="set_start_22:00"),
-            InlineKeyboardButton("23:00", callback_data="set_start_23:00"),
+            InlineKeyboardButton("23:00", callback_data="set_start_23:00")
+        )
+        markup.row(
             InlineKeyboardButton("00:00", callback_data="set_start_00:00"),
-            InlineKeyboardButton("01:00", callback_data="set_start_01:00")
+            InlineKeyboardButton("01:00", callback_data="set_start_01:00"),
+            InlineKeyboardButton("02:00", callback_data="set_start_02:00")
         )
         markup.row(InlineKeyboardButton("◀️ Ортга (Тунги режим)", callback_data="open_night_menu"))
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text="🔓 <b>Тунги режим бошланиш соатини танланг:</b>",
-                reply_markup=markup
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(
+            chat_id, message_id,
+            "🔓 <b>Тунги режим бошланиш соатини танланг:</b>",
+            markup
+        )
         return
 
     if data.startswith("set_start_"):
         val = data.replace("set_start_", "")
         set_setting("night_start", val)
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_night_menu_text(),
-                reply_markup=build_night_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_night_menu_text(), build_night_menu_markup())
         return
 
     # Тугаш вақти танлаш
     if data == "pick_night_end":
         markup = InlineKeyboardMarkup()
         markup.row(
+            InlineKeyboardButton("04:00", callback_data="set_end_04:00"),
             InlineKeyboardButton("05:00", callback_data="set_end_05:00"),
-            InlineKeyboardButton("06:00", callback_data="set_end_06:00"),
+            InlineKeyboardButton("05:30", callback_data="set_end_05:30"),
+            InlineKeyboardButton("06:00", callback_data="set_end_06:00")
+        )
+        markup.row(
             InlineKeyboardButton("06:30", callback_data="set_end_06:30"),
-            InlineKeyboardButton("07:00", callback_data="set_end_07:00")
+            InlineKeyboardButton("07:00", callback_data="set_end_07:00"),
+            InlineKeyboardButton("07:30", callback_data="set_end_07:30"),
+            InlineKeyboardButton("08:00", callback_data="set_end_08:00")
         )
         markup.row(InlineKeyboardButton("◀️ Ортга (Тунги режим)", callback_data="open_night_menu"))
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text="🔓 <b>Тунги режим тугаш соатини танланг:</b>",
-                reply_markup=markup
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(
+            chat_id, message_id,
+            "🔓 <b>Тунги режим тугаш соатини танланг:</b>",
+            markup
+        )
         return
 
     if data.startswith("set_end_"):
         val = data.replace("set_end_", "")
         set_setting("night_end", val)
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_night_menu_text(),
-                reply_markup=build_night_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_night_menu_text(), build_night_menu_markup())
         return
 
     # Синов эълони юбориш
     if data == "send_night_test_now":
         test_text = get_night_warn_text()
+        sent_in_group = False
         try:
             sent = bot.send_message(MAIN_GROUP, f"🧪 <b>[СИНОВ ЭЪЛОНИ]:</b>\n\n{test_text}")
             delete_later(MAIN_GROUP, sent.message_id, delay=30)
+            sent_in_group = True
+        except Exception as e:
+            logging.error(f"Group send test error: {e}")
+
+        try:
+            sent_priv = bot.send_message(chat_id, f"🧪 <b>[СИНОВ ЭЪЛОНИ]:</b>\n\n{test_text}")
+            delete_later(chat_id, sent_priv.message_id, delay=30)
+        except Exception:
+            pass
+
+        alert_msg = "🚀 Гуруҳга синов эълони юборилди (30 сониядан сўнг ўчирилади)!" if sent_in_group else "🚀 Синов эълони юборилди!"
+        try:
+            bot.answer_callback_query(call.id, alert_msg, show_alert=True)
         except Exception:
             pass
         return
@@ -965,78 +1081,108 @@ def handle_all_callbacks(call):
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🔄 Стандарт матнга қайтариш (Сброс)", callback_data="reset_night_warn"))
         markup.row(InlineKeyboardButton("◀️ Ортга (Тунги режим)", callback_data="open_night_menu"))
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text="✏️ <b>Тунги режим огоҳлантириш матни:</b>\n\nСтандарт матнга қайтариш учун пастдаги тугмани босинг:",
-                reply_markup=markup
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(
+            chat_id, message_id,
+            "✏️ <b>Тунги режим огоҳлантириш матни:</b>\n\nСтандарт матнга қайтариш учун пастдаги тугмани босинг:",
+            markup
+        )
         return
 
     if data == "reset_night_warn":
         set_setting("night_warn_text", "")
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_night_menu_text(),
-                reply_markup=build_night_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_night_menu_text(), build_night_menu_markup())
         return
 
     # Бошқа бўлимлар
     if data == "info_media_limit":
+        alert_info = (
+            "📸 3 ТАЛИК МЕДИА ЛИМИТ:\n\n"
+            "• Биттада (альбом) ёки кетма-кет 3 тадан кўп расм/видео юборилса:\n"
+            "• Барча ташланган расмлар бир зумда ўчирилади!\n"
+            "• Қоидабузарга автоматик 24 соатлик (1 кунлик) МУТ берилади."
+        )
         try:
-            bot.send_message(chat_id, "📸 <b>3 талик медиа лимит:</b>\nАъзолар 3 тадан кўп расм ёки видео юборса, барча ташланган расмлар ўчирилади ва 24 соатлик МУТ берилади.")
+            bot.answer_callback_query(call.id, alert_info, show_alert=True)
         except Exception:
-            pass
+            try:
+                bot.send_message(chat_id, alert_info)
+            except Exception:
+                pass
         return
 
     if data == "open_stats":
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=build_main_menu_text(),
-                reply_markup=build_main_menu_markup()
-            )
-        except Exception:
-            pass
+        safe_edit_or_send(chat_id, message_id, build_main_menu_text(), build_main_menu_markup())
         return
 
     if data == "open_broadcast_menu":
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu"))
+        safe_edit_or_send(
+            chat_id, message_id,
+            "📢 <b>Жўнатма юбориш:</b>\n\nКанал ва гуруҳга расм, видео, аудио ва хабар юбориш учун телефонингиздаги <b>Asalarichilik.Uz</b> Android иловасидан фойдаланинг!",
+            markup
+        )
+        return
+
+    # 5. Мутдагилар рўйхати (Muted users list)
+    if data == "open_muted_list":
+        safe_edit_or_send(chat_id, message_id, build_muted_list_text(), build_muted_list_markup())
+        return
+
+    if data.startswith("unmute_uid_"):
+        uid = int(data.replace("unmute_uid_", ""))
+        unmute_user_fully(MAIN_GROUP, uid)
+        safe_edit_or_send(chat_id, message_id, build_muted_list_text(), build_muted_list_markup())
         try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text="📢 <b>Жўнатма юбориш:</b>\n\nКанал ва гуруҳга расм, видео, аудио ва хабар юбориш учун телефонингиздаги <b>Asalarichilik.Uz</b> Android иловасидан фойдаланинг!",
-                reply_markup=markup
-            )
+            bot.answer_callback_query(call.id, f"✅ Фойдаланувчи (ID: {uid}) мутдан озод қилинди!")
         except Exception:
             pass
         return
 
+    if data == "unmute_all_users":
+        muted = get_active_muted_users()
+        total_count = len(muted)
+        for u in muted:
+            unmute_user_fully(MAIN_GROUP, u["user_id"])
+        safe_edit_or_send(chat_id, message_id, build_muted_list_text(), build_muted_list_markup())
+        try:
+            bot.answer_callback_query(call.id, f"✅ Барча ({total_count} та) аъзо мутдан озод қилинди!", show_alert=True)
+        except Exception:
+            pass
+        return
+
+@bot.message_handler(commands=['mutlar', 'mutes', 'unmutelist'])
+def cmd_muted_list(message):
+    text = build_muted_list_text()
+    markup = build_muted_list_markup()
+    bot.send_message(message.chat.id, text, reply_markup=markup)
+
 # ==================== ИШГА ТУШИРИШ (POLLING ВА АВТО-ҚАЙТА ТИКЛАНИШ) ====================
 def run_bot():
     logging.info("🐝 Asalarichilik Moderation Bot ishga tushmoqda...")
+    try:
+        bot.delete_webhook(drop_pending_updates=False)
+        logging.info("Webhook sozlamalari yangilandi.")
+    except Exception as e:
+        logging.warning(f"delete_webhook notice: {e}")
+
     while True:
         try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=20, skip_pending=True)
+            bot.infinity_polling(
+                timeout=20,
+                long_polling_timeout=20,
+                skip_pending=False,
+                allowed_updates=['message', 'callback_query', 'chat_member', 'my_chat_member']
+            )
         except Exception as e:
             err_msg = str(e)
             if "409" in err_msg or "Conflict" in err_msg:
-                logging.warning("409 Conflict: Boshqa bot instansi ishlayapti. 15 soniya kutiladi...")
-                time.sleep(15)
+                logging.warning("409 Conflict: Boshqa bot instansi ishlayapti. 10 soniya kutiladi...")
+                time.sleep(10)
             else:
                 logging.error(f"Polling xatolik: {e}. 5 soniyadan so'ng qayta ishga tushadi...")
                 time.sleep(5)
 
 if __name__ == "__main__":
     run_bot()
+
