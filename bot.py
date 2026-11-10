@@ -1267,6 +1267,18 @@ def build_weather_menu_text():
     w_period = get_setting("weather_period", "1day")
     period_str = "1 кунлик (Кунлик баён)" if w_period == "1day" else ("3 кунлик таҳлил" if w_period == "3days" else "10 кунлик прогноз")
 
+    w_region = get_setting("weather_region", "all")
+    reg_names_map = {
+        "all": "🇺🇿 Барча вилоятлар (Умумреспублика)",
+        "tashkent": "📍 Тошкент шаҳри ва вилояти",
+        "fergana": "📍 Фарғона водийси (Андижон, Наманган, Фарғона)",
+        "samarkand": "📍 Самарқанд ва Жиззах",
+        "bukhara": "📍 Бухоро ва Навоий",
+        "kashkadarya": "📍 Қашқадарё ва Сурхондарё",
+        "khorezm": "📍 Хоразм ва Қорақалпоғистон"
+    }
+    reg_str = reg_names_map.get(w_region, "🇺🇿 Барча вилоятлар")
+
     tashkent_w = fetch_weather_for_region("tashkent")
     code = tashkent_w["cur_code"]
     cond_text, flight_status = WMO_CODE_TEXTS.get(code, ("⛅️ Булутли", "🟡 Ўртача"))
@@ -1282,11 +1294,64 @@ def build_weather_menu_text():
 
 ⚙️ <b>АВТО-ЭЪЛОН СОЗЛАМАЛАРИ:</b>
 • 📢 Ҳолати: <b>{auto_status}</b>
+• 🗺 Ҳудуд: <b>{reg_str}</b>
 • 📊 Авто-эълон даври: <b>{period_str}</b>
 • ⏰ Юбориш вақти: <b>Ҳар куни соат {w_time} да</b>
 • 🎯 Юбориш манзили: <b>{target_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
 <i>Кўриш ёки юбориш учун бўлимни танланг:</i>"""
+
+def build_pick_region_text():
+    curr = get_setting("weather_region", "all")
+    reg_names_map = {
+        "all": "🇺🇿 Барча вилоятлар (Умумреспублика)",
+        "tashkent": "📍 Тошкент шаҳри ва вилояти",
+        "fergana": "📍 Фарғона водийси (Андижон, Наманган, Фарғона)",
+        "samarkand": "📍 Самарқанд ва Жиззах",
+        "bukhara": "📍 Бухоро ва Навоий",
+        "kashkadarya": "📍 Қашқадарё ва Сурхондарё",
+        "khorezm": "📍 Хоразм ва Қорақалпоғистон"
+    }
+    cur_str = reg_names_map.get(curr, "🇺🇿 Барча вилоятлар")
+    return f"""🗺 <b>ОБ-ҲАВО ҲУДУДИНИ ТАНЛАШ</b>
+━━━━━━━━━━━━━━━━━━━━
+📌 <b>Жорий танланган ҳудуд:</b> <b>{cur_str}</b>
+
+Керакли ҳудудни танланг. Авто-эълон ва кунлик маълумотлар танланган ҳудуд бўйича (ёки <b>Барча вилоятлар</b> бўйича) юборилади:"""
+
+def build_pick_region_markup():
+    markup = InlineKeyboardMarkup()
+    curr = get_setting("weather_region", "all")
+
+    all_btn = f"{'✅ ' if curr == 'all' else ''}🇺🇿 Барча вилоятлар (Умумреспублика)"
+    markup.row(InlineKeyboardButton(all_btn, callback_data="set_wreg_all"))
+
+    t_btn = f"{'✅ ' if curr == 'tashkent' else ''}📍 Тошкент"
+    f_btn = f"{'✅ ' if curr == 'fergana' else ''}📍 Фарғона водийси"
+    markup.row(
+        InlineKeyboardButton(t_btn, callback_data="set_wreg_tashkent"),
+        InlineKeyboardButton(f_btn, callback_data="set_wreg_fergana")
+    )
+
+    s_btn = f"{'✅ ' if curr == 'samarkand' else ''}📍 Самарқанд"
+    b_btn = f"{'✅ ' if curr == 'bukhara' else ''}📍 Бухоро / Навоий"
+    markup.row(
+        InlineKeyboardButton(s_btn, callback_data="set_wreg_samarkand"),
+        InlineKeyboardButton(b_btn, callback_data="set_wreg_bukhara")
+    )
+
+    k_btn = f"{'✅ ' if curr == 'kashkadarya' else ''}📍 Қашқадарё"
+    kh_btn = f"{'✅ ' if curr == 'khorezm' else ''}📍 Хоразм"
+    markup.row(
+        InlineKeyboardButton(k_btn, callback_data="set_wreg_kashkadarya"),
+        InlineKeyboardButton(kh_btn, callback_data="set_wreg_khorezm")
+    )
+
+    markup.row(
+        InlineKeyboardButton("◀️ Об-ҳаво бўлимига қайтиш", callback_data="open_weather_menu"),
+        InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu")
+    )
+    return markup
 
 def build_weather_menu_markup():
     markup = InlineKeyboardMarkup()
@@ -1299,6 +1364,9 @@ def build_weather_menu_markup():
     w_period = get_setting("weather_period", "1day")
     p_label = "1 кунлик" if w_period == "1day" else ("3 кунлик" if w_period == "3days" else "10 кунлик")
 
+    w_region = get_setting("weather_region", "all")
+    short_reg = "Барчаси" if w_region == "all" else ("Тошкент" if w_region == "tashkent" else ("Фарғона" if w_region == "fergana" else ("Самарқанд" if w_region == "samarkand" else ("Бухоро" if w_region == "bukhara" else ("Қашқадарё" if w_region == "kashkadarya" else "Хоразм")))))
+
     # 1-қатор: 1 кунлик, 3 кунлик, 10 кунлик таҳлилларни кўриш
     markup.row(
         InlineKeyboardButton("🌤 1 кунлик баён", callback_data="view_wperiod_1day"),
@@ -1306,19 +1374,27 @@ def build_weather_menu_markup():
         InlineKeyboardButton("📆 10 кунлик прогноз", callback_data="view_wperiod_10days")
     )
 
-    # 2-қатор: Авто-эълон турини ўзгартириш
+    # 2-қатор: БАРЧА ВИЛОЯТЛАР (УМУМРЕСПУБЛИКА) ва ҲУДУД ТАНЛАШ
+    markup.row(
+        InlineKeyboardButton("🇺🇿 Барча вилоятлар (Умумреспублика)", callback_data="view_wreg_all")
+    )
+    markup.row(
+        InlineKeyboardButton(f"🗺 Ҳудудни танлаш: {short_reg} ⚙️", callback_data="open_pick_region")
+    )
+
+    # 3-қатор: Авто-эълон даври ва Вақти
     markup.row(
         InlineKeyboardButton(f"📊 Авто-давр: {p_label} 🔄", callback_data="cycle_weather_period"),
         InlineKeyboardButton(f"⏰ Вақт: {w_time}", callback_data="pick_weather_time")
     )
 
-    # 3-қатор: Авто-эълон ва Манзил
+    # 4-қатор: Авто-эълон ва Манзил
     markup.row(
         InlineKeyboardButton(auto_label, callback_data="toggle_weather_auto"),
         InlineKeyboardButton(target_label, callback_data="toggle_weather_target")
     )
 
-    # 4-қатор: Тезкор юбориш тугмалари
+    # 5-қатор: Тезкор юбориш тугмалари
     markup.row(
         InlineKeyboardButton("🚀 Гуруҳга юбориш", callback_data="send_weather_now_group"),
         InlineKeyboardButton("📢 Каналга юбориш", callback_data="send_weather_now_channel")
@@ -1327,7 +1403,7 @@ def build_weather_menu_markup():
         InlineKeyboardButton("🌐 Гуруҳ + Каналга ҳозир юбориш", callback_data="send_weather_now_both")
     )
 
-    # 5-қатор ва 6-қатор: Вилоятлар бўйича кўриш
+    # 6 ва 7-қатор: Вилоятлар бўйича кўриш
     markup.row(
         InlineKeyboardButton("📍 Тошкент", callback_data="view_wreg_tashkent"),
         InlineKeyboardButton("📍 Фарғона водийси", callback_data="view_wreg_fergana")
@@ -1341,7 +1417,7 @@ def build_weather_menu_markup():
         InlineKeyboardButton("📍 Хоразм", callback_data="view_wreg_khorezm")
     )
 
-    # 7-қатор: Ортга ва Янгилаш
+    # 8-қатор: Ортга ва Янгилаш
     markup.row(
         InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu"),
         InlineKeyboardButton("🔄 Янгилаш", callback_data="open_weather_menu")
@@ -1982,7 +2058,34 @@ def handle_all_callbacks(call):
 
     if data.startswith("view_wreg_"):
         reg_key = data.replace("view_wreg_", "")
-        safe_edit_or_send(chat_id, message_id, build_region_weather_text(reg_key), build_region_weather_markup())
+        if reg_key == "all":
+            safe_edit_or_send(chat_id, message_id, build_daily_weather_post_text(), build_weather_preview_markup("1day"))
+        else:
+            safe_edit_or_send(chat_id, message_id, build_region_weather_text(reg_key), build_region_weather_markup())
+        return
+
+    if data == "open_pick_region":
+        safe_edit_or_send(chat_id, message_id, build_pick_region_text(), build_pick_region_markup())
+        return
+
+    if data.startswith("set_wreg_"):
+        reg_code = data.replace("set_wreg_", "")
+        set_setting("weather_region", reg_code)
+        safe_edit_or_send(chat_id, message_id, build_pick_region_text(), build_pick_region_markup())
+        reg_names_quick = {
+            "all": "Барча вилоятлар (Умумреспублика)",
+            "tashkent": "Тошкент",
+            "fergana": "Фарғона водийси",
+            "samarkand": "Самарқанд",
+            "bukhara": "Бухоро / Навоий",
+            "kashkadarya": "Қашқадарё",
+            "khorezm": "Хоразм"
+        }
+        r_name = reg_names_quick.get(reg_code, "Ҳудуд")
+        try:
+            bot.answer_callback_query(call.id, f"✅ {r_name} танланди!")
+        except Exception:
+            pass
         return
 
     if data == "cycle_weather_period":
