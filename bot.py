@@ -103,7 +103,8 @@ _settings_cache = {
     "weather_auto": "1",
     "weather_time": "07:30",
     "weather_target": "both",
-    "weather_region": "all"
+    "weather_region": "all",
+    "weather_period": "1day"
 }
 
 def init_db():
@@ -251,7 +252,7 @@ _admin_cache = {}
 _night_warn_cache = {}
 
 def is_admin(chat_id, user_id):
-    if user_id == OWNER_ID:
+    if user_id in [OWNER_ID, 777000, 1087968824, 136817688]:
         return True
     now = time.time()
     cache_key = (chat_id, user_id)
@@ -266,6 +267,130 @@ def is_admin(chat_id, user_id):
         return is_adm
     except Exception:
         return False
+
+OFFICIAL_CHATS = {
+    MAIN_CHANNEL,  # -1001261575171
+    MAIN_GROUP,    # -1001548174542
+    OWNER_ID       # 2047501151
+}
+
+OFFICIAL_USERNAMES = {
+    "uz_asalarichilik",
+    "asalarichilik_uzbekistan",
+    "asalarichilikuztv_bot",
+    "asalarichilikuz_bot",
+    "jamshidjondavronov"
+}
+
+OFFICIAL_ALLOWED_LINKS = [
+    "t.me/uz_asalarichilik",
+    "t.me/asalarichilik_uzbekistan",
+    "t.me/asalarichilikuztv_bot",
+    "t.me/asalarichilikuz_bot",
+    "t.me/jamshidjondavronov",
+    "youtube.com/@asalarichilikuz",
+    "youtube.com/@asalarichilik",
+    "youtube.com/channel/",
+    "youtu.be/"
+]
+
+def is_official_message(message):
+    """
+    Каналдан уланган гуруҳга келган барча хабарларни ва расмий канал/гуруҳ/бот постларини аниқлаш.
+    Ушбу хабарларга ҳеч қачон чеклов, ўчириш ёки огоҳлантириш қўлланмайди.
+    """
+    if not message:
+        return False
+
+    # 1. Telegram Service / Automatic linked channel forward
+    if getattr(message, 'is_automatic_forward', False):
+        return True
+
+    from_u = getattr(message, 'from_user', None)
+    if from_u:
+        # 777000: Telegram Channel proxy, 1087968824: GroupAnonymousBot, 136817688: Channel Bot
+        if from_u.id in [777000, 1087968824, 136817688, OWNER_ID]:
+            return True
+        if from_u.username and from_u.username.lower() in OFFICIAL_USERNAMES:
+            return True
+
+    # 2. Sender chat (канал номидан пост келганда)
+    sender_c = getattr(message, 'sender_chat', None)
+    if sender_c:
+        if sender_c.id in [MAIN_CHANNEL, MAIN_GROUP, message.chat.id]:
+            return True
+        if sender_c.username and sender_c.username.lower() in OFFICIAL_USERNAMES:
+            return True
+
+    # 3. Расмий канал ёки гуруҳдан форвард қилинган пост
+    fwd_chat = getattr(message, 'forward_from_chat', None)
+    if fwd_chat:
+        if fwd_chat.id in [MAIN_CHANNEL, MAIN_GROUP]:
+            return True
+        if fwd_chat.username and fwd_chat.username.lower() in OFFICIAL_USERNAMES:
+            return True
+
+    return False
+
+def has_foreign_links(message):
+    """
+    Хабарда бегона реклама, ҳавола ёки бошқа канал/гуруҳ борлигини кучайтирилган тарзда текширади.
+    Гуруҳ ва каналнинг ўз ҳаволаларига тегмайди.
+    """
+    if is_official_message(message):
+        return False
+
+    text = (getattr(message, 'text', '') or '') + " " + (getattr(message, 'caption', '') or '')
+    all_entities = (getattr(message, 'entities', None) or []) + (getattr(message, 'caption_entities', None) or [])
+
+    urls_found = []
+
+    # Регуляр ифода: ҳаволалар ва t.me силкалари
+    raw_lower = text.lower()
+    url_matches = re.findall(r'(https?://[^\s]+|t\.me/[^\s]+|telegram\.me/[^\s]+|www\.[^\s]+)', raw_lower)
+    urls_found.extend(url_matches)
+
+    # Канал/гуруҳ юзернеймлари: @kanal_nomi
+    mention_matches = re.findall(r'@([a-zA-Z0-9_]{4,})', raw_lower)
+    for m in mention_matches:
+        urls_found.append(f"@{m.lower()}")
+
+    # Telegram Entities (яширин форматланган ҳаволалар)
+    for ent in all_entities:
+        if ent.type == 'text_link' and getattr(ent, 'url', None):
+            urls_found.append(ent.url.lower())
+        elif ent.type == 'url':
+            full_txt = message.text or message.caption or ""
+            extracted = full_txt[ent.offset:ent.offset+ent.length].lower()
+            urls_found.append(extracted)
+        elif ent.type == 'mention':
+            full_txt = message.text or message.caption or ""
+            extracted = full_txt[ent.offset:ent.offset+ent.length].lower()
+            urls_found.append(extracted)
+
+    if not urls_found:
+        return False
+
+    # Ҳар бир ҳаволани расмий ҳаволалар оқ рўйхати билан текширамиз
+    for item in urls_found:
+        clean = item.strip().lower()
+
+        is_own = False
+        for allowed in OFFICIAL_ALLOWED_LINKS:
+            if allowed in clean:
+                is_own = True
+                break
+
+        if clean.startswith("@"):
+            uname = clean[1:].strip()
+            if uname in OFFICIAL_USERNAMES:
+                is_own = True
+
+        # Агар ўзимизнинг канал ёки гуруҳ бўлмаса — демак БЕГОНА реклама/канал!
+        if not is_own:
+            return True
+
+    return False
 
 def get_mention(user):
     name = user.first_name or "Фойдаланувчи"
@@ -469,8 +594,10 @@ def build_muted_list_markup():
 def check_night_mode_violation(message):
     if message.chat.type == 'private':
         return False
-    # Админларга чеклов йўқ
-    if is_admin(message.chat.id, message.from_user.id):
+    if is_official_message(message):
+        return False
+    user_id = message.from_user.id if message.from_user else 0
+    if is_admin(message.chat.id, user_id):
         return False
 
     if is_night_mode_now():
@@ -701,14 +828,106 @@ def build_night_menu_markup():
 
 # ==================== 5. ОБ-ҲАВО МАЪЛУМОТЛАРИ ВА СОЗЛАМАЛАРИ ====================
 
+WEATHER_REGIONS_ORDER = ["tashkent", "fergana", "samarkand", "bukhara", "kashkadarya", "khorezm"]
+
 WEATHER_REGIONS_CONFIG = {
-    "tashkent": {"name": "Тошкент ва вилояти", "lat": 41.31, "lon": 69.24},
-    "fergana": {"name": "Фарғона водийси", "lat": 40.38, "lon": 71.78},
-    "samarkand": {"name": "Самарқанд ва Жиззах", "lat": 39.65, "lon": 66.97},
-    "bukhara": {"name": "Бухоро ва Навоий", "lat": 39.77, "lon": 64.42},
-    "kashkadarya": {"name": "Қашқадарё ва Сурхондарё", "lat": 38.86, "lon": 65.79},
-    "khorezm": {"name": "Хоразм ва Қорақалпоғистон", "lat": 41.55, "lon": 60.63}
+    "tashkent": {
+        "header": "📍 Тошкент шаҳри ва вилояти:",
+        "name": "Тошкент шаҳри ва вилояти",
+        "lat": 41.31,
+        "lon": 69.24
+    },
+    "fergana": {
+        "header": "📍 Фарғона водийси (Андижон, Наманган, Фарғона):",
+        "name": "Фарғона водийси",
+        "lat": 40.38,
+        "lon": 71.78
+    },
+    "samarkand": {
+        "header": "📍 Самарқанд ва Жиззах вилоятлари:",
+        "name": "Самарқанд ва Жиззах",
+        "lat": 39.65,
+        "lon": 66.97
+    },
+    "bukhara": {
+        "header": "📍 Бухоро ва Навоий вилоятлари:",
+        "name": "Бухоро ва Навоий",
+        "lat": 39.77,
+        "lon": 64.42
+    },
+    "kashkadarya": {
+        "header": "📍 Қашқадарё ва Сурхондарё вилоятлари:",
+        "name": "Қашқадарё ва Сурхондарё",
+        "lat": 38.86,
+        "lon": 65.79
+    },
+    "khorezm": {
+        "header": "📍 Хоразм вилояти ва Қорақалпоғистон:",
+        "name": "Хоразм ва Қорақалпоғистон",
+        "lat": 41.55,
+        "lon": 60.63
+    }
 }
+
+UZ_MONTHS = {
+    1: "январ", 2: "феврал", 3: "март", 4: "апрел", 5: "май", 6: "июн",
+    7: "июл", 8: "август", 9: "сентябр", 10: "октябр", 11: "ноябр", 12: "декабр"
+}
+
+UZ_WEEKDAYS = {
+    0: "Душанба", 1: "Сешанба", 2: "Чоршанба", 3: "Пайшанба", 4: "Жума", 5: "Шанба", 6: "Якшанба"
+}
+
+YOUNG_BEEKEEPER_TIPS = [
+    {
+        "title": "👔 <b>Асаларичининг кийими ва гигиенаси:</b>",
+        "body": "Арилар қора ранг, жунли матолар ва кескин ҳидларни (тер, спирт, парфюм, саримсоқ) ёқтирмайди ва чақишга интилади. Арихонага фақат тоза, оқ ёки оч рангдаги пахта матоли кийим ва тўрли қалпоқ кийиб киринг!"
+    },
+    {
+        "title": "💨 <b>Тутатгич (дымарь)дан фойдаланиш санъати:</b>",
+        "body": "Тутатгичга чирик тол ёки дарахт пўстлоғи, қуруқ тезак солинг. Ариларга қайноқ оловли тутун эмас, салқин ва оппоқ тутун берилади. Уяни очганда 1-2 марта енгил тутун пуркаб, 1 дақиқа кутинг — арилар ошқозонига асал тўлдириб, мулойим бўлиб қолади."
+    },
+    {
+        "title": "💧 <b>Арихонада тоза сувдоннинг (поилка) аҳамияти:</b>",
+        "body": "Асаларилар қуюқ асални эритиш ва наслни парваришлаш учун доимо сувга муҳтож. Арихонанинг қуёш тушадиган илиқ бурчагига тоза, бироз туз қўшилган (10 литр сувга 1 чой қошиқ ош тузи) илиқ сувдон қўйишни ҳеч қачон унутманг!"
+    },
+    {
+        "title": "🍯 <b>Қишлов олдидан озиқа захирасини назорат қилиш:</b>",
+        "body": "Ҳар бир соғлом оила қишловга киришда камида 16-20 кг сифатли асал захирасига эга бўлиши шарт. Захира кам бўлса ёки ҳарорат пасайганда арилар очликдан ҳалок бўлмаслиги учун рамкалар устига канди хамири ёки қуюқ сироп берилади."
+    },
+    {
+        "title": "❄️ <b>Қишда ари уясини безовта қилмаслик қоидаси:</b>",
+        "body": "Қиш фаслида уяни тақиллатиш, силкитиш ёки ортиқча очиш мутлақо тақиқланади! Шовқиндан қўрққан арилар қишки клубдан (тўдадан) уя тубига тўкилиб совуқда нобуд бўлади. Арилар ҳолатини резина найча орқали қулоқ солиб текшириш кифоя."
+    },
+    {
+        "title": "🌬 <b>Уяларда шамоллатиш (вентиляция) қоидалари:</b>",
+        "body": "Қишда ариларни совуқ эмас, балки уя ичидаги намлик ва димлик нобуд қилади. Уя тубида ва шифтида ҳаво алмашиш йўли бўлиши, ёстиқчалар қуруқ пахтадан бўлиши керак. Намлик тўпланса рамкалар моғорлайди ва арилар нозематозга чалинади."
+    },
+    {
+        "title": "🐝 <b>Она арини (матка) эҳтиётлаш ва текшириш:</b>",
+        "body": "Рамкани кўздан кечирганда доимо уянинг устида тутинг. Агар тасодифан она ари рамкадан сирғалиб кетса ҳам, тўғри уя ичига тушади. Рамкада янги қўйилган 1-2 кунлик тухумлар бўлса, она ари оила ичида соғ-омон эканлигини билдиради."
+    },
+    {
+        "title": "🐜 <b>Варроа канасига қарши ўз вақтида ишлов бериш:</b>",
+        "body": "Асал олингач ва куз бошида оилаларни Варроа канасига қарши дорилаш шарт. Бунинг учун тимол, шовул кислотаси ёки махсус тасдиқланган пластинкалар қўлланилади. Канаси кўп оила қишдан соғлом чиқа олмайди."
+    },
+    {
+        "title": "🪵 <b>Мумпарда (вощина) ва янги рамкалар қўйиш:</b>",
+        "body": "Ҳар йили уядаги эскирган қора рамкаларнинг 30-40 фоизини янгиларига алмаштиринг. Эски уя кўзлари кичрайиб кетгани сабабли ундан чиққан янги арилар ҳам майда ва нимжон бўлиб қолади. Янги рамка — соғлом авлод демакдир!"
+    },
+    {
+        "title": "🌸 <b>Баҳорги биринчи тозаланиш парвози (облёт):</b>",
+        "body": "Баҳор бошланиб ҳаво ҳарорати +12...+14°C га етганда арилар қиш бўйи ичакларида йиғилган чиқиндиларни ташқарига чиқариш учун ёппасига парвоз қилади. Шу куни арихона атрофи тозаланиши ва парвоз йўли очиқ бўлиши шарт."
+    },
+    {
+        "title": "🧤 <b>Чақиш хавфини камайтириш ва тўғри ҳаракатланиш:</b>",
+        "body": "Асаларилар олдида қўлни тез силтаманг ва арини уриб ўлдиришга уринманг. Ари ҳалок бўлаётганда хавф феромонини ажратади ва бошқа ариларни ҳам ҳужумга чорлайди. Агар сизни ари чақса, нишни сиқмасдан, пичоқ ёки тирноқ билан суриб чиқаринг!"
+    },
+    {
+        "title": "🌱 <b>Асалли ўсимликлар (медоносы) экиш:</b>",
+        "body": "Арихона атрофига фацелия, оқ беда, эспарцет, липа, ялпиз каби асал берувчи ўсимликларни экиш асал ҳосилини 20-30% га оширади ва ариларнинг узоққа учиб чарчашининг олдини олади."
+    }
+]
 
 WMO_CODE_TEXTS = {
     0: ("☀️ Очиқ қуёшли", "🟢 Парвоз учун қулай"),
@@ -741,7 +960,7 @@ def fetch_weather_for_region(reg_key):
         return _weather_cache[reg_key]
 
     cfg = WEATHER_REGIONS_CONFIG.get(reg_key, WEATHER_REGIONS_CONFIG["tashkent"])
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={cfg['lat']}&longitude={cfg['lon']}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max&timezone=Asia%2FTashkent"
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={cfg['lat']}&longitude={cfg['lon']}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max,precipitation_sum&forecast_days=10&timezone=Asia%2FTashkent"
     try:
         import urllib.request
         import json
@@ -757,8 +976,18 @@ def fetch_weather_for_region(reg_key):
             daily_min = data['daily']['temperature_2m_min']
             daily_code = data['daily']['weather_code']
             daily_dates = data['daily']['time']
+            daily_wind_max = data['daily'].get('wind_speed_10m_max', [cur_wind])
+            daily_precip = data['daily'].get('precipitation_sum', [0.0] * len(daily_dates))
+
+            max_w = round(daily_wind_max[0], 1) if daily_wind_max else cur_wind
+            w_min = int(round(min(cur_wind, max_w)))
+            w_max = int(round(max(cur_wind, max_w)))
+            if w_min >= w_max:
+                w_min = max(1, w_max - 3)
+            wind_str = f"{w_min}-{w_max} м/с"
 
             result = {
+                "header": cfg.get("header", f"📍 {cfg['name']}:"),
                 "name": cfg["name"],
                 "cur_temp": cur_temp,
                 "cur_wind": cur_wind,
@@ -766,14 +995,16 @@ def fetch_weather_for_region(reg_key):
                 "cur_code": cur_code,
                 "max_temp": round(daily_max[0], 1) if daily_max else cur_temp,
                 "min_temp": round(daily_min[0], 1) if daily_min else cur_temp,
+                "wind_str": wind_str,
                 "days": []
             }
-            for i in range(min(4, len(daily_dates))):
+            for i in range(min(10, len(daily_dates))):
                 result["days"].append({
                     "date": daily_dates[i],
                     "max": round(daily_max[i], 1),
                     "min": round(daily_min[i], 1),
-                    "code": int(daily_code[i])
+                    "code": int(daily_code[i]),
+                    "precip": round(daily_precip[i], 1) if i < len(daily_precip) else 0.0
                 })
             _weather_cache[reg_key] = result
             _weather_cache_time = now
@@ -781,20 +1012,63 @@ def fetch_weather_for_region(reg_key):
     except Exception as e:
         logging.warning(f"Weather fetch error for {reg_key}: {e}")
         fallback = {
+            "header": cfg.get("header", f"📍 {cfg['name']}:"),
             "name": cfg["name"],
-            "cur_temp": 14.5,
-            "cur_wind": 3.2,
+            "cur_temp": 13.0,
+            "cur_wind": 4.5,
             "cur_hum": 55,
             "cur_code": 1,
-            "max_temp": 16.0,
-            "min_temp": 6.0,
+            "max_temp": 14.0,
+            "min_temp": 2.0,
+            "wind_str": "4-8 м/с",
             "days": [
-                {"date": "Бугун", "max": 16.0, "min": 6.0, "code": 1},
-                {"date": "Эртага", "max": 14.5, "min": 5.0, "code": 2},
-                {"date": "Индинга", "max": 13.0, "min": 4.0, "code": 3}
+                {"date": "Бугун", "max": 14.0, "min": 2.0, "code": 1},
+                {"date": "Эртага", "max": 13.5, "min": 2.0, "code": 2},
+                {"date": "Индинга", "max": 12.0, "min": 1.0, "code": 3}
             ]
         }
         return fallback
+
+def fmt_temp_c(t):
+    val = round(t)
+    return f"+{val}°C" if val > 0 else f"{val}°C"
+
+def get_detailed_condition_text(code, month):
+    # Ойларга қараб мослаштириш
+    season = "кузги" if month in [9, 10, 11] else ("қишки" if month in [12, 1, 2] else "баҳорги")
+    if code == 0:
+        return f"☀️ Очиқ, илиқ {season} қуёш"
+    elif code in [1, 2]:
+        return f"🌤 Ўзгарувчан булутли, илиқ {season} ҳаво"
+    elif code == 3:
+        return "☁️ Булутли"
+    elif code in [45, 48]:
+        return "🌫 Туманли ҳаво"
+    elif code in [51, 53, 55]:
+        return "🌦 Майда ёмғир"
+    elif code in [61, 63, 65]:
+        return "🌧 Ёмғир ёғиши кутилади"
+    elif code in [71, 73, 75]:
+        return "❄️ Қор ёғиши кутилади"
+    elif code in [80, 81, 82]:
+        return "🌦 Қисқа ёмғир"
+    elif code >= 95:
+        return "⛈ Момақалдироқли ёмғир"
+    return "🌤 Ўзгарувчан булутли"
+
+def get_bee_flight_badge(temp, code):
+    if code in [51, 53, 55, 61, 63, 65, 71, 73, 75, 80, 81, 82, 95]:
+        return "🔴 Ёғингарчилик (Уяни очманг)"
+    if temp < 7:
+        return "🔴 Совуқ (Уяни очманг)"
+    elif temp < 12:
+        return "🟡 Салқин (Қисқа сувга парвоз)"
+    elif temp < 16:
+        return "🟡 Ўртача қулай (Салқин)"
+    elif temp <= 28:
+        return "🟢 Қулай (Фаол парвоз)"
+    else:
+        return "🟡 Иссиқ (Сув ва соя зарур)"
 
 def get_bee_advice_for_temp(temp, code):
     if code in [51, 53, 55, 61, 63, 65, 71, 73, 75, 80, 81, 95]:
@@ -806,37 +1080,180 @@ def get_bee_advice_for_temp(temp, code):
     else:
         return "❄️ Ҳаво салқин/совуқ (+10°C дан паст). Арилар уяда жипс клуб шаклида. Шамоллатиш тешикларини ва уя иссиқлигини текширинг."
 
+def get_daily_beekeeper_tip(now_dt=None):
+    if not now_dt:
+        now_dt = datetime.now(TASHKENT_TZ)
+    idx = now_dt.timetuple().tm_yday % len(YOUNG_BEEKEEPER_TIPS)
+    return YOUNG_BEEKEEPER_TIPS[idx]
+
+def build_daily_weather_markup():
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("👍 1", callback_data="rx_like"),
+        InlineKeyboardButton("👎", callback_data="rx_dislike"),
+        InlineKeyboardButton("❤️", callback_data="rx_heart"),
+        InlineKeyboardButton("👏", callback_data="rx_clap")
+    )
+    markup.row(
+        InlineKeyboardButton("📢 Asalarichilik.Uz ↗️", url="https://t.me/Uz_Asalarichilik"),
+        InlineKeyboardButton("👥 Расмий Гуруҳ ↗️", url="https://t.me/ASALARICHILIK_UZBEKISTAN")
+    )
+    return markup
+
 def build_daily_weather_post_text():
     now_dt = datetime.now(TASHKENT_TZ)
-    date_str = now_dt.strftime("%d-%m-%Y")
+    day = now_dt.day
+    month_str = UZ_MONTHS.get(now_dt.month, "ноябр")
+    weekday_str = UZ_WEEKDAYS.get(now_dt.weekday(), "Сешанба")
+
+    tip = get_daily_beekeeper_tip(now_dt)
 
     lines = [
-        f"⛅️ <b>АСАЛАРИЧИЛИК ВА КУНЛИК ОБ-ҲАВО МАЪЛУМОТИ</b>",
-        f"📅 <b>Сана:</b> {date_str} | Тошкент вақти",
-        "━━━━━━━━━━━━━━━━━━━━"
+        "🟠 <b>Asalarichilik.Uz</b> 🇺🇿 🟡",
+        "⛅️ <b>ОБ-ҲАВО МАЪЛУМОТИ — БАРЧА ВИЛОЯТЛАР (ЎЗБЕКИСТОН)</b>",
+        f"🗓 <b>{day}-{month_str}, {weekday_str}</b> | Кунлик умумреспублика об-ҳаво баёни\n"
     ]
 
-    for reg_key in ["tashkent", "fergana", "samarkand", "bukhara", "kashkadarya", "khorezm"]:
+    for reg_key in WEATHER_REGIONS_ORDER:
         data = fetch_weather_for_region(reg_key)
-        name = data["name"]
-        t_cur = data["cur_temp"]
-        t_max = data["max_temp"]
-        t_min = data["min_temp"]
-        w_spd = data["cur_wind"]
-        code = data["cur_code"]
+        header = data.get("header", f"📍 {data['name']}:")
+        t_max_str = fmt_temp_c(data["max_temp"])
+        t_min_str = fmt_temp_c(data["min_temp"])
+        cond_text = get_detailed_condition_text(data["cur_code"], now_dt.month)
+        wind_str = data.get("wind_str", f"{round(data['cur_wind'])} м/с")
+        flight_badge = get_bee_flight_badge(data["max_temp"], data["cur_code"])
 
-        cond_text, flight_status = WMO_CODE_TEXTS.get(code, ("⛅️ Булутли", "🟡 Парвоз ўртача"))
-        lines.append(f"📍 <b>{name.upper()}:</b>")
-        lines.append(f"• Ҳарорат: <b>+{t_max}°C</b> / <b>+{t_min}°C</b> (ҳозир: +{t_cur}°C)")
-        lines.append(f"• Ҳолат: {cond_text} | Шамол: {w_spd} м/с")
-        lines.append(f"• Асаларилар парвози: <b>{flight_status}</b>\n")
+        lines.append(f"<b>{header}</b>")
+        lines.append(f"☀️ Кундузи: <b>{t_max_str}</b> | 🌙 Кечаси: <b>{t_min_str}</b>")
+        lines.append(f"🌤 Ҳолат: {cond_text} | 💨 Шамол: {wind_str}")
+        lines.append(f"🐝 Асаларичилик: <b>{flight_badge}</b>")
+        lines.append("----------------------------------------")
 
-    lines.append("━━━━━━━━━━━━━━━━━━━━")
-    lines.append("🐝 <b>МУҲИМ АСАЛАРИЧИЛИК ТАВСИЯСИ:</b>")
-    lines.append("<i>Ҳаво ҳарорати ва ёғингарчиликка қараб уяларни қишловга тўғри тайёрланг. Шамоллатиш тешикларини назорат қилинг ва намлик тўпланишига йўл қўйманг. Зарур бўлса канди ёки озиқа билан таъминланг.</i>")
-    lines.append("\n📢 Канал: @Uz_Asalarichilik | 👥 Гуруҳ: @Asalarichilik_Uzbekistan")
+    lines.append("\n💡 <b>ЯНГИ ВА ЁШ АСАЛАРИЧИЛАР УЧУН КУНЛИК ҚИЗИҚАРЛИ МАЪЛУМОТ ВА ТАВСИЯ:</b>")
+    lines.append(tip["title"])
+    lines.append(tip["body"])
+    lines.append("----------------------------------------")
+    lines.append("📌 <i>Ушбу об-ҳаво маълумоти гуруҳда доимий сақланади (ўчирилмайди).</i>")
+    lines.append("🐝 @Asalarichilikuztv_bot — @JamshidjonDavronov")
 
     return "\n".join(lines)
+
+def build_3days_weather_post_text():
+    now_dt = datetime.now(TASHKENT_TZ)
+    end_3d = now_dt + timedelta(days=2)
+    start_str = f"{now_dt.day}-{UZ_MONTHS.get(now_dt.month, 'ноябр')}"
+    end_str = f"{end_3d.day}-{UZ_MONTHS.get(end_3d.month, 'ноябр')}"
+    weekday_str = UZ_WEEKDAYS.get(now_dt.weekday(), "Сешанба")
+
+    lines = [
+        "🟠 <b>Asalarichilik.Uz</b> 🇺🇿 🟡",
+        "⛅️ <b>3 КУНЛИК ОБ-ҲАВО ВА АСАЛАРИЧИЛИК ТАҲЛИЛИ (ЎЗБЕКИСТОН)</b>",
+        f"🗓 <b>{start_str} дан {end_str} гача</b> ({weekday_str}дан бошлаб)",
+        "━━━━━━━━━━━━━━━━━━━━\n"
+    ]
+
+    day_labels = ["Бугун", "Эртага", "Индинга"]
+
+    for reg_key in WEATHER_REGIONS_ORDER:
+        data = fetch_weather_for_region(reg_key)
+        header = data.get("header", f"📍 {data['name']}:")
+        lines.append(f"<b>{header}</b>")
+
+        days_data = data.get("days", [])
+        for i in range(min(3, len(days_data))):
+            d = days_data[i]
+            t_max_s = fmt_temp_c(d["max"])
+            t_min_s = fmt_temp_c(d["min"])
+            cond_s, flight_s = WMO_CODE_TEXTS.get(d["code"], ("⛅️ Булутли", "🟡 Ўртача"))
+            label = day_labels[i] if i < len(day_labels) else d.get("date", f"{i+1}-кун")
+            badge = get_bee_flight_badge(d["max"], d["code"])
+            lines.append(f"• <b>{label}:</b> {t_max_s} / {t_min_s} | {cond_s}")
+            lines.append(f"   🐝 Асаларичилик: <b>{badge}</b>")
+        lines.append("----------------------------------------")
+
+    lines.append("\n💡 <b>ЁШ АСАЛАРИЧИЛАР УЧУН 3 КУНЛИК МУҲИМ ТАҲЛИЛ ВА РЕЖА:</b>")
+    lines.append("1. 🐝 <b>Парвоз кунлари:</b> Кундузи ҳарорат +14...+17°C бўлган илиқ соатларда арилар сув ва тозаланиш учун қисқа парвоз қилади. Сувдонларни қуёшли илиқ жойга қўйинг.")
+    lines.append("2. ❄️ <b>Совуқ ва ёғингарчилик кунлари:</b> Ҳарорат +10°C дан паст ва ёмғирли кунларда уяни мутлақо очманг ва силкитманг! Оилалар иссиқликни сақлаш учун клубга тўпланади.")
+    lines.append("3. 🍯 <b>Озиқа назорати:</b> Озиқа захираси кам бўлган оилалар совуқда заифлашади. Рамкалар устига 0.5–1 кг канди хамири қўйиб озиқлантиринг.")
+    lines.append("4. 🌬 <b>Вентиляция:</b> Намлик йиғилишига йўл қўйманг, устки ёстиқлар қуруқ пахтадан бўлиши шарт.")
+    lines.append("----------------------------------------")
+    lines.append("📌 <i>Ушбу 3 кунлик таҳлил гуруҳда доимий сақланади.</i>")
+    lines.append("🐝 @Asalarichilikuztv_bot — @JamshidjonDavronov")
+
+    return "\n".join(lines)
+
+def build_10days_weather_post_text():
+    now_dt = datetime.now(TASHKENT_TZ)
+    end_10d = now_dt + timedelta(days=9)
+    start_str = f"{now_dt.day}-{UZ_MONTHS.get(now_dt.month, 'ноябр')}"
+    end_str = f"{end_10d.day}-{UZ_MONTHS.get(end_10d.month, 'ноябр')}"
+
+    lines = [
+        "🟠 <b>Asalarichilik.Uz</b> 🇺🇿 🟡",
+        "📆 <b>10 КУНЛИК ОБ-ҲАВО ПРОГНОЗИ ВА СТРАТЕГИК ТАҲЛИЛ</b>",
+        f"🗓 <b>{start_str} — {end_str}</b> | 10 кунлик агро-метеорологик таҳлил",
+        "━━━━━━━━━━━━━━━━━━━━\n"
+    ]
+
+    lines.append("🗺 <b>ҲУДУДЛАР БЎЙИЧА 10 КУНЛИК КЎРСАТКИЧЛАР:</b>")
+    for reg_key in WEATHER_REGIONS_ORDER:
+        data = fetch_weather_for_region(reg_key)
+        name = data.get("name", reg_key)
+        days_data = data.get("days", [])
+        if not days_data:
+            continue
+        max_temps = [d["max"] for d in days_data[:10]]
+        min_temps = [d["min"] for d in days_data[:10]]
+        codes = [d["code"] for d in days_data[:10]]
+
+        avg_max = round(sum(max_temps) / len(max_temps), 1)
+        lowest_min = min(min_temps)
+        highest_max = max(max_temps)
+        rain_days_count = sum(1 for c in codes if c in [51, 53, 55, 61, 63, 65, 71, 73, 75, 80, 81, 82, 95])
+
+        lines.append(f"📍 <b>{name.upper()}:</b>")
+        lines.append(f"• Кундузги: <b>+{highest_max}°C ... +{min(max_temps)}°C</b> (ўртача: +{avg_max}°C)")
+        lines.append(f"• Энг совуқ тун: <b>{fmt_temp_c(lowest_min)}</b>")
+        lines.append(f"• Ёғингарчилик кунлари: <b>{rain_days_count} кун</b>")
+        strat_badge = "❄️ Қишки совуққа шайлик" if lowest_min <= 2 else "⛅️ Илиқ кузги қишлов"
+        lines.append(f"• Стратегия: <i>{strat_badge}</i>\n")
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append("💡 <b>ЁШ ВА ЯНГИ АСАЛАРИЧИЛАР УЧУН 10 КУНЛИК СТРАТЕГИК ТАВСИЯЛАР:</b>")
+    lines.append("1. 🍯 <b>Қишлов озиқа захираси:</b> Кейинги 10 кунда ҳарорат пасаяди. Ҳар бир уяда камида 16–20 кг озиқа борлигини назорат қилинг. Захира оз бўлса, кечиктирмай канди беринг.")
+    lines.append("2. ❄️ <b>Клуб жипслиги ва тинчлик:</b> Ҳаво +8...+10°C га тушганда арилар тўлиқ шарсимон клуб ҳосил қилади. Клубни ҳеч қачон зарб билан урманг, шовқин қилманг — арилар уя тубига тўкилиб нобуд бўлади.")
+    lines.append("3. 🌬 <b>Вентиляция ва намлик ҳимояси:</b> Қишда ариларни совуқ эмас, балки уя ичидаги рутубат ва димлик ҳалок қилади. Парвоз тешигини сичқон кирмайдиган қилиб торайтиринг, устки ёстиқлар қуруқ бўлишини таъминланг.")
+    lines.append("4. 🐜 <b>Варроа канаси:</b> Агар даволаш ишлари якунланмаган бўлса, илиқ кунлардан бирида шошилинч Варроа канасига қарши ишлов беринг.")
+    lines.append("----------------------------------------")
+    lines.append("📌 <i>Ушбу 10 кунлик стратегик таҳлил гуруҳда доимий сақланади.</i>")
+    lines.append("🐝 @Asalarichilikuztv_bot — @JamshidjonDavronov")
+
+    return "\n".join(lines)
+
+def get_current_weather_post_text(period=None):
+    if not period:
+        period = get_setting("weather_period", "1day")
+    if period == "3days":
+        return build_3days_weather_post_text()
+    elif period == "10days":
+        return build_10days_weather_post_text()
+    else:
+        return build_daily_weather_post_text()
+
+def build_weather_preview_markup(period="1day"):
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("🚀 Гуруҳга юбориш", callback_data=f"send_w_{period}_group"),
+        InlineKeyboardButton("📢 Каналга юбориш", callback_data=f"send_w_{period}_channel")
+    )
+    markup.row(
+        InlineKeyboardButton("🌐 Гуруҳ + Каналга юбориш", callback_data=f"send_w_{period}_both")
+    )
+    markup.row(
+        InlineKeyboardButton("◀️ Об-ҳаво бўлимига қайтиш", callback_data="open_weather_menu"),
+        InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu")
+    )
+    return markup
 
 def build_weather_menu_text():
     now_dt = datetime.now(TASHKENT_TZ)
@@ -846,6 +1263,9 @@ def build_weather_menu_text():
     w_time = get_setting("weather_time", "07:30")
     w_target = get_setting("weather_target", "both")
     target_str = "👥 Гуруҳ + 📢 Канал" if w_target == "both" else ("👥 Фақат Гуруҳ" if w_target == "group" else "📢 Фақат Канал")
+
+    w_period = get_setting("weather_period", "1day")
+    period_str = "1 кунлик (Кунлик баён)" if w_period == "1day" else ("3 кунлик таҳлил" if w_period == "3days" else "10 кунлик прогноз")
 
     tashkent_w = fetch_weather_for_region("tashkent")
     code = tashkent_w["cur_code"]
@@ -862,34 +1282,52 @@ def build_weather_menu_text():
 
 ⚙️ <b>АВТО-ЭЪЛОН СОЗЛАМАЛАРИ:</b>
 • 📢 Ҳолати: <b>{auto_status}</b>
+• 📊 Авто-эълон даври: <b>{period_str}</b>
 • ⏰ Юбориш вақти: <b>Ҳар куни соат {w_time} да</b>
 • 🎯 Юбориш манзили: <b>{target_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
-<i>Керакли амални ёки вилоятни танланг:</i>"""
+<i>Кўриш ёки юбориш учун бўлимни танланг:</i>"""
 
 def build_weather_menu_markup():
     markup = InlineKeyboardMarkup()
     is_auto = get_setting("weather_auto", "1") == "1"
-    auto_label = f"📢 Авто-эълон: {'🟢 Ёқилган' if is_auto else '🔴 Ўчирилган'}"
+    auto_label = f"📢 Авто: {'🟢 Ёқилган' if is_auto else '🔴 Ўчирилган'}"
     w_time = get_setting("weather_time", "07:30")
     w_target = get_setting("weather_target", "both")
     target_label = f"🎯 Манзил: {'Гуруҳ+Канал' if w_target == 'both' else ('Фақат Гуруҳ' if w_target == 'group' else 'Фақат Канал')}"
 
-    # 1-қатор: Авто-эълон ва Вақти
+    w_period = get_setting("weather_period", "1day")
+    p_label = "1 кунлик" if w_period == "1day" else ("3 кунлик" if w_period == "3days" else "10 кунлик")
+
+    # 1-қатор: 1 кунлик, 3 кунлик, 10 кунлик таҳлилларни кўриш
     markup.row(
-        InlineKeyboardButton(auto_label, callback_data="toggle_weather_auto"),
+        InlineKeyboardButton("🌤 1 кунлик баён", callback_data="view_wperiod_1day"),
+        InlineKeyboardButton("📅 3 кунлик таҳлил", callback_data="view_wperiod_3days"),
+        InlineKeyboardButton("📆 10 кунлик прогноз", callback_data="view_wperiod_10days")
+    )
+
+    # 2-қатор: Авто-эълон турини ўзгартириш
+    markup.row(
+        InlineKeyboardButton(f"📊 Авто-давр: {p_label} 🔄", callback_data="cycle_weather_period"),
         InlineKeyboardButton(f"⏰ Вақт: {w_time}", callback_data="pick_weather_time")
     )
-    # 2-қатор: Манзил танлаш
-    markup.row(InlineKeyboardButton(target_label, callback_data="toggle_weather_target"))
 
-    # 3-қатор: Тезкор юбориш тугмалари
+    # 3-қатор: Авто-эълон ва Манзил
     markup.row(
-        InlineKeyboardButton("🚀 Гуруҳга ҳозир юбориш", callback_data="send_weather_now_group"),
-        InlineKeyboardButton("📢 Каналга ҳозир юбориш", callback_data="send_weather_now_channel")
+        InlineKeyboardButton(auto_label, callback_data="toggle_weather_auto"),
+        InlineKeyboardButton(target_label, callback_data="toggle_weather_target")
     )
 
-    # 4-қатор ва 5-қатор: Вилоятлар бўйича кўриш
+    # 4-қатор: Тезкор юбориш тугмалари
+    markup.row(
+        InlineKeyboardButton("🚀 Гуруҳга юбориш", callback_data="send_weather_now_group"),
+        InlineKeyboardButton("📢 Каналга юбориш", callback_data="send_weather_now_channel")
+    )
+    markup.row(
+        InlineKeyboardButton("🌐 Гуруҳ + Каналга ҳозир юбориш", callback_data="send_weather_now_both")
+    )
+
+    # 5-қатор ва 6-қатор: Вилоятлар бўйича кўриш
     markup.row(
         InlineKeyboardButton("📍 Тошкент", callback_data="view_wreg_tashkent"),
         InlineKeyboardButton("📍 Фарғона водийси", callback_data="view_wreg_fergana")
@@ -899,11 +1337,11 @@ def build_weather_menu_markup():
         InlineKeyboardButton("📍 Бухоро / Навоий", callback_data="view_wreg_bukhara")
     )
     markup.row(
-        InlineKeyboardButton("📍 Сурхондарё", callback_data="view_wreg_kashkadarya"),
+        InlineKeyboardButton("📍 Қашқадарё", callback_data="view_wreg_kashkadarya"),
         InlineKeyboardButton("📍 Хоразм", callback_data="view_wreg_khorezm")
     )
 
-    # 6-қатор: Ортга ва Янгилаш
+    # 7-қатор: Ортга ва Янгилаш
     markup.row(
         InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu"),
         InlineKeyboardButton("🔄 Янгилаш", callback_data="open_weather_menu")
@@ -981,17 +1419,18 @@ def weather_scheduler_worker():
             if is_auto and current_hm == target_hm and last_sent_date != today_str:
                 last_sent_date = today_str
                 target = get_setting("weather_target", "both")
-                post_text = build_daily_weather_post_text()
+                post_text = get_current_weather_post_text()
+                post_markup = build_daily_weather_markup()
 
                 if target in ["both", "group"]:
                     try:
-                        bot.send_message(MAIN_GROUP, post_text)
+                        bot.send_message(MAIN_GROUP, post_text, reply_markup=post_markup)
                     except Exception as e:
                         logging.error(f"Auto weather to group error: {e}")
 
                 if target in ["both", "channel"]:
                     try:
-                        bot.send_message(MAIN_CHANNEL, post_text)
+                        bot.send_message(MAIN_CHANNEL, post_text, reply_markup=post_markup)
                     except Exception as e:
                         logging.error(f"Auto weather to channel error: {e}")
 
@@ -1013,13 +1452,22 @@ def handle_service_messages(message):
 # Расм ва видеолар (3 талик лимит ва 24с мут)
 @bot.message_handler(content_types=['photo', 'video'])
 def handle_media_control(message):
+    if is_official_message(message):
+        return
+
     if check_night_mode_violation(message):
         return
 
     chat_id = message.chat.id
-    user_id = message.from_user.id
+    user_id = message.from_user.id if message.from_user else 0
 
     if message.chat.type == 'private' or is_admin(chat_id, user_id):
+        return
+
+    # Агар расм/видео остидаги матнда бегона ҳавола бўлса — дарҳол ўчириш ва огоҳлантириш:
+    if get_setting("lock_links", "1") == "1" and has_foreign_links(message):
+        safe_delete_message(chat_id, message.message_id)
+        warn_user(chat_id, user_id, message.from_user)
         return
 
     is_photo = message.content_type == 'photo'
@@ -1071,11 +1519,21 @@ def handle_media_control(message):
 # Овоз, стикер ва бошқа медиалар
 @bot.message_handler(content_types=['voice', 'audio', 'document', 'sticker', 'animation', 'video_note', 'contact', 'location', 'poll'])
 def handle_other_media(message):
+    if is_official_message(message):
+        return
+
     if check_night_mode_violation(message):
         return
 
     chat_id = message.chat.id
-    if message.chat.type == 'private' or is_admin(chat_id, message.from_user.id):
+    user_id = message.from_user.id if message.from_user else 0
+    if message.chat.type == 'private' or is_admin(chat_id, user_id):
+        return
+
+    # Агар файл ёки ҳужжат остидаги матнда бегона ҳавола бўлса:
+    if get_setting("lock_links", "1") == "1" and has_foreign_links(message):
+        safe_delete_message(chat_id, message.message_id)
+        warn_user(chat_id, user_id, message.from_user)
         return
 
     # Овозли хабар қулфи
@@ -1110,11 +1568,14 @@ def cmd_locks_shortcut(message):
 # Гуруҳ матнли хабарлари
 @bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['text'])
 def handle_group_text(message):
+    if is_official_message(message):
+        return
+
     if check_night_mode_violation(message):
         return
 
     chat_id = message.chat.id
-    user_id = message.from_user.id
+    user_id = message.from_user.id if message.from_user else 0
     text = message.text or ""
 
     if is_admin(chat_id, user_id):
@@ -1123,9 +1584,9 @@ def handle_group_text(message):
     now = time.time()
     user_key = (chat_id, user_id)
 
-    # Форвард хабар қулфи
+    # Форвард хабар қулфи (бегона каналлардан форвард қилинганда)
     if getattr(message, 'forward_from', None) or getattr(message, 'forward_from_chat', None):
-        if get_setting("lock_forwards", "0") == "1":
+        if not is_official_message(message) and get_setting("lock_forwards", "0") == "1":
             safe_delete_message(chat_id, message.message_id)
             return
 
@@ -1143,15 +1604,18 @@ def handle_group_text(message):
         mute_user_24h(chat_id, user_id, get_mention(message.from_user), reason="Флуд (Тез-тез хабар ёзиш)")
         return
 
-    # Реклама ва ҳаволалар
+    # Реклама ва ҳаволалар (Кучайтирилган назорат — бегона канал ва ҳаволалар учун)
     if get_setting("lock_links", "1") == "1":
-        if any(kw in text.lower() for kw in ["http://", "https://", "t.me/"]):
-            if not any(allowed in text for allowed in ["t.me/Uz_Asalarichilik", "t.me/ASALARICHILIK_UZBEKISTAN", "t.me/JamshidjonDavronov"]):
-                safe_delete_message(chat_id, message.message_id)
-                warn_user(chat_id, user_id, message.from_user)
-                return
+        if has_foreign_links(message):
+            safe_delete_message(chat_id, message.message_id)
+            warn_user(chat_id, user_id, message.from_user)
+            return
 
 def warn_user(chat_id, user_id, user_obj):
+    # Telegram Channel proxy, botlar ёки расмий админ бўлса огоҳлантирилмайди
+    if user_id in [777000, 1087968824, 136817688, OWNER_ID]:
+        return
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT warn_count FROM warnings WHERE user_id = ? AND chat_id = ?", (user_id, chat_id))
@@ -1163,11 +1627,18 @@ def warn_user(chat_id, user_id, user_obj):
 
     mention = get_mention(user_obj)
     if count >= 3:
-        mute_user_24h(chat_id, user_id, mention, reason="3 марта реклама/спам тарқатиш")
+        mute_user_24h(chat_id, user_id, mention, reason="3 марта бегона канал ва реклама тарқатиш")
+        msg = bot.send_message(
+            chat_id,
+            f"🚫 {mention}, сизга 3 марта огоҳлантириш берилди!\n"
+            f"Гуруҳда бегона реклама ва канал тарқатганингиз сабабли <b>24 соатлик МУТ</b> берилди."
+        )
+        delete_later(chat_id, msg.message_id, delay=35)
     else:
         msg = bot.send_message(
             chat_id,
-            f"⚠️ {mention}, гуруҳда бегона реклама ва ҳавола тарқатиш тақиқланган!\nОгоҳлантириш: <b>{count}/3</b> (3 тадан сўнг 24 соатлик мут берилади)."
+            f"⚠️ {mention}, гуруҳда бегона реклама, канал ва ҳавола тарқатиш қатъиян тақиқланган!\n"
+            f"Огоҳлантириш: <b>{count}/3</b> (3 тадан сўнг 24 соатлик мут берилади)."
         )
         delete_later(chat_id, msg.message_id, delay=35)
 
@@ -1514,16 +1985,69 @@ def handle_all_callbacks(call):
         safe_edit_or_send(chat_id, message_id, build_region_weather_text(reg_key), build_region_weather_markup())
         return
 
+    if data == "cycle_weather_period":
+        curr = get_setting("weather_period", "1day")
+        next_period = {"1day": "3days", "3days": "10days", "10days": "1day"}.get(curr, "1day")
+        set_setting("weather_period", next_period)
+        safe_edit_or_send(chat_id, message_id, build_weather_menu_text(), build_weather_menu_markup())
+        p_label = "1 кунлик" if next_period == "1day" else ("3 кунлик" if next_period == "3days" else "10 кунлик")
+        try:
+            bot.answer_callback_query(call.id, f"Авто-эълон даври: {p_label} созланди!")
+        except Exception:
+            pass
+        return
+
+    if data == "view_wperiod_1day":
+        safe_edit_or_send(chat_id, message_id, build_daily_weather_post_text(), build_weather_preview_markup("1day"))
+        return
+
+    if data == "view_wperiod_3days":
+        safe_edit_or_send(chat_id, message_id, build_3days_weather_post_text(), build_weather_preview_markup("3days"))
+        return
+
+    if data == "view_wperiod_10days":
+        safe_edit_or_send(chat_id, message_id, build_10days_weather_post_text(), build_weather_preview_markup("10days"))
+        return
+
+    # Муайян давр бўйича юборишлар
+    if data.startswith("send_w_"):
+        parts = data.split("_")  # ['send', 'w', '1day', 'group']
+        if len(parts) >= 4:
+            p_code = parts[2]
+            dest = parts[3]
+            txt = build_daily_weather_post_text() if p_code == "1day" else (build_3days_weather_post_text() if p_code == "3days" else build_10days_weather_post_text())
+            mrk = build_daily_weather_markup()
+
+            if dest in ["group", "both"]:
+                try:
+                    bot.send_message(MAIN_GROUP, txt, reply_markup=mrk)
+                except Exception as e:
+                    logging.error(f"Send {p_code} to group error: {e}")
+
+            if dest in ["channel", "both"]:
+                try:
+                    bot.send_message(MAIN_CHANNEL, txt, reply_markup=mrk)
+                except Exception as e:
+                    logging.error(f"Send {p_code} to channel error: {e}")
+
+            dest_str = "Гуруҳ ва Каналга" if dest == "both" else ("Гуруҳга" if dest == "group" else "Каналга")
+            try:
+                bot.answer_callback_query(call.id, f"🚀 {dest_str} муваффақиятли юборилди!", show_alert=True)
+            except Exception:
+                pass
+            return
+
     if data == "send_weather_now_group":
-        post_text = build_daily_weather_post_text()
+        post_text = get_current_weather_post_text()
+        post_markup = build_daily_weather_markup()
         sent_ok = False
         try:
-            bot.send_message(MAIN_GROUP, post_text)
+            bot.send_message(MAIN_GROUP, post_text, reply_markup=post_markup)
             sent_ok = True
         except Exception as e:
             logging.error(f"Manual send weather to group error: {e}")
 
-        alert_text = "🚀 Об-ҳаво эълони гуруҳга муваффақиятли юборилди!" if sent_ok else "⚠️ Гуруҳга юборишда хатолик бўлди (Бот гуруҳда админ эканлигини текширинг)."
+        alert_text = "🚀 Ўзбекистон об-ҳавоси ва таҳлил гуруҳга юборилди!" if sent_ok else "⚠️ Гуруҳга юборишда хатолик бўлди."
         try:
             bot.answer_callback_query(call.id, alert_text, show_alert=True)
         except Exception:
@@ -1531,15 +2055,40 @@ def handle_all_callbacks(call):
         return
 
     if data == "send_weather_now_channel":
-        post_text = build_daily_weather_post_text()
+        post_text = get_current_weather_post_text()
+        post_markup = build_daily_weather_markup()
         sent_ok = False
         try:
-            bot.send_message(MAIN_CHANNEL, post_text)
+            bot.send_message(MAIN_CHANNEL, post_text, reply_markup=post_markup)
             sent_ok = True
         except Exception as e:
             logging.error(f"Manual send weather to channel error: {e}")
 
-        alert_text = "📢 Об-ҳаво эълони каналга муваффақиятли юборилди!" if sent_ok else "⚠️ Каналга юборишда хатолик бўлди (Бот каналда админ эканлигини текширинг)."
+        alert_text = "📢 Ўзбекистон об-ҳавоси ва таҳлил каналга юборилди!" if sent_ok else "⚠️ Каналга юборишда хатолик бўлди."
+        try:
+            bot.answer_callback_query(call.id, alert_text, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    if data == "send_weather_now_both":
+        post_text = get_current_weather_post_text()
+        post_markup = build_daily_weather_markup()
+        g_ok = False
+        c_ok = False
+        try:
+            bot.send_message(MAIN_GROUP, post_text, reply_markup=post_markup)
+            g_ok = True
+        except Exception as e:
+            logging.error(f"Send both to group error: {e}")
+
+        try:
+            bot.send_message(MAIN_CHANNEL, post_text, reply_markup=post_markup)
+            c_ok = True
+        except Exception as e:
+            logging.error(f"Send both to channel error: {e}")
+
+        alert_text = f"🌐 Об-ҳаво эълони юборилди! (Гуруҳ: {'✅' if g_ok else '❌'}, Канал: {'✅' if c_ok else '❌'})"
         try:
             bot.answer_callback_query(call.id, alert_text, show_alert=True)
         except Exception:
@@ -1557,6 +2106,24 @@ def cmd_weather(message):
     text = build_weather_menu_text()
     markup = build_weather_menu_markup()
     bot.send_message(message.chat.id, text, reply_markup=markup)
+
+@bot.message_handler(commands=['obhavo_1kun', 'obhavo_1', 'obhavo_post'])
+def cmd_weather_1day(message):
+    post_text = build_daily_weather_post_text()
+    post_markup = build_daily_weather_markup()
+    bot.send_message(message.chat.id, post_text, reply_markup=post_markup)
+
+@bot.message_handler(commands=['obhavo_3kun', 'obhavo_3'])
+def cmd_weather_3days(message):
+    post_text = build_3days_weather_post_text()
+    post_markup = build_daily_weather_markup()
+    bot.send_message(message.chat.id, post_text, reply_markup=post_markup)
+
+@bot.message_handler(commands=['obhavo_10kun', 'obhavo_10'])
+def cmd_weather_10days(message):
+    post_text = build_10days_weather_post_text()
+    post_markup = build_daily_weather_markup()
+    bot.send_message(message.chat.id, post_text, reply_markup=post_markup)
 
 # ==================== ИШГА ТУШИРИШ (POLLING ВА АВТО-ҚАЙТА ТИКЛАНИШ) ====================
 def run_bot():
