@@ -290,7 +290,11 @@ def get_settings() -> dict:
         data["quiz_auto_target"] = main_target
         data["apitherapy_auto_target"] = main_target
         data["video_auto_target"] = main_target
-    # Eski xato qiymatlar bo'lsa, avtomatik yangilash
+    # Eski xato qiymatlar yoki ruscha ogohlantirish matni bo'lsa, avtomatik tozalash
+    user_warn_val = str(data.get("night_msg_user_warn", ""))
+    if ("пожалуйста" in user_warn_val.lower()) or ("подождите" in user_warn_val.lower()) or ("снята" in user_warn_val.lower()):
+        data["night_msg_user_warn"] = DEFAULT_NIGHT_MSG_USER_WARN
+        save_settings(data)
     if data.get("official_channel") in ["@asalarichilik", "asalarichilik"]:
         data["official_channel"] = "@uz_asalarichilik"
     if data.get("official_group") in ["@Uz_Asalarichilik", "Uz_Asalarichilik", "@UzAsalarichilik", "UzAsalarichilik"]:
@@ -2060,21 +2064,44 @@ class SettingsStates(StatesGroup):
 NIGHT_LOCK_STATE_FILE = "night_lock_state.json"
 
 DEFAULT_NIGHT_MSG_PRE_WARN = (
-    "📢 @Asalarichilik_Uzbekistan Группасида 3 минутдан кейин ёзишга чеклов ўрнатилади ва барча ёзишмаларингиз ўчирилиб ташланади. Эртагача яхши дам олинг.\n\nҲурмат билан админ 👨‍💼"
+    "📢 **ДИҚҚАТ! ТУНГИ ЧЕКЛОВГА 3 ДАҚИҚА ҚОЛДИ!**\n\n"
+    "👥 **Гуруҳ:** {group_name}\n"
+    "🔴 **Чеклов бошланиш вақти:** {start}\n"
+    "🟢 **Чеклов тугаш вақти:** {end}\n\n"
+    "Ҳурматли асаларичилар ва гуруҳдошлар!\n"
+    "Соат 🔴 **{start}** да гуруҳ тунги дам олиш режимига ўтади ва ёзишмалар автоматик тарзда тўхтатилади.\n"
+    "Илтимос, фикр ва ёзишмаларингизни якунлаб олинг. Барчангизга хайрли дам олишни тилаймиз! 👨‍💼🐝"
 )
 DEFAULT_NIGHT_MSG_LOCK_START = (
-    "🌙 @Asalarichilik_Uzbekistan Группасида тунги чеклов бошланди!\n\nСоат {end} гача гуруҳда ёзиш тўхтатилади. Барча янги хабарлар автоматик ўчирилади."
+    "🌙 **ТУНГИ ЧЕКЛОВ БОШЛАНДИ!**\n\n"
+    "👥 **Гуруҳ:** {group_name}\n"
+    "🔴 **Тунги чеклов ўрнатилган вақт:** {start}\n"
+    "🟢 **Чеклов якунланиш вақти:** {end}\n\n"
+    "Ҳурматли асаларичилар ва гуруҳ аъзолари!\n"
+    "Барча гуруҳдошларимизнинг тунги вақтда тинч дам олишини таъминлаш мақсадида гуруҳда ёзиш вақтинча тўхтатилди.\n\n"
+    "🔒 Ушбу вақт оралиғида гуруҳга юборилган барча хабарлар бот томонидан автоматик равишда ўчирилади.\n"
+    "☀️ Эрталаб соат 🟢 **{end}** да чеклов автоматик тарзда ечилади ва ёзишмалар давом этади.\n\n"
+    "Барчангизга хайрли тун ва осуда дам тилаймиз! 🐝🍯✨"
 )
 DEFAULT_NIGHT_MSG_LOCK_END = (
-    "☀️ Ассалому алайкум! @Asalarichilik_Uzbekistan Группасида тунги чеклов якунланди.\n\nСоат {end} дан бошлаб бемалол фикр ва маълумот алмашишингиз мумкин. Кунингиз баракали ўтсин! 🐝🍯"
+    "☀️ **ХАЙРЛИ ТОНГ! ТУНГИ ЧЕКЛОВ ЯКУНЛАНДИ!**\n\n"
+    "👥 **Гуруҳ:** {group_name}\n"
+    "🟢 **Гуруҳ очилган вақт:** {end}\n\n"
+    "Ассалому алайкум, ҳурматли асаларичилар ва қадрдон гуруҳдошлар!\n"
+    "Гуруҳимизда тунги чеклов муваффақиятли якунланди ва ёзиш тўлиқ очилди.\n\n"
+    "Бемалол соҳа янгиликлари, савол-жавоблар ва тажриба алмашишингиз мумкин.\n"
+    "Янги кунингиз баракали, ризқингиз улуғ ва асал ҳосилингиз мўл бўлсин! 🐝🍯\n\n"
+    "⏱ *Ушбу очилиш эълони 1 соатдан сўнг автоматик тозаланади.*"
 )
 DEFAULT_NIGHT_MSG_USER_WARN = (
     "🌙 **Ҳурматли {user_mention}!**\n\n"
-    "Ҳозирда ушбу гуруҳ автоматик қулфланган (соат **{start}** дан **{end}** гача).\n\n"
-    "Сиз соат **{end}** дан кейин гуруҳга ёзишингиз ёки бирор маълумот жўнатишингиз мумкин. "
-    "Ҳозирда ушбу гуруҳ автоматик қулфланганлиги сабабли юборилган хабарингиз ўчирилди.\n\n"
-    "⏳ **Пожалуйста, подождите [ {remaining_time} ], пока блокировка группы не будет снята.**\n\n"
-    "⏳ *Ушбу огоҳлантириш 30 сониядан сўнг автоматик ўчириб ташланади.*"
+    "👥 **Гуруҳ:** {group_name}\n"
+    "🔴 **Тунги чеклов ўрнатилган вақт:** {start}\n"
+    "🟢 **Чеклов якунланиш вақти:** {end}\n\n"
+    "Ҳозирда гуруҳ тунги дам олиш режимида бўлганлиги сабабли юборган хабарингиз автоматик равишда ўчирилди.\n\n"
+    "⏳ **Илтимос {user_mention}, гуруҳ блокировкаси очилгунича {remaining_time} кутиб туринг.**\n\n"
+    "Соат 🟢 **{end}** дан бошлаб бемалол гуруҳга ёзишингиз ва фикр алмашишингиз мумкин. Тўғри тушунганингиз учун катта раҳмат! 🐝🍯\n\n"
+    "⏱ *Ушбу огоҳлантириш 30 сониядан сўнг автоматик ўчириб ташланади.*"
 )
 
 class NightLockEditStates(StatesGroup):
@@ -2496,9 +2523,15 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
             user_mention = f"[{user_name}](tg://user?id={message.from_user.id})" if message.from_user else user_name
 
             user_tpl = settings.get("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+            if ("пожалуйста" in user_tpl.lower()) or ("подождите" in user_tpl.lower()) or ("снята" in user_tpl.lower()):
+                user_tpl = DEFAULT_NIGHT_MSG_USER_WARN
+                update_setting("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+
+            grp_title = message.chat.title or get_official_group()
             warn_text = (
                 user_tpl
                 .replace("{user_mention}", user_mention)
+                .replace("{group_name}", grp_title)
                 .replace("{start}", start_t)
                 .replace("{end}", end_t)
                 .replace("{remaining_time}", remaining_str)
@@ -6019,7 +6052,7 @@ async def daily_scheduler_loop():
                                 pass
                             st["pre_warning_msg_id"] = None
                         start_tpl = settings.get("night_msg_lock_start", DEFAULT_NIGHT_MSG_LOCK_START)
-                        start_text = start_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
+                        start_text = start_tpl.replace("{group_name}", get_official_group()).replace("{start}", nl_start).replace("{end}", nl_end)
                         sent_lock = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=start_text, parse_mode=None)
                         if sent_lock and getattr(sent_lock, "message_id", None):
                             try:
@@ -6044,7 +6077,8 @@ async def daily_scheduler_loop():
                             ALREADY_SENT_SCHEDULE_KEYS.add(key_nl_pre)
                             log[key_nl_pre] = True
                             save_json_file(SCHEDULER_LOG_FILE, log)
-                            pre_text = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+                            pre_tpl = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+                            pre_text = pre_tpl.replace("{group_name}", get_official_group()).replace("{start}", nl_start).replace("{end}", nl_end)
                             sent_msg = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=pre_text, parse_mode=None)
                             if sent_msg and getattr(sent_msg, "message_id", None):
                                 st["pre_warning_msg_id"] = sent_msg.message_id
@@ -6068,7 +6102,7 @@ async def daily_scheduler_loop():
 
                         if nl_enabled:
                             end_tpl = settings.get("night_msg_lock_end", DEFAULT_NIGHT_MSG_LOCK_END)
-                            end_text = end_tpl.replace("{start}", nl_start).replace("{end}", nl_end)
+                            end_text = end_tpl.replace("{group_name}", get_official_group()).replace("{start}", nl_start).replace("{end}", nl_end)
                             sent_end = await safe_send_to_destination(bot_inst=bot, destination=OFFICIAL_GROUP_ID, text=end_text, parse_mode=None)
                             if sent_end and getattr(sent_end, "message_id", None):
                                 asyncio.create_task(delete_after_delay(bot, OFFICIAL_GROUP_ID, sent_end.message_id, 3600))
@@ -7444,6 +7478,9 @@ SCIENTIFIC_TESTS_FILE = "scientific_tests.json"
 SCIENTIFIC_SETTINGS_FILE = "scientific_test_settings.json"
 SCIENTIFIC_SESSION_FILE = "scientific_test_session.json"
 SCIENTIFIC_HISTORY_FILE = "scientific_test_history.json"
+SCIENTIFIC_POLL_MAP_FILE = "scientific_poll_map.json"
+SCIENTIFIC_PARTICIPANTS_FILE = "scientific_participants.json"
+SCI_SESSION_LOCK = asyncio.Lock()
 
 DEFAULT_SCIENTIFIC_SETTINGS = {
     "target": "both",
@@ -7965,23 +8002,25 @@ def build_dtm_leaderboard_view():
         lines.append("Ҳозирча қатнашчилар тестни якунламаган. Биринчи бўлиб қатнашинг ва 1-ўринни эгалланг!")
     else:
         medals = {1: "🥇 1-ЎРИН (Олтин медаль) 🥇", 2: "🥈 2-ЎРИН (Кумуш медаль) 🥈", 3: "🥉 3-ЎРИН (Бронза медаль) 🥉"}
-        for rank, p in enumerate(leaderboard[:10], start=1):
+        for rank, p in enumerate(leaderboard, start=1):
             t_sec = int(p.get("time_taken", 0))
             min_p = t_sec // 60
             sec_p = t_sec % 60
             t_str = f"{min_p}м {sec_p}с" if min_p > 0 else f"{sec_p}с"
             u_name = f"(@{p['username']})" if p.get("username") else ""
+            attempts = p.get("attempts", 1)
+            att_str = f"{attempts}-уриниш"
 
             if rank in medals:
                 lines.append(f"{medals[rank]}")
                 lines.append(f"👤 **{p['name']}** {u_name}")
-                lines.append(f"🎯 Натижа: **{p['score']}/10 та тўғри** ({t_str})")
+                lines.append(f"🎯 Натижа: **{p['score']}/10 та тўғри** ({t_str}, {att_str})")
                 lines.append("")
             else:
-                lines.append(f"**{rank}-ўрин.** 👤 {p['name']} {u_name} — **{p['score']}/10 та тўғри** ({t_str})")
+                lines.append(f"**{rank}-ўрин.** 👤 {p['name']} {u_name} — **{p['score']}/10 та тўғри** ({t_str}, {att_str})")
 
     lines.append("══════════════════════════════")
-    lines.append("💡 *Рейтинг тўғри жавоблар сони ва сарфланган вақт тезлигига қараб автоматик янгиланади.*")
+    lines.append("💡 *Рейтинг тўғри жавоблар сони, 1-уриниш ҳаққонийлиги ва сарфланган вақтга қараб автоматик янгиланади.*")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Рейтингни янгилаш", callback_data="dtm_rank:view")],
@@ -8075,6 +8114,11 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
             targets = [get_official_group()]
         else:
             targets = [get_official_channel(), get_official_group()]
+
+    format_mode = settings.get("format_mode", "dtm_poll")
+    # ДТМ сўровнома тестида гуруҳ аъзолари тестни бевосита ечиб натижаларда кўриниши учун расмий гуруҳ манзили ҳар доим киритилади:
+    if format_mode == "dtm_poll" and (OFFICIAL_GROUP_ID not in targets) and (get_official_group() not in targets):
+        targets.append(OFFICIAL_GROUP_ID)
 
     session = {
         "is_active": True,
@@ -8244,12 +8288,23 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                             explanation=expl,
                             is_anonymous=poll_anon
                         )
-                        if not is_channel_dest:
-                            poll_map[poll_msg.poll.id] = {
-                                "q_idx": q_idx - 1,
-                                "correct_id": correct_id,
-                                "set_id": active_set
-                            }
+                        poll_id_str = str(poll_msg.poll.id)
+                        p_info = {
+                            "q_idx": q_idx - 1,
+                            "correct_id": correct_id,
+                            "set_id": active_set,
+                            "chat_id": real_chat_id
+                        }
+                        poll_map[poll_id_str] = p_info
+
+                        # Zudlik bilan faylga saqlash (foydalanuvchi birinchi savolga javob berishi bilanoq ushlash uchun):
+                        all_perm_polls = load_json_file(SCIENTIFIC_POLL_MAP_FILE, {})
+                        all_perm_polls[poll_id_str] = p_info
+                        save_json_file(SCIENTIFIC_POLL_MAP_FILE, all_perm_polls)
+
+                        session.setdefault("poll_map", {})[poll_id_str] = p_info
+                        save_sci_session(session)
+
                         await asyncio.sleep(0.4)
                     except Exception as pe:
                         logging.warning(f"Scientific poll send error ({cid}, q {q_idx}): {pe}")
@@ -8285,59 +8340,78 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     save_sci_session(session)
     return sent_cnt, len(test_set), session_id
 
-def calculate_leaderboard(session: dict) -> list:
+def calculate_leaderboard(session: Optional[dict] = None) -> list:
+    if session is None:
+        session = get_sci_session()
     participants = session.get("participants", {})
+    perm_participants = load_json_file(SCIENTIFIC_PARTICIPANTS_FILE, {})
+
+    all_p = dict(perm_participants)
+    all_p.update(participants)
+
     results = []
-    for uid, p in participants.items():
-        score = p.get("score", 0)
-        time_taken = p.get("time_taken", 9999.0)
-        name = p.get("name", "Асаларичи")
-        username = p.get("username", "")
+    for uid, p in all_p.items():
+        answers_count = len(p.get("answers", {}))
+        score = int(p.get("score", 0))
+        if answers_count == 0 and score == 0:
+            continue
+
+        name = str(p.get("name", "Асаларичи")).strip()
+        username = str(p.get("username", "")).strip().replace("@", "")
+        time_taken = float(p.get("time_taken", 60.0))
+        attempts = int(p.get("attempts", 1))
+        first_score = int(p.get("first_score", score))
+
         results.append({
             "user_id": uid,
             "name": name,
             "username": username,
             "score": score,
+            "first_score": first_score,
+            "attempts": attempts,
             "time_taken": time_taken,
-            "answers_count": len(p.get("answers", {}))
+            "answers_count": answers_count,
+            "source": p.get("source", "group")
         })
-    results.sort(key=lambda x: (-x["score"], x["time_taken"]))
+
+    # Ҳаққоний саралаш:
+    # 1. Тўпланган тўғри жавоблар сони (кўпроқ ball)
+    # 2. Уринишлар сони камлиги (1-уринишда ечганлар 2-3 уринишлардан юқори туради)
+    # 3. Вақт тезлиги (камроқ вақт сарфлаганлар олдинда)
+    # 4. Жавоб берилган саволлар сони
+    results.sort(key=lambda x: (-x["score"], x["attempts"], x["time_taken"], -x["answers_count"]))
     return results
 
 async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     session = get_sci_session()
     cat = session.get("category", "young_beekeepers")
+    active_set = session.get("set_id", 1)
     settings = get_sci_settings()
     script = settings.get("script_mode", "cyrillic")
     cat_title = get_sci_category_title(cat, script)
 
+    now_t = get_uzbekistan_now().strftime("%H:%M")
     leaderboard = calculate_leaderboard(session)
     total_participants = len(leaderboard)
 
     lines = [
-        "🎆 🎇 ✨ 🏆 🎉 🍯 🐝 👑 🥇 🥈 🥉 ✨ 🎇 🎆",
-        "══════════════════════════════════════",
-        "🎉 **«АСАЛАРИЧИЛИК ТАНТАНАЛИ ТАҚДИРЛАШ МАРОСИМИ»** 🎉",
-        "══════════════════════════════════════",
-        "",
-        "🏛 **Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот марказлари Давлат стандарти синов тести муваффақиятли якунланди!**",
-        "",
+        "🏆 **«АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТИ РАСМИЙ НАТИЖАЛАРИ»** 🏆",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         f"🔬 **Йўналиш:** {cat_title}",
-        f"👥 **Жами синовдан ўтган асаларичилар:** **{total_participants} нафар**",
+        f"📑 **Серия:** #{active_set}-серия (10 та синов тести)",
+        f"👥 **Жами синовдан ўтганлар:** **{total_participants} нафар**",
+        f"⏰ **Якунланган вақт:** {now_t}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "",
-        "Бугунги синовда барча қатнашчиларимиз юксак фаоллик ва асаларичилик бўйича пухта билимларини намоён этдилар!",
-        "",
-        "══════════════════════════════════════",
-        "🎆 🎇 **ҒОЛИБЛАР ВА ФАХРИЙ МЕДАЛ СОҲИБЛАРИ:** 🎇 🎆",
-        "══════════════════════════════════════"
+        "🎖 **ҒОЛИБЛАР ВА БАРЧА ҚАТНАШЧИЛАР РЎЙХАТИ:**",
+        ""
     ]
 
     if not leaderboard:
-        lines.append("")
-        lines.append("Ҳозирча қатнашчилар жавоблари қайд этилмаган. Тест якунланди.")
+        lines.append("⚠️ Ҳозирча тестда қатнашчилар жавоблари қайд этилмаган. Тест якунланди.")
     else:
         def format_user_mention(p: dict) -> str:
-            name_raw = str(p.get("name", "Асаларичи")).replace("[", "").replace("]", "").replace("*", "")
+            name_raw = str(p.get("name", "Асаларичи")).replace("[", "").replace("]", "").replace("*", "").strip()
             uname = str(p.get("username", "")).replace("@", "").strip()
             uid = p.get("user_id")
             if uname and uid:
@@ -8348,48 +8422,28 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
                 return f"[{name_raw}](tg://user?id={uid})"
             return f"**{name_raw}**"
 
-        w1 = leaderboard[0]
-        u1_str = format_user_mention(w1)
-        t1_str = f"{int(w1['time_taken'])} сония" if w1['time_taken'] < 9000 else ""
-        lines.append("")
-        lines.append("🥇 **1-ЎРИН — ОЛТИН МЕДАЛ ВА «ОЛИЙ ДАРАЖАЛИ АСАЛАРИЧИ» НОМИ:** 🥇")
-        lines.append(f"👤 Ғолиб: {u1_str}")
-        lines.append(f"🎯 **Натижа:** **{w1['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t1_str})")
-        lines.append("🏆 Юқори илмий савия, тезкор тафаккур ва юксак касбий маҳоратингизни чин қалбдан қутлаймиз! 🎖⭐️🍯")
-        lines.append("")
+        for rank_idx, p in enumerate(leaderboard, start=1):
+            u_mention = format_user_mention(p)
+            score = p.get("score", 0)
+            t_sec = int(p.get("time_taken", 0))
+            time_str = f"{t_sec} сония" if t_sec < 3600 else f"{t_sec // 60} дақ"
+            attempts = p.get("attempts", 1)
+            att_str = f"{attempts}-уриниш"
 
-        if len(leaderboard) > 1:
-            w2 = leaderboard[1]
-            u2_str = format_user_mention(w2)
-            t2_str = f"{int(w2['time_taken'])} сония" if w2['time_taken'] < 9000 else ""
-            lines.append("🥈 **2-ЎРИН — КУМУШ МЕДАЛ ВА «ТАЖРИБАЛИ МУТАХАССИС» НОМИ:** 🥈")
-            lines.append(f"👤 Ғолиб: {u2_str}")
-            lines.append(f"🎯 **Натижа:** **{w2['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t2_str})")
-            lines.append("👏 Чин кўнгилдан муборакбод этамиз! Сизга омад ва зафарлар тилаймиз! 🥈🎉")
-            lines.append("")
+            if rank_idx == 1:
+                badge = "🥇 1-ўрин (Олтин)"
+            elif rank_idx == 2:
+                badge = "🥈 2-ўрин (Кумуш)"
+            elif rank_idx == 3:
+                badge = "🥉 3-ўрин (Бронза)"
+            else:
+                badge = f"🏅 {rank_idx}-ўрин"
 
-        if len(leaderboard) > 2:
-            w3 = leaderboard[2]
-            u3_str = format_user_mention(w3)
-            t3_str = f"{int(w3['time_taken'])} сония" if w3['time_taken'] < 9000 else ""
-            lines.append("🥉 **3-ЎРИН — БРОНЗА МЕДАЛ ВА «ИЛМИЙ БИЛИМДОН» НОМИ:** 🥉")
-            lines.append(f"👤 Ғолиб: {u3_str}")
-            lines.append(f"🎯 **Натижа:** **{w3['score']} / 10 та ТЎҒРИ** (⚡️ Сарфланган вақт: {t3_str})")
-            lines.append("🎉 Фахрий натижа ва медал муборак бўлсин! 🥉✨")
-            lines.append("")
-
-        if len(leaderboard) > 3:
-            lines.append("══════════════════════════════════════")
-            lines.append("🎖 **ТОП-10 ТАЛИККА КИРГАН ФАОЛ АСАЛАРИЧИЛАР:**")
-            for rank_idx, p in enumerate(leaderboard[3:10], start=4):
-                p_mention = format_user_mention(p)
-                lines.append(f"🏅 {rank_idx}-ўрин: {p_mention} — **{p['score']}/10 та тўғри**")
+            lines.append(f"{badge}: {u_mention} — **{score}/10 та тўғри** (⏱ {time_str}, {att_str})")
 
     lines.append("")
-    lines.append("══════════════════════════════════════")
-    lines.append("🍯 «Асалингиз доимо мўл, оилаларингиз бақувват ва баракали бўлсин!» 🐝🇺🇿")
-    lines.append("Барча иштирокчи асаларичиларимизга чуқур миннатдорчилик билдирамиз!")
-    lines.append("══════════════════════════════════════")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🍯 *Иштирок этган барча асаларичиларимизга катта раҳмат! Асалингиз доимо мўл ва баракали бўлсин!* 🐝🇺🇿")
     lines.append("")
     lines.append(get_official_footer(script))
 
@@ -8399,6 +8453,7 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     history.append({
         "session_id": session.get("session_id"),
         "category": cat,
+        "set_id": active_set,
         "ended_at": time.time(),
         "total_participants": total_participants,
         "leaderboard": leaderboard
@@ -8408,8 +8463,8 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     session["is_active"] = False
     save_sci_session(session)
 
-    eff_target = get_effective_post_target(get_settings())
-    targets = get_destinations_for_target(eff_target)
+    # Тақдирлаш хабари расмий канал ва расмий гуруҳга тенг юборилади
+    targets = [get_official_channel(), get_official_group()]
     bot_user = get_settings().get("official_bot", "@Asalarichilikuz_bot").replace("@", "")
     ch_user = get_official_channel_clean()
     grp_user = get_official_group_clean()
@@ -9074,19 +9129,36 @@ async def on_dtm_ans_cb(call: types.CallbackQuery):
         await call.answer(salut_msg, show_alert=False)
     else:
         # 10-savol yakunlandi! Natijalarni global sessiyaga yozamiz
-        total_time = max(1.0, time.time() - exam["started_at"])
-        session = get_sci_session()
-        participants = session.setdefault("participants", {})
-        participants[str(user_id)] = {
-            "name": exam["name"],
-            "username": exam["username"],
-            "score": exam["score"],
-            "time_taken": total_time,
-            "finished": True,
-            "answers_count": len(exam["questions"]),
-            "answers": {str(a["q_idx"]): {"selected": a["selected_id"], "is_correct": a["is_correct"]} for a in exam["answers"]}
-        }
-        save_sci_session(session)
+        total_time = max(1.0, round(time.time() - exam["started_at"], 1))
+        async with SCI_SESSION_LOCK:
+            session = get_sci_session()
+            participants = session.setdefault("participants", {})
+            perm_participants = load_json_file(SCIENTIFIC_PARTICIPANTS_FILE, {})
+            u_key = str(user_id)
+            old_p = participants.get(u_key, perm_participants.get(u_key, {}))
+
+            prev_att = int(old_p.get("attempts", 0))
+            attempts = prev_att + 1
+            first_score = int(old_p.get("first_score", exam["score"])) if prev_att > 0 else exam["score"]
+            first_time = float(old_p.get("first_time_taken", total_time)) if prev_att > 0 else total_time
+
+            entry = {
+                "name": exam["name"],
+                "username": exam["username"],
+                "score": exam["score"],
+                "first_score": first_score,
+                "first_time_taken": first_time,
+                "attempts": attempts,
+                "time_taken": total_time,
+                "finished": True,
+                "answers_count": len(exam["questions"]),
+                "answers": {str(a["q_idx"]): {"selected": a["selected_id"], "is_correct": a["is_correct"]} for a in exam["answers"]},
+                "source": "bot_dtm"
+            }
+            participants[u_key] = entry
+            perm_participants[u_key] = entry
+            save_sci_session(session)
+            save_json_file(SCIENTIFIC_PARTICIPANTS_FILE, perm_participants)
 
         text, kb = build_dtm_results_card(exam)
         USER_DTM_EXAMS.pop(user_id, None)
@@ -9290,18 +9362,28 @@ async def on_scientific_poll_answer(poll_answer: types.PollAnswer):
     Har bir qatnashchi variant tanlaganda real-vaqtda uning natijasi qayd etiladi.
     """
     try:
-        poll_id = poll_answer.poll_id
+        poll_id = str(poll_answer.poll_id)
         session = get_sci_session()
         poll_map = session.get("poll_map", {})
 
         if poll_id not in poll_map:
-            return
+            perm_polls = load_json_file(SCIENTIFIC_POLL_MAP_FILE, {})
+            if poll_id in perm_polls:
+                poll_map[poll_id] = perm_polls[poll_id]
+                session["poll_map"] = poll_map
+                save_sci_session(session)
+            else:
+                logging.warning(f"Poll {poll_id} not found in poll_map!")
+                return
 
         q_info = poll_map[poll_id]
-        q_idx = q_info.get("q_idx", 0)
-        correct_id = q_info.get("correct_id", 0)
+        q_idx = int(q_info.get("q_idx", 0))
+        correct_id = int(q_info.get("correct_id", 0))
 
         user = poll_answer.user
+        if not user:
+            return
+
         uid = str(user.id)
         name = user.full_name or "Асаларичи"
         username = user.username or ""
@@ -9310,40 +9392,58 @@ async def on_scientific_poll_answer(poll_answer: types.PollAnswer):
         selected_id = selected_opts[0] if selected_opts else -1
         is_correct = (selected_id == correct_id)
 
-        participants = session.setdefault("participants", {})
-        if uid not in participants:
-            participants[uid] = {
-                "name": name,
-                "username": username,
-                "score": 0,
-                "answers": {},
-                "started_at": time.time(),
-                "time_taken": 0.0,
-                "finished": False
-            }
+        async with SCI_SESSION_LOCK:
+            session = get_sci_session()
+            participants = session.setdefault("participants", {})
+            perm_participants = load_json_file(SCIENTIFIC_PARTICIPANTS_FILE, {})
 
-        p = participants[uid]
-        p["name"] = name
-        p["username"] = username
+            if uid not in participants and uid in perm_participants:
+                participants[uid] = perm_participants[uid]
 
-        if str(q_idx) not in p["answers"]:
-            p["answers"][str(q_idx)] = {
-                "selected": selected_id,
-                "is_correct": is_correct,
-                "answered_at": time.time()
-            }
-            if is_correct:
-                p["score"] = p.get("score", 0) + 1
+            if uid not in participants:
+                participants[uid] = {
+                    "name": name,
+                    "username": username,
+                    "score": 0,
+                    "first_score": 0,
+                    "attempts": 1,
+                    "answers": {},
+                    "started_at": time.time(),
+                    "time_taken": 0.0,
+                    "finished": False,
+                    "source": "group"
+                }
 
-            start_t = p.get("started_at", session.get("started_at", time.time()))
-            p["time_taken"] = max(1.0, time.time() - start_t)
+            p = participants[uid]
+            p["name"] = name
+            p["username"] = username
+            if "attempts" not in p:
+                p["attempts"] = 1
 
-            if len(p["answers"]) >= session.get("questions_count", 10):
-                p["finished"] = True
+            q_key = str(q_idx)
+            if q_key not in p.get("answers", {}):
+                p.setdefault("answers", {})[q_key] = {
+                    "selected": selected_id,
+                    "is_correct": is_correct,
+                    "answered_at": time.time()
+                }
+                if is_correct:
+                    p["score"] = int(p.get("score", 0)) + 1
+                    p["first_score"] = p["score"]
 
-        save_sci_session(session)
+                start_t = float(p.get("started_at", session.get("started_at", time.time())))
+                p["time_taken"] = max(1.0, round(time.time() - start_t, 1))
+
+                if len(p["answers"]) >= session.get("questions_count", 10):
+                    p["finished"] = True
+
+                perm_participants[uid] = p
+                save_json_file(SCIENTIFIC_PARTICIPANTS_FILE, perm_participants)
+                save_sci_session(session)
+
+                logging.info(f"✅ [GURUH TESTI] {name} (@{username}, {uid}) {q_idx+1}-savolga javob berdi. To'g'ri: {is_correct}, Ball: {p['score']}")
     except Exception as e:
-        logging.error(f"on_scientific_poll_answer error: {e}")
+        logging.error(f"on_scientific_poll_answer error: {e}", exc_info=True)
 
 @dp.message(F.web_app_data)
 async def on_scientific_web_app_data(message: types.Message):
@@ -9372,23 +9472,38 @@ async def on_scientific_web_app_data(message: types.Message):
     cat = data.get("category", "young_beekeepers")
     set_id = int(data.get("set_id", 1))
 
-    session = get_sci_session()
-    participants = session.setdefault("participants", {})
-    participants[uid] = {
-        "name": name,
-        "username": username,
-        "score": score,
-        "total": total,
-        "percentage": pct,
-        "time_taken": time_spent,
-        "answers": data.get("answers", {}),
-        "started_at": time.time() - time_spent,
-        "finished": True,
-        "category": cat,
-        "set_id": set_id,
-        "source": "webapp"
-    }
-    save_sci_session(session)
+    async with SCI_SESSION_LOCK:
+        session = get_sci_session()
+        participants = session.setdefault("participants", {})
+        perm_participants = load_json_file(SCIENTIFIC_PARTICIPANTS_FILE, {})
+        old_p = participants.get(uid, perm_participants.get(uid, {}))
+
+        prev_att = int(old_p.get("attempts", 0))
+        attempts = prev_att + 1
+        first_score = int(old_p.get("first_score", score)) if prev_att > 0 else score
+        first_time = float(old_p.get("first_time_taken", time_spent)) if prev_att > 0 else time_spent
+
+        entry = {
+            "name": name,
+            "username": username,
+            "score": score,
+            "first_score": first_score,
+            "first_time_taken": first_time,
+            "attempts": attempts,
+            "total": total,
+            "percentage": pct,
+            "time_taken": time_spent,
+            "answers": data.get("answers", {}),
+            "started_at": time.time() - time_spent,
+            "finished": True,
+            "category": cat,
+            "set_id": set_id,
+            "source": "webapp"
+        }
+        participants[uid] = entry
+        perm_participants[uid] = entry
+        save_sci_session(session)
+        save_json_file(SCIENTIFIC_PARTICIPANTS_FILE, perm_participants)
 
     if score >= 9:
         medal = "🥇"
@@ -10010,9 +10125,14 @@ def build_night_lock_dashboard() -> tuple[str, InlineKeyboardMarkup]:
     
     # 4-хабар (фойдаланувчига 30 сониялик огоҳлантириш намунаси)
     user_tpl = settings.get("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+    if ("пожалуйста" in user_tpl.lower()) or ("подождите" in user_tpl.lower()) or ("снята" in user_tpl.lower()):
+        user_tpl = DEFAULT_NIGHT_MSG_USER_WARN
+        update_setting("night_msg_user_warn", DEFAULT_NIGHT_MSG_USER_WARN)
+
     sample_warn = (
         user_tpl
         .replace("{user_mention}", "Фойдаланувчи")
+        .replace("{group_name}", get_official_group())
         .replace("{start}", start_t)
         .replace("{end}", end_t)
         .replace("{remaining_time}", "07 соат 30 дақиқа")
@@ -10252,13 +10372,21 @@ async def on_night_lock_actions(call: types.CallbackQuery, state: FSMContext):
         await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
 
     elif act == "test_warn":
-        pre_text = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+        start_t = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+        end_t = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+        pre_tpl = settings.get("night_msg_pre_warn", DEFAULT_NIGHT_MSG_PRE_WARN)
+        formatted_test = (
+            pre_tpl
+            .replace("{group_name}", get_official_group())
+            .replace("{start}", start_t)
+            .replace("{end}", end_t)
+        )
         try:
             await bot.send_message(
-                chat_id=-1001275726275,
-                text=pre_text
+                chat_id=OFFICIAL_GROUP_ID,
+                text=formatted_test
             )
-            await call.answer("✅ @Asalarichilik_Uzbekistan гуруҳига синов эълони муваффақиятли юборилди!", show_alert=True)
+            await call.answer("✅ @asalarichilik_uzbekistan гуруҳига синов эълони муваффақиятли юборилди!", show_alert=True)
         except Exception as te:
             await call.answer(f"⚠️ Хатолик: {te}", show_alert=True)
         return
@@ -10790,7 +10918,12 @@ async def main():
 
             print("🚀 Bot Telegram serveriga ulandi va xabarlarni qabul qilmoqda...", flush=True)
             # PythonAnywhere bepul proksisida 503 xatosi bo'lmasligi uchun polling_timeout=3 soniya o'rnatiladi
-            await dp.start_polling(bot, polling_timeout=3, handle_signals=False)
+            await dp.start_polling(
+                bot,
+                polling_timeout=3,
+                handle_signals=False,
+                allowed_updates=["message", "edited_message", "channel_post", "edited_channel_post", "inline_query", "chosen_inline_result", "callback_query", "poll", "poll_answer", "my_chat_member", "chat_member", "chat_join_request"]
+            )
         except Exception as e:
             retry_count += 1
             err_msg = str(e)
