@@ -1,0 +1,12 @@
+{
+    "target": "both",
+    "current_category": "young_beekeepers",
+    "duration_limit_sec": 60,
+    "pre_notice_1h": true,
+    "auto_enabled": false,
+    "auto_time": "19:00",
+    "script_mode": "cyrillic",
+    "reactions_enabled": true,
+    "selected_set_id": 1,
+    "format_mode": "dtm_poll"
+}
