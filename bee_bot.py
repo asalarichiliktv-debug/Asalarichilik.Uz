@@ -258,19 +258,19 @@ def get_settings() -> dict:
         "silent_send": False,
         "news_auto_enabled": True,
         "news_auto_time": "07:00",
-        "news_auto_target": "both",          # "channel", "group", "both"
+        "news_auto_target": "channel",       # "channel", "group", "both"
         "quiz_auto_enabled": True,
         "quiz_auto_time": "16:00",
         "quiz_schedule_time": "16:00",
-        "quiz_auto_target": "both",          # "channel", "group", "both"
+        "quiz_auto_target": "channel",       # "channel", "group", "both"
         "apitherapy_auto_enabled": True,
         "apitherapy_auto_time": "08:00",
-        "apitherapy_auto_target": "both",
+        "apitherapy_auto_target": "channel",
         "video_auto_enabled": True,
         "video_schedule_enabled": True,
         "video_auto_time": "18:00",
         "video_schedule_time": "18:00",
-        "video_auto_target": "both",
+        "video_auto_target": "channel",
         "night_lock_enabled": True,
         "night_lock_start": "23:00",
         "night_lock_end": "06:30",
@@ -283,6 +283,13 @@ def get_settings() -> dict:
     for k, v in defaults.items():
         if k not in data:
             data[k] = v
+    # Agar post_target_mode mavjud bo'lsa, barcha avto bo'limlar unga to'liq buysunishi kerak
+    main_target = str(data.get("post_target_mode", "channel")).strip().lower()
+    if main_target in ["channel", "group", "both"]:
+        data["news_auto_target"] = main_target
+        data["quiz_auto_target"] = main_target
+        data["apitherapy_auto_target"] = main_target
+        data["video_auto_target"] = main_target
     # Eski xato qiymatlar bo'lsa, avtomatik yangilash
     if data.get("official_channel") in ["@asalarichilik", "asalarichilik"]:
         data["official_channel"] = "@uz_asalarichilik"
@@ -292,6 +299,14 @@ def get_settings() -> dict:
 
 def save_settings(data: dict):
     save_json_file(SETTINGS_FILE, data)
+
+def get_effective_post_target(settings_dict: Optional[dict] = None) -> str:
+    """Груҳ созламалари ва умумий созламаларда танланган ягона расмий манзил (channel, group, both)"""
+    s = settings_dict if settings_dict is not None else get_settings()
+    m = str(s.get("post_target_mode", "channel")).strip().lower()
+    if m in ["channel", "group", "both"]:
+        return m
+    return "channel"
 
 def update_setting(key: str, value: Any):
     settings = get_settings()
@@ -2131,20 +2146,35 @@ async def delete_after_delay(bot_inst: Bot, chat_id: int, message_id: int, delay
     except Exception:
         pass
 
-async def notify_owner_success(bot_inst: Bot, title: str, details: str):
+async def notify_owner_success(bot_inst: Bot, title: str, details: str, target_mode: Optional[str] = None):
     """Rejalashtirilgan har bir xabar yuborilganda bot egasiga tasdiq hisoboti beradi"""
     try:
         cur_t = get_uzb_now().strftime('%H:%M:%S')
+        settings = get_settings()
+        dest_mode = target_mode or get_effective_post_target(settings)
+        
+        off_chan = get_official_channel()
+        off_grp = get_official_group()
+        
+        if dest_mode == "channel":
+            dest_text = f"{off_chan} (Фақат Канал)"
+        elif dest_mode == "group":
+            dest_text = f"{off_grp} (Фақат Гуруҳ)"
+        elif dest_mode == "both":
+            dest_text = f"{off_chan} ва {off_grp} (Канал ва Гуруҳ)"
+        else:
+            dest_text = f"{off_chan} (Фақат Канал)"
+
         report = (
             "✅ **РЕЖАЛАШТИРИЛГАН ХАБАР МУВАФФАҚИЯТЛИ ЮБОРИЛДИ!**\n\n"
             f"📌 **Бўлим:** {title}\n"
             f"{details}\n"
             f"⏰ **Вақт:** {cur_t}\n"
-            "📍 **Манзил:** @uz_asalarichilik ва @asalarichilik_uzbekistan"
+            f"📍 **Манзил:** {dest_text}"
         )
         await bot_inst.send_message(chat_id=OWNER_ID, text=report, parse_mode="Markdown")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"notify_owner_success error: {e}")
 
 # ==============================================================================
 # 10. ASOSIY MENYU KLAVIATURASI (SKRINSHOTDAGI KABI 1-GA-1)
@@ -4176,7 +4206,7 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
     a_time = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "16:00")))
     a_status = f"🟢 {a_time} (Фаол)" if a_en else "🔴 Ўчирилган"
 
-    t_mode = settings.get("post_target_mode", "ask")
+    t_mode = get_effective_post_target(settings)
     if t_mode == "channel":
         target_label = "📢 Фақат Канал"
     elif t_mode == "group":
@@ -4184,7 +4214,7 @@ def build_settings_inline(source_menu: Optional[str] = None) -> InlineKeyboardMa
     elif t_mode == "both":
         target_label = "🚀 Канал + Гуруҳ"
     else:
-        target_label = "❓ Ҳар сафар сўралсин"
+        target_label = "📢 Фақат Канал"
 
     poll_type = settings.get("poll_type", "quiz")
     poll_mode_label = "🐝 Викторина (Quiz)" if poll_type == "quiz" else "📋 Опрос (Сўровнома)"
@@ -4534,12 +4564,17 @@ async def on_setting_toggle(call: types.CallbackQuery):
     settings = get_settings()
 
     if key == "post_target_mode":
-        current = settings.get("post_target_mode", "ask")
-        order = ["ask", "channel", "group", "both"]
-        next_val = order[(order.index(current) + 1) % len(order)] if current in order else "ask"
+        current = get_effective_post_target(settings)
+        order = ["channel", "group", "both"]
+        next_val = order[(order.index(current) + 1) % len(order)] if current in order else "channel"
         update_setting("post_target_mode", next_val)
+        update_setting("news_auto_target", next_val)
+        update_setting("quiz_auto_target", next_val)
+        update_setting("apitherapy_auto_target", next_val)
+        update_setting("video_auto_target", next_val)
+        update_sci_setting("target", next_val)
         await call.message.edit_reply_markup(reply_markup=build_settings_inline(source_menu=src))
-        lbl = {"ask": "Ҳар сафар сўралади ❓", "channel": "Фақат Каналга 📢", "group": "Фақат Гуруҳга 👥", "both": "Канал ва Гуруҳга (иккаласига) 🚀"}[next_val]
+        lbl = {"channel": "Фақат Каналга 📢", "group": "Фақат Гуруҳга 👥", "both": "Канал ва Гуруҳга (иккаласига) 🚀"}[next_val]
         await call.answer(f"Манзил: {lbl}")
         return
 
@@ -5801,20 +5836,22 @@ async def daily_scheduler_loop():
             log = load_json_file(SCHEDULER_LOG_FILE, {})
             settings = get_settings()
 
+            # Ягона умумий расмий манзил (Груҳ созламаларидаги post_target_mode):
+            eff_target = get_effective_post_target(settings)
+            targets = get_destinations_for_target(eff_target)
+
             # 1. Avtomatik Yangiliklar
             news_enabled = settings.get("news_auto_enabled", settings.get("news_schedule_enabled", True))
-            news_time = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "14:00")))
-            news_target = settings.get("news_auto_target", "both")
+            news_time = normalize_hhmm(settings.get("news_auto_time", settings.get("news_schedule_time", "07:00")))
             key_n = f"news_{today_str}_{news_time}"
 
             if news_enabled and (cur_hhmm == news_time or (cur_hhmm > news_time and is_within_minutes(cur_hhmm, news_time, 15))) and not log.get(key_n) and (key_n not in ALREADY_SENT_SCHEDULE_KEYS):
                 ALREADY_SENT_SCHEDULE_KEYS.add(key_n)
                 log[key_n] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
-                logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {news_target}")
-                targets = get_destinations_for_target(news_target)
+                logging.info(f"⏰ Avto-yangilik vaqti keldi ({cur_hhmm})! Target: {eff_target} (Чатлар: {targets})")
                 news = get_next_sequential_news()
-                asyncio.create_task(notify_owner_success(bot, "Асаларичилик янгиликлари", f"Янгилик: {news.get('title', '')[:60]}"))
+                asyncio.create_task(notify_owner_success(bot, "Асаларичилик янгиликлари", f"Янгилик: {news.get('title', '')[:60]}", target_mode=eff_target))
                 script = settings.get("script_mode", "cyrillic")
                 text = format_news_post_text(news, script, is_admin=False)
                 for cid in targets:
@@ -5839,18 +5876,16 @@ async def daily_scheduler_loop():
             # 2. Avtomatik Viktorina va So'rovnomalar (16:00)
             quiz_enabled = settings.get("quiz_auto_enabled", settings.get("quiz_schedule_enabled", True))
             quiz_time = normalize_hhmm(settings.get("quiz_auto_time", settings.get("quiz_schedule_time", "16:00")))
-            quiz_target = settings.get("quiz_auto_target", "both")
             key_q = f"quiz_{today_str}_{quiz_time}"
 
             if quiz_enabled and (cur_hhmm == quiz_time or (cur_hhmm > quiz_time and is_within_minutes(cur_hhmm, quiz_time, 15))) and not log.get(key_q) and (key_q not in ALREADY_SENT_SCHEDULE_KEYS):
                 ALREADY_SENT_SCHEDULE_KEYS.add(key_q)
                 log[key_q] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
-                logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {quiz_target}")
-                targets = get_destinations_for_target(quiz_target)
+                logging.info(f"⏰ Avto-viktorina vaqti keldi ({cur_hhmm})! Target: {eff_target} (Чатлар: {targets})")
                 poll_type = settings.get("poll_type", "quiz")
                 quiz = get_next_sequential_quiz(poll_type=poll_type)
-                asyncio.create_task(notify_owner_success(bot, "Викторина ва сўровнома", f"Савол: {quiz.get('question', '')[:60]}"))
+                asyncio.create_task(notify_owner_success(bot, "Викторина ва сўровнома", f"Савол: {quiz.get('question', '')[:60]}", target_mode=eff_target))
                 for cid in targets:
                     try:
                         await send_quiz_poll_to_chat(cid, quiz, poll_mode=poll_type)
@@ -5862,19 +5897,16 @@ async def daily_scheduler_loop():
             # 3. Avtomatik Apiterapiya (08:00)
             api_enabled = settings.get("apitherapy_auto_enabled", settings.get("apitherapy_schedule_enabled", True))
             api_time = normalize_hhmm(settings.get("apitherapy_auto_time", settings.get("apitherapy_schedule_time", "08:00")))
-            api_target = settings.get("apitherapy_auto_target", "both")
             key_a = f"apitherapy_{today_str}_{api_time}"
 
             if api_enabled and (cur_hhmm == api_time or (cur_hhmm > api_time and is_within_minutes(cur_hhmm, api_time, 15))) and not log.get(key_a) and (key_a not in ALREADY_SENT_SCHEDULE_KEYS):
                 ALREADY_SENT_SCHEDULE_KEYS.add(key_a)
                 log[key_a] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
-                logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {api_target}")
-                targets = get_destinations_for_target(api_target)
+                logging.info(f"⏰ Avto-apiterapiya vaqti keldi ({cur_hhmm})! Target: {eff_target} (Чатлар: {targets})")
                 item = get_next_sequential_apitherapy()
                 if item:
-                    asyncio.create_task(notify_owner_success(bot, "Апитерапия янгиликлари", f"Мавзу: {item.get('title', '')[:60]}"))
-                if item:
+                    asyncio.create_task(notify_owner_success(bot, "Апитерапия янгиликлари", f"Мавзу: {item.get('title', '')[:60]}", target_mode=eff_target))
                     script = settings.get("script_mode", "cyrillic")
                     text = format_apitherapy_post_text(item, 0, 1000, script=script)
                     for cid in targets:
@@ -5883,7 +5915,7 @@ async def daily_scheduler_loop():
                                 chat_id=int(cid) if str(cid).replace("-", "").isdigit() else 0,
                                 message_id=0,
                                 reactions_list=settings.get("reactions"),
-                                is_channel_post=(cid == get_official_channel()),
+                                is_channel_post=(cid == OFFICIAL_CHANNEL_ID),
                                 share_title=f"🌿 Апитерапия: {item.get('title', '')[:60]}",
                                 share_text=item.get("body", "")[:300]
                             )
@@ -5896,19 +5928,16 @@ async def daily_scheduler_loop():
             # 4. Avtomatik Asalarichilik Videolari (18:00)
             vid_enabled = settings.get("video_auto_enabled", settings.get("video_schedule_enabled", True))
             vid_time = normalize_hhmm(settings.get("video_auto_time", settings.get("video_schedule_time", "18:00")))
-            vid_target = settings.get("video_auto_target", "both")
             key_v = f"video_{today_str}_{vid_time}"
 
             if vid_enabled and (cur_hhmm == vid_time or (cur_hhmm > vid_time and is_within_minutes(cur_hhmm, vid_time, 15))) and not log.get(key_v) and (key_v not in ALREADY_SENT_SCHEDULE_KEYS):
                 ALREADY_SENT_SCHEDULE_KEYS.add(key_v)
                 log[key_v] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
-                logging.info(f"⏰ Avto-video vaqti keldi ({cur_hhmm})! Target: {vid_target}")
-                targets = get_destinations_for_target(vid_target)
+                logging.info(f"⏰ Avto-video vaqti keldi ({cur_hhmm})! Target: {eff_target} (Чатлар: {targets})")
                 v = get_next_sequential_video()
                 if v:
-                    asyncio.create_task(notify_owner_success(bot, "Асаларичилик жаҳон видеолари", f"Видео: {v.get('title', '')[:60]}"))
-                if v:
+                    asyncio.create_task(notify_owner_success(bot, "Асаларичилик жаҳон видеолари", f"Видео: {v.get('title', '')[:60]}", target_mode=eff_target))
                     script = settings.get("script_mode", "cyrillic")
                     text = format_video_card_text(v, script)
                     for cid in targets:
@@ -5917,7 +5946,7 @@ async def daily_scheduler_loop():
                                 chat_id=int(cid) if str(cid).replace("-", "").isdigit() else 0,
                                 message_id=0,
                                 reactions_list=settings.get("reactions"),
-                                is_channel_post=(cid == get_official_channel()),
+                                is_channel_post=(cid == OFFICIAL_CHANNEL_ID),
                                 share_title=f"🎬 {v.get('title', '')[:60]}",
                                 share_text=v.get("description", "")[:250]
                             )
@@ -6914,7 +6943,7 @@ async def bot_guide_menu(message: types.Message):
 
 def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, InlineKeyboardMarkup]:
     settings = get_settings()
-    cur_target = settings.get("post_target_mode", "both")
+    cur_target = get_effective_post_target(settings)
     off_group = get_official_group()
     off_channel = get_official_channel()
     chan_title = get_channel_title()
@@ -6922,12 +6951,12 @@ def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, Inli
     script_display = "Крил 🇺🇿" if script == "cyrillic" else "Лотин 🇺🇿"
 
     target_map = {
-        "channel": ("📢 1-Канал", "📢 1-Канал"),
-        "group": ("👥 2-Группа", "👥 2-Группа"),
-        "both": ("📢+👥 3-Канал ва Группа", "📢+👥 3-Канал ва Группа"),
+        "channel": ("📢 1-Канал (Фақат Канал)", "📢 1-Канал"),
+        "group": ("👥 2-Группа (Фақат Гуруҳ)", "👥 2-Группа"),
+        "both": ("📢+👥 3-Канал ва Группа (Иккаласи)", "📢+👥 3-Канал ва Группа"),
         "ask": ("❓ 4-Сўралсин", "❓ 4-Сўралсин")
     }
-    dest_str, dest_btn = target_map.get(cur_target, ("📢+👥 3-Канал ва Группа", "📢+👥 3-Канал ва Группа"))
+    dest_str, dest_btn = target_map.get(cur_target, ("📢 1-Канал (Фақат Канал)", "📢 1-Канал"))
 
     # Reactions
     auto_react = settings.get("auto_reactions", True)
@@ -7357,11 +7386,13 @@ async def on_grp_set_dest_select(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     mode = call.data.split(":")[1]
-    update_setting("post_target_mode", mode)
-    update_sci_setting("target", "both" if mode in ["both", "ask"] else mode)
-    update_setting("news_auto_target", "both" if mode in ["both", "ask"] else mode)
-    update_setting("quiz_auto_target", "both" if mode in ["both", "ask"] else mode)
-    update_setting("apitherapy_auto_target", "both" if mode in ["both", "ask"] else mode)
+    target_mode = mode if mode in ["channel", "group", "both"] else "channel"
+    update_setting("post_target_mode", target_mode)
+    update_setting("news_auto_target", target_mode)
+    update_setting("quiz_auto_target", target_mode)
+    update_setting("apitherapy_auto_target", target_mode)
+    update_setting("video_auto_target", target_mode)
+    update_sci_setting("target", target_mode)
 
     labels = {
         "channel": "Фақат КАНАЛГА 📢",
@@ -7734,8 +7765,7 @@ async def dispatch_scientific_pre_notice(bot_instance: Bot) -> int:
     ]
     notice_text = chr(10).join(text_lines)
 
-    global_target = get_settings().get("post_target_mode", "both")
-    eff_target = global_target if global_target in ["channel", "group", "both"] else settings.get("target", "both")
+    eff_target = get_effective_post_target(get_settings())
     targets = get_destinations_for_target(eff_target)
     sent_cnt = 0
     for cid in targets:
@@ -8035,7 +8065,8 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
     test_set = set_questions[:10]
 
     # Admin sozlamalardan belgilangan manzil (Kanal, Guruh yoki Ikkala)
-    eff_target = settings.get("target", "both")
+    main_settings = get_settings()
+    eff_target = get_effective_post_target(main_settings)
     targets = get_destinations_for_target(eff_target)
     if not targets:
         if eff_target == "channel":
@@ -8377,7 +8408,8 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     session["is_active"] = False
     save_sci_session(session)
 
-    targets = get_destinations_for_target(settings.get("target", "both"))
+    eff_target = get_effective_post_target(get_settings())
+    targets = get_destinations_for_target(eff_target)
     bot_user = get_settings().get("official_bot", "@Asalarichilikuz_bot").replace("@", "")
     ch_user = get_official_channel_clean()
     grp_user = get_official_group_clean()
