@@ -24,6 +24,7 @@ Tavsif:
 from __future__ import annotations
 import asyncio
 import copy
+import html
 import importlib.util
 import json
 import logging
@@ -71,6 +72,8 @@ def is_within_minutes(current_hhmm: str, target_hhmm: str, max_mins: int = 15) -
         ch, cm = map(int, current_hhmm.split(":"))
         th, tm = map(int, target_hhmm.split(":"))
         diff = (ch * 60 + cm) - (th * 60 + tm)
+        if diff < -720:
+            diff += 1440
         return 0 <= diff <= max_mins
     except Exception:
         return False
@@ -5996,7 +5999,7 @@ async def daily_scheduler_loop():
             # 5. Avtomatik Asalarichilik Ilmiy Testlari (10 talik A, B, C, D, E) ва ТАҚДИРЛАШ
             sci_settings = get_sci_settings() if 'get_sci_settings' in globals() else {}
             sci_enabled = sci_settings.get("auto_enabled", True)
-            sci_start_time = normalize_hhmm(sci_settings.get("start_time", sci_settings.get("auto_time", "18:00")))
+            sci_start_time = normalize_hhmm(sci_settings.get("start_time") or sci_settings.get("auto_time") or "18:00")
             sci_end_time = normalize_hhmm(sci_settings.get("end_time", "19:00"))
             key_sci_pre = f"sci_pre_{today_str}_{sci_start_time}"
             key_sci_start = f"sci_start_{today_str}_{sci_start_time}"
@@ -6009,30 +6012,33 @@ async def daily_scheduler_loop():
                     target_min = int(sci_start_time.split(":")[1])
                     pre_hour = (target_hour - 1) % 24
                     pre_time_str = f"{pre_hour:02d}:{target_min:02d}"
-                    if (cur_hhmm == pre_time_str or (cur_hhmm > pre_time_str and is_within_minutes(cur_hhmm, pre_time_str, 15))) and not log.get(key_sci_pre):
-                        logging.info(f"⏰ Ilmiy testdan 1 soat oldingi xabarnoma vaqti keldi ({cur_hhmm})!")
+                    if is_within_minutes(cur_hhmm, pre_time_str, 15) and not log.get(key_sci_pre):
+                        logging.info(f"⏰ Ilmiy testdan 1 soat oldingi xabarnoma vaqti keldi ({cur_hhmm}, reja: {pre_time_str})!")
                         await dispatch_scientific_pre_notice(bot)
                         log[key_sci_pre] = True
                         save_json_file(SCHEDULER_LOG_FILE, log)
                 except Exception as pe:
                     logging.error(f"Sci pre-notice error: {pe}")
 
-            # Testni boshlash vaqti (masalan 18:00 yoki 19:05 da)
-            if sci_enabled and (cur_hhmm == sci_start_time or (cur_hhmm > sci_start_time and is_within_minutes(cur_hhmm, sci_start_time, 15))) and not log.get(key_sci_start):
-                logging.info(f"🚀 Avto Ilmiy Test boshlanish vaqti keldi ({cur_hhmm})!")
+            # Testni boshlash vaqti (masalan 18:00 da)
+            if sci_enabled and is_within_minutes(cur_hhmm, sci_start_time, 15) and not log.get(key_sci_start):
+                logging.info(f"🚀 Avto Ilmiy Test boshlanish vaqti keldi ({cur_hhmm}, reja: {sci_start_time})!")
                 await launch_full_scientific_test(bot)
                 log[key_sci_start] = True
                 save_json_file(SCHEDULER_LOG_FILE, log)
 
-            # Test yakuni va AVTOMATIK TAQDIRLASH (masalan 19:00 yoki 20:00 da)
+            # Test yakuni va AVTOMATIK TAQDIRLASH (masalan 19:00 ёки 20:00 да)
             sci_sess = get_sci_session() if 'get_sci_session' in globals() else {}
             sess_end_time = normalize_hhmm(sci_sess.get("end_time", sci_end_time))
-            if (cur_hhmm == sci_end_time or cur_hhmm == sess_end_time or (cur_hhmm > sci_end_time and is_within_minutes(cur_hhmm, sci_end_time, 15))) and not log.get(key_sci_award):
+            key_sess_award = f"sci_award_{today_str}_{sess_end_time}"
+            if (is_within_minutes(cur_hhmm, sci_end_time, 15) or is_within_minutes(cur_hhmm, sess_end_time, 15)) and not log.get(key_sci_award) and not log.get(key_sess_award):
                 if sci_sess.get("is_active"):
                     logging.info(f"🏆 Test vaqti tugadi ({cur_hhmm})! G'oliblarni avtomatik taqdirlash boshlandi...")
-                    await broadcast_scientific_results(bot)
-                    log[key_sci_award] = True
-                    save_json_file(SCHEDULER_LOG_FILE, log)
+                    _, award_ok = await broadcast_scientific_results(bot)
+                    if award_ok:
+                        log[key_sci_award] = True
+                        log[key_sess_award] = True
+                        save_json_file(SCHEDULER_LOG_FILE, log)
 
             # 6. Avtomatik Guruh Tunggi Cheklovi (Night Lock - to tongacha turuvchi e'lon, 1 soatlik ochilish xabari)
             try:
@@ -7483,12 +7489,14 @@ SCIENTIFIC_PARTICIPANTS_FILE = "scientific_participants.json"
 SCI_SESSION_LOCK = asyncio.Lock()
 
 DEFAULT_SCIENTIFIC_SETTINGS = {
-    "target": "both",
+    "target": "channel",
     "current_category": "young_beekeepers",
     "duration_limit_sec": 60,
     "pre_notice_1h": True,
     "auto_enabled": False,
-    "auto_time": "19:00",
+    "start_time": "18:00",
+    "end_time": "19:00",
+    "auto_time": "18:00",
     "script_mode": "cyrillic",
     "reactions_enabled": True,
     "selected_set_id": 1,
@@ -7516,6 +7524,12 @@ def get_sci_settings() -> dict:
         if k not in s:
             s[k] = v
             changed = True
+    # Agar start_time va auto_time mos kelmasa, start_time asosida sinxronlash
+    norm_start = normalize_hhmm(s.get("start_time", "18:00"))
+    if s.get("start_time") != norm_start or s.get("auto_time") != norm_start:
+        s["start_time"] = norm_start
+        s["auto_time"] = norm_start
+        changed = True
     if changed:
         save_json_file(SCIENTIFIC_SETTINGS_FILE, s)
     return s
@@ -7523,6 +7537,10 @@ def get_sci_settings() -> dict:
 def update_sci_setting(key: str, val: Any):
     s = get_sci_settings()
     s[key] = val
+    if key == "start_time":
+        s["auto_time"] = normalize_hhmm(val)
+    elif key == "auto_time":
+        s["start_time"] = normalize_hhmm(val)
     save_json_file(SCIENTIFIC_SETTINGS_FILE, s)
 
 def get_sci_session() -> dict:
@@ -7778,46 +7796,53 @@ async def dispatch_scientific_pre_notice(bot_instance: Bot) -> int:
     settings = get_sci_settings()
     script = settings.get("script_mode", "cyrillic")
     cat = settings.get("current_category", "young_beekeepers")
-    cat_title = get_sci_category_title(cat, script)
+    cat_title = get_sci_category_title(cat, script).replace("**", "")
     dur = settings.get("duration_limit_sec", 60)
     dur_lbl = "Чекловсиз" if dur == 0 else f"{dur} сония"
     dur_lbl = apply_script(dur_lbl, script)
+    start_t = normalize_hhmm(settings.get("start_time", "18:00"))
+    end_t = normalize_hhmm(settings.get("end_time", "19:00"))
 
     text_lines = [
-        "⏰ " + apply_script("ДИҚҚАТ! 1 СОАТДАН СЎНГ ИЛМИЙ ТЕСТ БОШЛАНАДИ!", script) + " ⏰",
+        "⏰ <b>" + html.escape(apply_script("ДИҚҚАТ! 1 СОАТДАН СЎНГ ИЛМИЙ ТЕСТ БОШЛАНАДИ!", script)) + "</b> ⏰",
         "",
-        "🏛 " + apply_script("Манба: Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот институтлари", script),
-        f"🏆 {apply_script('Йўналиш', script)}: **{cat_title}**",
-        "📝 " + apply_script("Саволлар: 10 та савол (A, B, C, D, E вариантлар)", script),
-        f"⏱ {apply_script('Ҳар бир савол учун вақт', script)}: **{dur_lbl}**",
+        "🏛 " + html.escape(apply_script("Манба: Ўзбекистон ва Халқаро Асаларичилик илмий-тадқиқот институтлари", script)),
+        f"🏆 {html.escape(apply_script('Йўналиш', script))}: <b>{html.escape(cat_title)}</b>",
+        f"🕒 {html.escape(apply_script('Синов вақти', script))}: <b>{start_t} — {end_t}</b>",
+        "📝 " + html.escape(apply_script("Саволлар: 10 та савол (A, B, C, D, E вариантлар)", script)),
+        f"⏱ {html.escape(apply_script('Ҳар бир савол учун вақт', script))}: <b>{html.escape(dur_lbl)}</b>",
         "",
-        "🥇 " + apply_script("1-ўрин — Олтин медал 🥇", script),
-        "🥈 " + apply_script("2-ўрин — Кумуш медал 🥈", script),
-        "🥉 " + apply_script("3-ўрин — Бронза медал 🥉", script),
+        "🥇 " + html.escape(apply_script("1-ўрин — Олтин медал 🥇", script)),
+        "🥈 " + html.escape(apply_script("2-ўрин — Кумуш медал 🥈", script)),
+        "🥉 " + html.escape(apply_script("3-ўрин — Бронза медал 🥉", script)),
         "",
-        apply_script("Барча асаларичиларни билимларини синаб кўришга таклиф этамиз!", script),
-        apply_script("Тест роппа-роса 1 соатдан сўнг шу ерда бошланади. Тайёр туринг! 🐝🇺🇿", script),
+        html.escape(apply_script("Барча асаларичиларни билимларини синаб кўришга таклиф этамиз!", script)),
+        html.escape(apply_script(f"Тест соат {start_t} да бошланади. Тайёр туринг! 🐝🇺🇿", script)),
         "",
-        get_official_footer()
+        html.escape(get_official_footer(script))
     ]
     notice_text = chr(10).join(text_lines)
 
-    eff_target = get_effective_post_target(get_settings())
-    targets = get_destinations_for_target(eff_target)
+    # Фақат Илмий тест созламаларида танланган манзилга юбориш!
+    sci_target = str(settings.get("target", "channel")).strip().lower()
+    if sci_target not in ("channel", "group", "both"):
+        sci_target = "channel"
+    targets = get_destinations_for_target(sci_target)
     sent_cnt = 0
     for cid in targets:
         try:
+            is_ch = (cid == OFFICIAL_CHANNEL_ID) or (str(cid) == str(get_official_channel()))
             markup = build_post_markup(
                 chat_id=cid,
                 message_id=999999,
                 reactions_list=["👍", "🔥", "🐝", "👏", "🥇"],
-                is_channel_post=(cid == get_official_channel()),
+                is_channel_post=is_ch,
                 share_title="⏰ Илмий тест бошланишига 1 соат қолди!",
                 share_text="Билимингизни синаб кўринг ва олтин медал соҳиби бўлинг!"
             )
-            sent_msg = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=notice_text, reply_markup=markup, parse_mode=None)
+            sent_msg = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=notice_text, reply_markup=markup, parse_mode="HTML")
             try:
-                await bot_instance.pin_chat_message(chat_id=cid, message_id=sent_msg.message_id, both_silent=True)
+                await bot_instance.pin_chat_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id, both_silent=True)
             except Exception:
                 pass
             sent_cnt += 1
@@ -8103,22 +8128,20 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
 
     test_set = set_questions[:10]
 
-    # Admin sozlamalardan belgilangan manzil (Kanal, Guruh yoki Ikkala)
-    main_settings = get_settings()
-    eff_target = get_effective_post_target(main_settings)
+    # Илмий тест созламаларида танланган манзил (Канал, Гуруҳ ёки Иккаласи)га ҚАТЪИЙ амал қилинади!
+    eff_target = str(settings.get("target", "channel")).strip().lower()
+    if eff_target not in ("channel", "group", "both"):
+        eff_target = "channel"
     targets = get_destinations_for_target(eff_target)
     if not targets:
         if eff_target == "channel":
-            targets = [get_official_channel()]
+            targets = [OFFICIAL_CHANNEL_ID]
         elif eff_target == "group":
-            targets = [get_official_group()]
+            targets = [OFFICIAL_GROUP_ID]
         else:
-            targets = [get_official_channel(), get_official_group()]
+            targets = [OFFICIAL_CHANNEL_ID, OFFICIAL_GROUP_ID]
 
     format_mode = settings.get("format_mode", "dtm_poll")
-    # ДТМ сўровнома тестида гуруҳ аъзолари тестни бевосита ечиб натижаларда кўриниши учун расмий гуруҳ манзили ҳар доим киритилади:
-    if format_mode == "dtm_poll" and (OFFICIAL_GROUP_ID not in targets) and (get_official_group() not in targets):
-        targets.append(OFFICIAL_GROUP_ID)
 
     session = {
         "is_active": True,
@@ -8126,17 +8149,20 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
         "category": cat,
         "target": eff_target,
         "started_at": time.time(),
-        "start_time": start_time,
-        "end_time": end_time,
+        "start_time": normalize_hhmm(start_time),
+        "end_time": normalize_hhmm(end_time),
         "duration_sec": dur,
         "set_id": active_set,
         "questions_count": len(test_set),
         "participants": {},
         "poll_map": {},
+        "live_board_msgs": [],
         "pre_notice_sent": True
     }
+    # Эски қатнашчилар рўйхатини янги тест сессияси учун тозалаш
+    save_json_file(SCIENTIFIC_PARTICIPANTS_FILE, {})
+    save_sci_session(session)
 
-    format_mode = settings.get("format_mode", "dtm_poll")
     webapp_base = settings.get("webapp_url", "https://ais-dev-3kuhdcrgzlxwjavmcfvmsc-952096399350.asia-southeast1.run.app")
     webapp_url = f"{webapp_base}?cat={cat}&series={active_set}"
     bot_username = "Asalarichilikuz_bot"
@@ -8171,12 +8197,13 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
             "2️⃣ Пастдаги «📱 Илмий тестни бошлаш (Мини-илова)» тугмасини босиб, 10 та саволга жавоб белгиланг ва якунланг.",
             f"3️⃣ Соат {end_time} да тест тўхтатилади ва барча қатнашган асаларичилар натижаси эълон қилиниб, ғолиблар тақдирланади!",
             "",
-            "👇 **Тестни бошлаш учун қуйидаги тугмани босинг:**"
+            "👇 **Тестни бошлаш ва қатнашчиларни кўриш учун қуйидаги тугмалардан фойдаланинг:**"
         ]
         banner_text = chr(10).join(banner_lines)
 
         post_markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📱 Илмий тестни бошлаш (Мини-илова) 🚀", web_app=WebAppInfo(url=webapp_url))],
+            [InlineKeyboardButton(text="👥 Қатнашчилар рўйхати (Жонли)", callback_data="sci_pub:participants")],
             [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (Рўйхат)", url=f"https://t.me/{bot_username}?start=sci_rank")],
             [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
         ])
@@ -8193,6 +8220,12 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     parse_mode="Markdown"
                 )
                 sent_cnt += 1
+                session.setdefault("live_board_msgs", []).append({
+                    "chat_id": sent_msg.chat.id,
+                    "message_id": sent_msg.message_id,
+                    "is_channel": getattr(sent_msg.chat, "type", "") == "channel",
+                    "kind": "webapp"
+                })
                 try:
                     await bot_instance.pin_chat_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id, both_silent=True)
                 except Exception:
@@ -8215,16 +8248,17 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
             "🏆 **Мукофотлар:** 1-2-3-ўрин эгаларига Олтин, Кумуш ва Бронза фахрий медаллар!",
             "",
             "📋 **СИНОВДА ҚАТНАШИШ ТАРТИБИ:**",
-            "1️⃣ **Гуруҳда бевосита ечиш:** Гуруҳга жойланган 10 та саволга шу ернинг ўзида жавоб белгиланг (ботга ўтиш шарт эмас).",
-            "2️⃣ **Шахсий ДТМ тест (Ботда):** Саволларни бирма-бир вақт чеклови ва онлайн саноқ билан ечиш учун пастдаги тугмани босинг.",
+            "1️⃣ **Тест саволлари:** Пастда жойланган 10 та викторина саволларига жавоб беринг.",
+            "2️⃣ **Иштирокингиз ва номингиз Канал/Гуруҳ рейтингида кўриниши учун:** «🎯 Шахсий тестни бошлаш (Рўйхатга тушиш)» тугмаси орқали ечинг — натижангиз дарҳол жонли рўйхатга тушади!",
             f"3️⃣ **Автоматик тақдирлаш:** Соат {end_time} да тест тўхтатилади ва барча қатнашган асаларичилар натижаси эълон қилиниб, ғолиблар тақдирланади!",
             "",
-            "👇 **Қатнашиш учун қуйидаги тугмалардан бирини танланг:**"
+            "👇 **Қатнашиш ва қатнашчиларни кузатиш учун қуйидаги тугмалардан фойдаланинг:**"
         ]
         banner_text = chr(10).join(banner_lines)
 
         post_markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👉 Ҳа, розиман! Шахсий тестни бошлаш 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
+            [InlineKeyboardButton(text="🎯 Шахсий тестни бошлаш (Рўйхатга тушиш) 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
+            [InlineKeyboardButton(text="👥 Қатнашчилар рўйхати (Жонли)", callback_data="sci_pub:participants")],
             [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5-ўринлар)", url=f"https://t.me/{bot_username}?start=sci_rank")],
             [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
         ])
@@ -8249,7 +8283,8 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     pass
 
                 chat_type = getattr(sent_msg.chat, "type", "")
-                is_channel_dest = (str(cid) in ["@uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)]) or (chat_type == "channel") or (eff_target == "channel" and str(cid) not in ["@asalarichilik_uzbekistan", str(OFFICIAL_GROUP_ID)])
+                is_channel_dest = (chat_type == "channel") or (str(real_chat_id) == str(OFFICIAL_CHANNEL_ID)) or (str(cid) in ["@uz_asalarichilik", str(OFFICIAL_CHANNEL_ID)])
+                # Telegram каналида сўровнома фақат is_anonymous=True бўлиши шарт; гуруҳда исмлар очиқ (is_anonymous=False)
                 poll_anon = True if is_channel_dest else False
 
                 balanced_slots = [2, 0, 3, 1, 4, 1, 3, 0, 4, 2]
@@ -8310,28 +8345,21 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                         logging.warning(f"Scientific poll send error ({cid}, q {q_idx}): {pe}")
 
                 try:
-                    finish_text = (
-                        f"🏁 **{cat_title} ({active_set}-серия) бўйича барча 10 та синов тести саволлари юборилди!**\n\n"
-                        "📊 **Реакциялар ва расмий канал ҳаволалари:**\n"
-                        "Тестда иштирок этган барча асаларичиларимизга катта раҳмат! Қуйидаги смайклар орқали тестни баҳоланг ва дўстларингиз билан улашинг:"
-                    )
-                    end_markup = build_post_markup(
+                    board_text, board_kb = build_live_scientific_board_content(session, is_channel_dest=is_channel_dest)
+                    board_msg = await bot_instance.send_message(
                         chat_id=real_chat_id,
-                        message_id=0,
-                        reactions_list=["👍", "❤️", "🔥", "👏", "🐝"],
-                        channel_username="uz_asalarichilik",
-                        is_channel_post=is_channel_dest,
-                        share_title=f"Asalarichilik илмий тести: {cat_title}",
-                        share_text=f"Асаларичилик бўйича {cat_title} ({active_set}-серия) тест саволлари якунланди! 🐝🇺🇿"
+                        text=board_text,
+                        reply_markup=board_kb,
+                        parse_mode="HTML"
                     )
-                    await bot_instance.send_message(
-                        chat_id=real_chat_id,
-                        text=finish_text,
-                        reply_markup=end_markup,
-                        parse_mode="Markdown"
-                    )
+                    session.setdefault("live_board_msgs", []).append({
+                        "chat_id": real_chat_id,
+                        "message_id": board_msg.message_id,
+                        "is_channel": is_channel_dest,
+                        "kind": "board"
+                    })
                 except Exception as ee:
-                    logging.warning(f"Error sending test end reactions block ({cid}): {ee}")
+                    logging.warning(f"Error sending live scientific board ({cid}): {ee}")
 
             except Exception as e:
                 logging.error(f"Test launch broadcast error ({cid}): {e}")
@@ -8382,48 +8410,128 @@ def calculate_leaderboard(session: Optional[dict] = None) -> list:
     results.sort(key=lambda x: (-x["score"], x["attempts"], x["time_taken"], -x["answers_count"]))
     return results
 
+_LAST_LIVE_BOARD_UPDATE = 0.0
+
+def build_live_scientific_board_content(session: Optional[dict] = None, is_channel_dest: bool = False) -> tuple[str, InlineKeyboardMarkup]:
+    if session is None:
+        session = get_sci_session()
+    settings = get_sci_settings()
+    script = settings.get("script_mode", "cyrillic")
+    cat = session.get("category", settings.get("current_category", "young_beekeepers"))
+    active_set = session.get("set_id", settings.get("selected_set_id", 1))
+    cat_title = get_sci_category_title(cat, script).replace("**", "")
+    leaderboard = calculate_leaderboard(session)
+    total_p = len(leaderboard)
+    bot_user = get_settings().get("official_bot", "@Asalarichilikuz_bot").replace("@", "")
+
+    lines = [
+        f"🏁 <b>{html.escape(cat_title)} (#{active_set}-серия) — ЖОНЛИ ҚАТНАШЧИЛАР ТАХТАСИ</b>",
+        "",
+        f"👥 <b>Жами қатнашганлар:</b> {total_p} нафар",
+    ]
+    if is_channel_dest:
+        lines.append("ℹ️ <i>Канал қоидасига кўра сўровнома овозлари аноним; номингиз рўйхатда кўриниши учун «🎯 Тестни ечиш» тугмасини босинг!</i>")
+    lines.append("")
+
+    if not leaderboard:
+        lines.append("⏳ <i>Ҳозирча иштирокчилар тестни ечишни бошламоқда...</i>")
+    else:
+        for idx, p in enumerate(leaderboard[:25], start=1):
+            p_name = html.escape(str(p.get("name", "Асаларичи")).strip())
+            uid = p.get("user_id")
+            mention = f'<a href="tg://user?id={uid}">{p_name}</a>' if uid else p_name
+            medal = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"{idx}."))
+            t_sec = int(p.get("time_taken", 0))
+            lines.append(f"{medal} {mention} — <b>{p.get('score', 0)}/10</b> ({t_sec}с)")
+        if total_p > 25:
+            lines.append(f"<i>...ва яна {total_p - 25} нафар иштирокчи</i>")
+
+    lines.append("")
+    lines.append(f"⏰ Тақдирлаш вақти: <b>{session.get('end_time', settings.get('end_time', '19:00'))}</b>")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"👥 Қатнашчилар ({total_p} нафар) — Янгилаш", callback_data="sci_pub:participants")],
+        [InlineKeyboardButton(text="🎯 Тестни ечиш (Рўйхатга тушиш) 🚀", url=f"https://t.me/{bot_user}?start=sci_test_{active_set}")],
+        [InlineKeyboardButton(text="🏆 Онлайн рейтинг", url=f"https://t.me/{bot_user}?start=sci_rank")]
+    ])
+    return chr(10).join(lines), kb
+
+async def refresh_live_scientific_boards(bot_instance: Bot, force: bool = False):
+    global _LAST_LIVE_BOARD_UPDATE
+    now_ts = time.time()
+    if not force and (now_ts - _LAST_LIVE_BOARD_UPDATE) < 4.0:
+        return
+    _LAST_LIVE_BOARD_UPDATE = now_ts
+    try:
+        session = get_sci_session()
+        boards = session.get("live_board_msgs", [])
+        if not boards:
+            return
+        for b in boards:
+            if b.get("kind") != "board":
+                continue
+            cid = b.get("chat_id")
+            mid = b.get("message_id")
+            if not cid or not mid:
+                continue
+            text, kb = build_live_scientific_board_content(session, is_channel_dest=bool(b.get("is_channel")))
+            try:
+                await bot_instance.edit_message_text(
+                    chat_id=cid,
+                    message_id=mid,
+                    text=text,
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                if "is not modified" not in str(e).lower():
+                    logging.debug(f"Live board refresh skipped ({cid}): {e}")
+    except Exception as e:
+        logging.warning(f"refresh_live_scientific_boards error: {e}")
+
 async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     session = get_sci_session()
     cat = session.get("category", "young_beekeepers")
     active_set = session.get("set_id", 1)
     settings = get_sci_settings()
     script = settings.get("script_mode", "cyrillic")
-    cat_title = get_sci_category_title(cat, script)
+    cat_title = get_sci_category_title(cat, script).replace("**", "")
 
-    now_t = get_uzbekistan_now().strftime("%H:%M")
+    now_t = get_uzb_now().strftime("%H:%M")
     leaderboard = calculate_leaderboard(session)
     total_participants = len(leaderboard)
 
     lines = [
-        "🏆 **«АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТИ РАСМИЙ НАТИЖАЛАРИ»** 🏆",
+        "🏆 <b>«АСАЛАРИЧИЛИК ИЛМИЙ ТЕСТИ РАСМИЙ НАТИЖАЛАРИ»</b> 🏆",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"🔬 **Йўналиш:** {cat_title}",
-        f"📑 **Серия:** #{active_set}-серия (10 та синов тести)",
-        f"👥 **Жами синовдан ўтганлар:** **{total_participants} нафар**",
-        f"⏰ **Якунланган вақт:** {now_t}",
+        f"🔬 <b>Йўналиш:</b> {html.escape(cat_title)}",
+        f"📑 <b>Серия:</b> #{active_set}-серия (10 та синов тести)",
+        f"👥 <b>Жами синовдан ўтганлар:</b> <b>{total_participants} нафар</b>",
+        f"⏰ <b>Якунланган вақт:</b> {now_t}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "",
-        "🎖 **ҒОЛИБЛАР ВА БАРЧА ҚАТНАШЧИЛАР РЎЙХАТИ:**",
+        "🎖 <b>ҒОЛИБЛАР ВА БАРЧА ҚАТНАШЧИЛАР РЎЙХАТИ:</b>",
         ""
     ]
 
     if not leaderboard:
         lines.append("⚠️ Ҳозирча тестда қатнашчилар жавоблари қайд этилмаган. Тест якунланди.")
     else:
-        def format_user_mention(p: dict) -> str:
-            name_raw = str(p.get("name", "Асаларичи")).replace("[", "").replace("]", "").replace("*", "").strip()
+        def format_user_mention_html(p: dict) -> str:
+            name_raw = html.escape(str(p.get("name", "Асаларичи")).strip() or "Асаларичи")
             uname = str(p.get("username", "")).replace("@", "").strip()
             uid = p.get("user_id")
-            if uname and uid:
-                return f"[{name_raw}](tg://user?id={uid}) (@{uname})"
+            if uid and str(uid).isdigit():
+                mention = f'<a href="tg://user?id={uid}">{name_raw}</a>'
+                if uname:
+                    mention += f" (@{html.escape(uname)})"
+                return mention
             elif uname:
-                return f"@{uname} ({name_raw})"
-            elif uid:
-                return f"[{name_raw}](tg://user?id={uid})"
-            return f"**{name_raw}**"
+                return f"@{html.escape(uname)} ({name_raw})"
+            return f"<b>{name_raw}</b>"
 
         for rank_idx, p in enumerate(leaderboard, start=1):
-            u_mention = format_user_mention(p)
+            u_mention = format_user_mention_html(p)
             score = p.get("score", 0)
             t_sec = int(p.get("time_taken", 0))
             time_str = f"{t_sec} сония" if t_sec < 3600 else f"{t_sec // 60} дақ"
@@ -8439,13 +8547,13 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
             else:
                 badge = f"🏅 {rank_idx}-ўрин"
 
-            lines.append(f"{badge}: {u_mention} — **{score}/10 та тўғри** (⏱ {time_str}, {att_str})")
+            lines.append(f"{badge}: {u_mention} — <b>{score}/10 та тўғри</b> (⏱ {time_str}, {att_str})")
 
     lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("🍯 *Иштирок этган барча асаларичиларимизга катта раҳмат! Асалингиз доимо мўл ва баракали бўлсин!* 🐝🇺🇿")
+    lines.append("🍯 <i>Иштирок этган барча асаларичиларимизга катта раҳмат! Асалингиз доимо мўл ва баракали бўлсин!</i> 🐝🇺🇿")
     lines.append("")
-    lines.append(get_official_footer(script))
+    lines.append(html.escape(get_official_footer(script)))
 
     results_text = chr(10).join(lines)
 
@@ -8463,14 +8571,20 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
     session["is_active"] = False
     save_sci_session(session)
 
-    # Тақдирлаш хабари расмий канал ва расмий гуруҳга тенг юборилади
-    targets = [get_official_channel(), get_official_group()]
+    # Тақдирлаш хабари тест созламасида белгиланган манзилга (Канал, Гуруҳ ёки Иккаласи) юборилади
+    sci_target = str(settings.get("target", session.get("target", "channel"))).strip().lower()
+    if sci_target not in ("channel", "group", "both"):
+        sci_target = "channel"
+    targets = get_destinations_for_target(sci_target)
+    if not targets:
+        targets = [OFFICIAL_CHANNEL_ID] if sci_target == "channel" else ([OFFICIAL_GROUP_ID] if sci_target == "group" else [OFFICIAL_CHANNEL_ID, OFFICIAL_GROUP_ID])
+
     bot_user = get_settings().get("official_bot", "@Asalarichilikuz_bot").replace("@", "")
     ch_user = get_official_channel_clean()
     grp_user = get_official_group_clean()
 
-    # Тест якунида ортиқча овоз бериш ва фикр билдириш тугмалари олиб ташланиб, фақат расмий натижа ва улашиш тугмалари қўйилади:
     clean_award_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Қатнашчилар рўйхати (Тўлиқ)", callback_data="sci_pub:participants")],
         [InlineKeyboardButton(text="🏆 Расмий онлайн рейтинг ва натижалар", url=f"https://t.me/{bot_user}?start=sci_rank")],
         [
             InlineKeyboardButton(text="📢 Расмий Канал", url=f"https://t.me/{ch_user}"),
@@ -8478,17 +8592,19 @@ async def broadcast_scientific_results(bot_instance: Bot) -> tuple[str, bool]:
         ]
     ])
 
+    sent_ok = 0
     for cid in targets:
         try:
-            sent = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=results_text, reply_markup=clean_award_markup, parse_mode=None)
+            sent = await safe_send_to_destination(bot_inst=bot_instance, destination=cid, text=results_text, reply_markup=clean_award_markup, parse_mode="HTML")
+            sent_ok += 1
             try:
-                await bot_instance.pin_chat_message(chat_id=cid, message_id=sent.message_id, both_silent=True)
+                await bot_instance.pin_chat_message(chat_id=sent.chat.id, message_id=sent.message_id, both_silent=True)
             except Exception:
                 pass
         except Exception as e:
             logging.error(f"Results broadcast error ({cid}): {e}")
 
-    return results_text, True
+    return results_text, (sent_ok > 0)
 
 # ==============================================================================
 # АСАЛАРИЧИЛИК АМАЛИЙ ВИДЕО ДАРСЛИКЛАР БЎЛИМИ
@@ -8727,12 +8843,24 @@ async def on_sci_force_award_cb(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     await call.answer("🏆 Тест муддатидан олдин якунланмоқда ва ТАНТАНАЛИ ТАҚДИРЛАШ бошланмоқда...", show_alert=False)
-    res_text, ok = await broadcast_scientific_results(bot)
-    done_msg = (
-        "🏆 **ТЕСТ ТЎХТАТИЛДИ ВА ТАНТАНАЛИ ТАҚДИРЛАШ ЎТКАЗИЛДИ!** 🎆🎇\n\n"
-        "Барча қатнашчилар натижаси эълон қилиниб, ғолиблар 🥇 Олтин, 🥈 Кумуш ва 🥉 Бронза медаллар билан тақдирланди ҳамда Канал ва Гуруҳга қадалди!"
-    )
-    await call.message.answer(done_msg, parse_mode="Markdown")
+    try:
+        res_text, ok = await broadcast_scientific_results(bot)
+        tgt = get_sci_settings().get("target", "channel")
+        tgt_lbl = "Каналга" if tgt == "channel" else ("Гуруҳга" if tgt == "group" else "Канал ва Гуруҳга")
+        if ok:
+            done_msg = (
+                "🏆 <b>ТЕСТ ТЎХТАТИЛДИ ВА ТАНТАНАЛИ ТАҚДИРЛАШ ЎТКАЗИЛДИ!</b> 🎆🎇\n\n"
+                f"Барча қатнашчилар натижаси эълон қилиниб, ғолиблар 🥇 Олтин, 🥈 Кумуш ва 🥉 Бронза медаллар билан тақдирланди ҳамда {tgt_lbl} қадалди!"
+            )
+        else:
+            done_msg = "⚠️ Натижаларни юборишда хатолик юз берди. Бот Канал/Гуруҳда админ эканлигини текширинг."
+        await call.message.answer(done_msg, parse_mode="HTML")
+        # Тест маркази панелини янгилаш (тўхтатиш тугмаси йўқолиши учун)
+        dash_text, dash_kb = build_scientific_dashboard()
+        await safe_edit_text(call, dash_text, reply_markup=dash_kb)
+    except Exception as e:
+        logging.error(f"on_sci_force_award_cb error: {e}", exc_info=True)
+        await call.message.answer(f"⚠️ Тақдирлашда хатолик юз берди: {html.escape(str(e))}", parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("sci_time_pick:"))
 async def on_sci_time_picker(call: types.CallbackQuery):
@@ -8774,12 +8902,10 @@ async def on_sci_time_picker(call: types.CallbackQuery):
             update_sci_setting("end_time", chosen_time)
             await call.answer(f"Тақдирлаш вақти: {chosen_time} га созланди! ✅")
 
-        # Sozlamalar oynasiga qaytish
+        # Sozlamalar oynasiga to'liq matn + tugmalar bilan qaytish
         kb = build_scientific_settings_keyboard()
-        try:
-            await call.message.edit_reply_markup(reply_markup=kb)
-        except Exception:
-            pass
+        txt = get_scientific_settings_text()
+        await safe_edit_text(call, txt, reply_markup=kb)
 
     elif action == "custom":
         state_key = "sci_start_time" if mode == "start" else "sci_end_time"
@@ -9162,6 +9288,7 @@ async def on_dtm_ans_cb(call: types.CallbackQuery):
 
         text, kb = build_dtm_results_card(exam)
         USER_DTM_EXAMS.pop(user_id, None)
+        asyncio.create_task(refresh_live_scientific_boards(bot))
 
         try:
             await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -9227,17 +9354,46 @@ async def on_sci_participants_cb(call: types.CallbackQuery):
         await call.message.answer(chr(10).join(lines), reply_markup=kb, parse_mode="Markdown")
     await call.answer()
 
+@dp.callback_query(F.data == "sci_pub:participants")
+async def on_sci_public_participants_cb(call: types.CallbackQuery):
+    session = get_sci_session()
+    leaderboard = calculate_leaderboard(session)
+    if not leaderboard:
+        await call.answer(
+            "👥 Ҳозирча қатнашчилар рўйхатга тушмаган.\n\n«🎯 Тестни ечиш (Рўйхатга тушиш)» тугмаси орқали ечинг!",
+            show_alert=True
+        )
+        return
+    asyncio.create_task(refresh_live_scientific_boards(bot))
+    lines = [f"👥 Қатнашчилар ({len(leaderboard)} нафар):"]
+    for idx, p in enumerate(leaderboard[:10], start=1):
+        medal = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"{idx}."))
+        nm = str(p.get("name", "Асаларичи")).strip()[:16]
+        lines.append(f"{medal} {nm} — {p.get('score', 0)}/10")
+    if len(leaderboard) > 10:
+        lines.append(f"...яна {len(leaderboard) - 10} нафар")
+    alert_txt = "\n".join(lines)
+    if len(alert_txt) > 198:
+        alert_txt = alert_txt[:195] + "..."
+    await call.answer(alert_txt, show_alert=True)
+
 @dp.callback_query(F.data == "sci_act:results")
 async def on_sci_results_cb(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
     await call.answer("Натижалар ҳисобланмоқда ва эълон қилинмоқда...")
-    res_text, ok = await broadcast_scientific_results(bot)
-    done_msg = (
-        "✅ **Тест якунланди ва расмий натижалар эълон қилинди!**\n\n"
-        "Ғолиблар 🥇 1-ўрин (Олтин), 🥈 2-ўрин (Кумуш) ва 🥉 3-ўрин (Бронза) медаллар билан тақдирланди."
-    )
-    await call.message.answer(done_msg, parse_mode="Markdown")
+    try:
+        res_text, ok = await broadcast_scientific_results(bot)
+        tgt = get_sci_settings().get("target", "channel")
+        tgt_lbl = "Каналга" if tgt == "channel" else ("Гуруҳга" if tgt == "group" else "Канал ва Гуруҳга")
+        done_msg = (
+            f"✅ <b>Тест якунланди ва расмий натижалар {tgt_lbl} эълон қилинди!</b>\n\n"
+            "Ғолиблар 🥇 1-ўрин (Олтин), 🥈 2-ўрин (Кумуш) ва 🥉 3-ўрин (Бронза) медаллар билан тақдирланди."
+        )
+        await call.message.answer(done_msg, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"on_sci_results_cb error: {e}", exc_info=True)
+        await call.message.answer(f"⚠️ Натижаларни эълон қилишда хатолик: {html.escape(str(e))}", parse_mode="HTML")
 
 def get_scientific_settings_text() -> str:
     s = get_sci_settings()
@@ -9311,8 +9467,8 @@ async def on_sci_settings_action(call: types.CallbackQuery):
         await call.answer(f"Авто-тест режими: {'Ўчирилди 🔴' if not new_state else 'Ёқилди 🟢'}")
     elif param == "target":
         update_sci_setting("target", val)
-        update_setting("post_target_mode", val)
-        await call.answer(f"Манзил танланди: {val}")
+        tgt_lbl = {"channel": "📢 Фақат Канал", "group": "👥 Фақат Гуруҳ", "both": "🚀 Канал ва Гуруҳ"}.get(val, val)
+        await call.answer(f"Тест манзили танланди: {tgt_lbl}")
     elif param == "time":
         update_sci_setting("duration_limit_sec", int(val))
         await call.answer(f"Вақт чеклови: {val} сония")
@@ -9442,6 +9598,7 @@ async def on_scientific_poll_answer(poll_answer: types.PollAnswer):
                 save_sci_session(session)
 
                 logging.info(f"✅ [GURUH TESTI] {name} (@{username}, {uid}) {q_idx+1}-savolga javob berdi. To'g'ri: {is_correct}, Ball: {p['score']}")
+                asyncio.create_task(refresh_live_scientific_boards(bot))
     except Exception as e:
         logging.error(f"on_scientific_poll_answer error: {e}", exc_info=True)
 
@@ -9504,6 +9661,7 @@ async def on_scientific_web_app_data(message: types.Message):
         perm_participants[uid] = entry
         save_sci_session(session)
         save_json_file(SCIENTIFIC_PARTICIPANTS_FILE, perm_participants)
+        asyncio.create_task(refresh_live_scientific_boards(bot))
 
     if score >= 9:
         medal = "🥇"
