@@ -2643,6 +2643,18 @@ async def start_cmd(message: types.Message, state: FSMContext = None):
     elif start_arg.startswith("sci_rank") or start_arg == "rank":
         text, kb = build_dtm_leaderboard_view()
         return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    elif start_arg.startswith("sci_participants"):
+        await send_all_scientific_participants_list(message)
+        return
+    elif start_arg.startswith("sci_votes"):
+        q_idx = 0
+        try:
+            if "_" in start_arg and start_arg.split("_")[-1].isdigit():
+                q_idx = int(start_arg.split("_")[-1])
+        except Exception:
+            q_idx = 0
+        txt, kb = build_scientific_view_votes_card(q_idx)
+        return await message.answer(txt, reply_markup=kb, parse_mode="HTML")
 
     if user_id != OWNER_ID:
         welcome_text = (
@@ -2719,7 +2731,13 @@ async def send_quiz_poll_to_chat(chat_id: Any, quiz: dict, poll_mode: Optional[s
     script = settings.get("script_mode", "cyrillic")
 
     mode = poll_mode or quiz.get("type") or settings.get("poll_type", "quiz")
-    is_anon = bool(settings.get("poll_is_anonymous", True))
+    is_chan = (
+        str(chat_id) == get_official_channel()
+        or str(chat_id) == str(OFFICIAL_CHANNEL_ID)
+        or (str(chat_id).startswith("@") and "guruh" not in str(chat_id).lower() and str(chat_id).lower() != get_official_group().lower())
+    )
+    # Гуруҳда барча иштирокчилар ва овозлар (View Votes + аватарлар) кўриниши учун иккиланмасдан очиқ (is_anonymous=False):
+    is_anon = True if is_chan else False
 
     q_text = apply_script(quiz.get("question", "Асаларичилик сўровномаси"), script)[:300]
     options_raw = quiz.get("options", ["Ҳа", "Йўқ"])
@@ -2745,8 +2763,6 @@ async def send_quiz_poll_to_chat(chat_id: Any, quiz: dict, poll_mode: Optional[s
             shuffled_opts, new_corr = prepare_balanced_shuffled_options(quiz, target_slot=0, shuffle_enabled=False)
         options = [apply_script(opt, script)[:100] for opt in shuffled_opts[:5]]
         correct_id = new_corr
-
-    is_chan = str(chat_id) == get_official_channel() or (str(chat_id).startswith("@") and "guruh" not in str(chat_id).lower())
     s_title = f"{'🐝 Кун викторинаси' if mode == 'quiz' else '📊 Сўровнома'}: {q_text}"
     s_text = "Вариантлар:\n" + "\n".join([f"• {opt}" for opt in options])
 
@@ -8203,6 +8219,7 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
 
         post_markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📱 Илмий тестни бошлаш (Мини-илова) 🚀", web_app=WebAppInfo(url=webapp_url))],
+            [InlineKeyboardButton(text="👁 Овозлар ва қатнашчиларни кўриш (View Votes)", url=f"https://t.me/{bot_username}?start=sci_votes")],
             [InlineKeyboardButton(text="👥 Қатнашчилар рўйхати (Жонли)", callback_data="sci_pub:participants")],
             [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (Рўйхат)", url=f"https://t.me/{bot_username}?start=sci_rank")],
             [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
@@ -8227,7 +8244,7 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                     "kind": "webapp"
                 })
                 try:
-                    await bot_instance.pin_chat_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id, both_silent=True)
+                    await bot_instance.pin_chat_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id, disable_notification=True)
                 except Exception:
                     pass
             except Exception as e:
@@ -8258,7 +8275,8 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
 
         post_markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🎯 Шахсий тестни бошлаш (Рўйхатга тушиш) 🚀", url=f"https://t.me/{bot_username}?start=sci_test_{active_set}")],
-            [InlineKeyboardButton(text="👥 Қатнашчилар рўйхати (Жонли)", callback_data="sci_pub:participants")],
+            [InlineKeyboardButton(text="👁 Овозлар ва қатнашчиларни кўриш (View Votes)", url=f"https://t.me/{bot_username}?start=sci_votes")],
+            [InlineKeyboardButton(text="👥 Барча қатнашчилар рўйхати (Жонли)", callback_data="sci_pub:participants")],
             [InlineKeyboardButton(text="🏆 Жорий онлайн рейтинг (1-2-3-4-5-ўринлар)", url=f"https://t.me/{bot_username}?start=sci_rank")],
             [InlineKeyboardButton(text="↗️ Дўстларга ва бошқа гуруҳларга улашиш ↗️", url=share_url)]
         ])
@@ -8278,7 +8296,7 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                 sent_cnt += 1
                 real_chat_id = sent_msg.chat.id
                 try:
-                    await bot_instance.pin_chat_message(chat_id=real_chat_id, message_id=sent_msg.message_id, both_silent=True)
+                    await bot_instance.pin_chat_message(chat_id=real_chat_id, message_id=sent_msg.message_id, disable_notification=True)
                 except Exception:
                     pass
 
@@ -8328,9 +8346,19 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                             "q_idx": q_idx - 1,
                             "correct_id": correct_id,
                             "set_id": active_set,
-                            "chat_id": real_chat_id
+                            "chat_id": real_chat_id,
+                            "question": q_text,
+                            "options": poll_opts
                         }
                         poll_map[poll_id_str] = p_info
+                        snap_list = session.setdefault("questions_snapshot", [])
+                        while len(snap_list) < q_idx:
+                            snap_list.append({})
+                        snap_list[q_idx - 1] = {
+                            "question": q_text,
+                            "options": poll_opts,
+                            "correct_id": correct_id
+                        }
 
                         # Zudlik bilan faylga saqlash (foydalanuvchi birinchi savolga javob berishi bilanoq ushlash uchun):
                         all_perm_polls = load_json_file(SCIENTIFIC_POLL_MAP_FILE, {})
@@ -8430,31 +8458,188 @@ def build_live_scientific_board_content(session: Optional[dict] = None, is_chann
         f"👥 <b>Жами қатнашганлар:</b> {total_p} нафар",
     ]
     if is_channel_dest:
-        lines.append("ℹ️ <i>Канал қоидасига кўра сўровнома овозлари аноним; номингиз рўйхатда кўриниши учун «🎯 Тестни ечиш» тугмасини босинг!</i>")
+        lines.append("ℹ️ <i>Канал сўровномаси аноним бўлгани учун барча овозларни ва исмларни пастдаги «👁 Овозларни кўриш» тугмасида кўришингиз мумкин!</i>")
     lines.append("")
 
     if not leaderboard:
         lines.append("⏳ <i>Ҳозирча иштирокчилар тестни ечишни бошламоқда...</i>")
     else:
-        for idx, p in enumerate(leaderboard[:25], start=1):
+        shown_count = 0
+        char_budget = 3450
+        cur_len = sum(len(l) + 1 for l in lines)
+        for idx, p in enumerate(leaderboard, start=1):
             p_name = html.escape(str(p.get("name", "Асаларичи")).strip())
             uid = p.get("user_id")
             mention = f'<a href="tg://user?id={uid}">{p_name}</a>' if uid else p_name
             medal = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"{idx}."))
             t_sec = int(p.get("time_taken", 0))
-            lines.append(f"{medal} {mention} — <b>{p.get('score', 0)}/10</b> ({t_sec}с)")
-        if total_p > 25:
-            lines.append(f"<i>...ва яна {total_p - 25} нафар иштирокчи</i>")
+            row = f"{medal} {mention} — <b>{p.get('score', 0)}/10</b> ({t_sec}с)"
+            if cur_len + len(row) + 1 > char_budget:
+                lines.append(f"<i>...ва яна {total_p - shown_count} нафар («👥 Тўлиқ рўйхат» тугмасини босинг)</i>")
+                break
+            lines.append(row)
+            cur_len += len(row) + 1
+            shown_count += 1
 
     lines.append("")
     lines.append(f"⏰ Тақдирлаш вақти: <b>{session.get('end_time', settings.get('end_time', '19:00'))}</b>")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"👥 Қатнашчилар ({total_p} нафар) — Янгилаш", callback_data="sci_pub:participants")],
-        [InlineKeyboardButton(text="🎯 Тестни ечиш (Рўйхатга тушиш) 🚀", url=f"https://t.me/{bot_user}?start=sci_test_{active_set}")],
-        [InlineKeyboardButton(text="🏆 Онлайн рейтинг", url=f"https://t.me/{bot_user}?start=sci_rank")]
+        [InlineKeyboardButton(text=f"👁 Овозларни кўриш (View Votes • {total_p})", url=f"https://t.me/{bot_user}?start=sci_votes")],
+        [
+            InlineKeyboardButton(text=f"👥 Тўлиқ рўйхат ({total_p})", url=f"https://t.me/{bot_user}?start=sci_participants"),
+            InlineKeyboardButton(text="🔄 Жонли тахта", callback_data="sci_pub:participants")
+        ],
+        [InlineKeyboardButton(text="🎯 Тестни ечиш (Рўйхатга тушиш) 🚀", url=f"https://t.me/{bot_user}?start=sci_test_{active_set}")]
     ])
     return chr(10).join(lines), kb
+
+def build_scientific_view_votes_card(q_idx: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+    """
+    Расмдагидек «View Votes (N)» — ҳар бир савол ва ҳар бир вариант (A, B, C, D, E)
+    бўйича барча овоз берган қатнашчилар рўйхатини кўрсатади.
+    """
+    session = get_sci_session()
+    settings = get_sci_settings()
+    script = settings.get("script_mode", "cyrillic")
+    cat = session.get("category", settings.get("current_category", "young_beekeepers"))
+    active_set = session.get("set_id", settings.get("selected_set_id", 1))
+    cat_title = get_sci_category_title(cat, script).replace("**", "")
+
+    snapshots = session.get("questions_snapshot", [])
+    if not snapshots:
+        db = load_scientific_tests_db()
+        qs = db.get(cat, [])
+        by_set = [q for q in qs if q.get("set_id") == active_set][:10] or qs[:10]
+        snapshots = [
+            {
+                "question": f"[{i + 1}/10] {apply_script(q.get('question', ''), script)}",
+                "options": [apply_script(o, script) for o in q.get("options", [])[:5]],
+                "correct_id": int(q.get("correct_option_id", 0))
+            }
+            for i, q in enumerate(by_set)
+        ]
+
+    total_q = max(1, len(snapshots))
+    q_idx = max(0, min(q_idx, total_q - 1))
+    q_snap = snapshots[q_idx] if snapshots else {"question": "Савол", "options": ["A", "B", "C", "D", "E"], "correct_id": 0}
+    q_text = q_snap.get("question", f"{q_idx + 1}-савол")
+    opts = q_snap.get("options", [])
+    correct_id = int(q_snap.get("correct_id", 0))
+
+    participants = dict(load_json_file(SCIENTIFIC_PARTICIPANTS_FILE, {}))
+    participants.update(session.get("participants", {}))
+
+    buckets: dict[int, list[dict]] = {i: [] for i in range(max(len(opts), 5))}
+    total_votes = 0
+    for uid, p in participants.items():
+        ans = (p.get("answers") or {}).get(str(q_idx))
+        if not ans:
+            continue
+        sel = int(ans.get("selected", -1))
+        if sel >= 0:
+            buckets.setdefault(sel, []).append({
+                "uid": uid,
+                "name": str(p.get("name", "Асаларичи")).strip() or "Асаларичи",
+                "username": str(p.get("username", "")).replace("@", "").strip()
+            })
+            total_votes += 1
+
+    lines = [
+        f"👁 <b>ОВОЗЛАРНИ КЎРИШ (View Votes • {total_votes} та овоз)</b>",
+        f"🔬 {html.escape(cat_title)} • #{active_set}-серия",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"❓ <b>{html.escape(q_text)}</b>",
+        ""
+    ]
+
+    letters = ["A", "B", "C", "D", "E"]
+    for i, opt_txt in enumerate(opts):
+        voters = buckets.get(i, [])
+        cnt = len(voters)
+        pct = int(round((cnt * 100.0) / total_votes)) if total_votes > 0 else 0
+        mark = "✅ " if i == correct_id else ""
+        opt_clean = html.escape(opt_txt)
+        lines.append(f"{mark}<b>{opt_clean}</b> — <b>{pct}%</b> ({cnt} та овоз)")
+        if voters:
+            v_strs = []
+            for v in voters[:40]:
+                nm = html.escape(v["name"])
+                v_uid = v["uid"]
+                if v_uid and str(v_uid).isdigit():
+                    v_strs.append(f'<a href="tg://user?id={v_uid}">{nm}</a>')
+                else:
+                    v_strs.append(nm)
+            joined = ", ".join(v_strs)
+            if len(voters) > 40:
+                joined += f" <i>(+{len(voters) - 40} та)</i>"
+            lines.append(f"   👤 {joined}")
+        else:
+            lines.append("   <i>Овоз йўқ</i>")
+        lines.append("")
+
+    # Навигация тугмалари: [1] [2] ... [10]
+    nav_row1 = [InlineKeyboardButton(text=("🟢" if i == q_idx else "") + f"{i + 1}", callback_data=f"sci_votes:q:{i}") for i in range(min(5, total_q))]
+    nav_row2 = [InlineKeyboardButton(text=("🟢" if i == q_idx else "") + f"{i + 1}", callback_data=f"sci_votes:q:{i}") for i in range(5, min(10, total_q))]
+    rows = [nav_row1]
+    if nav_row2:
+        rows.append(nav_row2)
+    rows.append([
+        InlineKeyboardButton(text="👥 Барча қатнашчилар (Тўлиқ)", callback_data="sci_votes:all_users"),
+        InlineKeyboardButton(text="🔄 Янгилаш", callback_data=f"sci_votes:q:{q_idx}")
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🏆 Онлайн рейтинг", callback_data="dtm_rank:view"),
+        InlineKeyboardButton(text="🔙 Асосий Меню", callback_data="main_menu")
+    ])
+    txt = chr(10).join(lines)
+    if len(txt) > 4000:
+        txt = txt[:3980] + "\n..."
+    return txt, InlineKeyboardMarkup(inline_keyboard=rows)
+
+async def send_all_scientific_participants_list(target_msg_or_call: Any):
+    """Барча тест иштирокчиларини ҳеч бирини қисқартирмасдан тўлиқ юборади"""
+    msg = target_msg_or_call.message if isinstance(target_msg_or_call, types.CallbackQuery) else target_msg_or_call
+    session = get_sci_session()
+    leaderboard = calculate_leaderboard(session)
+    if not leaderboard:
+        await msg.answer("⚠️ Ҳозирча тестда қатнашчилар жавоблари қайд этилмаган.")
+        return
+
+    header = (
+        f"👥 <b>БАРЧА ТЕСТ ҚАТНАШЧИЛАРИ РЎЙХАТИ ({len(leaderboard)} нафар)</b>\n"
+        f"📑 #{session.get('set_id', 1)}-серия • Тўлиқ ва ҳаққоний рўйхат:\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    chunks = []
+    cur_lines = [header]
+    cur_len = len(header)
+    for idx, p in enumerate(leaderboard, start=1):
+        nm = html.escape(str(p.get("name", "Асаларичи")).strip() or "Асаларичи")
+        uid = p.get("user_id")
+        uname = str(p.get("username", "")).replace("@", "").strip()
+        mention = f'<a href="tg://user?id={uid}">{nm}</a>' if (uid and str(uid).isdigit()) else nm
+        if uname:
+            mention += f" (@{html.escape(uname)})"
+        medal = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"{idx}."))
+        t_sec = int(p.get("time_taken", 0))
+        row = f"{medal} {mention} — <b>{p.get('score', 0)}/10</b> ({t_sec}с, {p.get('answers_count', 0)} та жавоб)\n"
+        if cur_len + len(row) > 3800:
+            chunks.append("".join(cur_lines))
+            cur_lines = [row]
+            cur_len = len(row)
+        else:
+            cur_lines.append(row)
+            cur_len += len(row)
+    if cur_lines:
+        chunks.append("".join(cur_lines))
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👁 Саволлар бўйича овозлар (View Votes)", callback_data="sci_votes:q:0")],
+        [InlineKeyboardButton(text="🏆 Онлайн рейтинг", callback_data="dtm_rank:view")]
+    ])
+    for c_idx, ch_txt in enumerate(chunks):
+        await msg.answer(ch_txt, reply_markup=(kb if c_idx == len(chunks) - 1 else None), parse_mode="HTML")
 
 async def refresh_live_scientific_boards(bot_instance: Bot, force: bool = False):
     global _LAST_LIVE_BOARD_UPDATE
@@ -9054,6 +9239,7 @@ async def on_sci_send_single_question(call: types.CallbackQuery):
     success = 0
     for cid in targets:
         try:
+            is_ch_cid = (cid == OFFICIAL_CHANNEL_ID) or (str(cid) == str(get_official_channel()))
             await bot.send_poll(
                 chat_id=cid,
                 question=q_text,
@@ -9061,7 +9247,7 @@ async def on_sci_send_single_question(call: types.CallbackQuery):
                 type="quiz",
                 correct_option_id=correct_id,
                 explanation=expl,
-                is_anonymous=False,
+                is_anonymous=(True if is_ch_cid else False),
                 open_period=open_period
             )
             success += 1
@@ -9365,17 +9551,37 @@ async def on_sci_public_participants_cb(call: types.CallbackQuery):
         )
         return
     asyncio.create_task(refresh_live_scientific_boards(bot))
+    # Агар шахсий ёки гуруҳда босилган бўлса ва иштирокчилар кўп бўлса, тўлиқ рўйхатни жўнатиш мумкин
     lines = [f"👥 Қатнашчилар ({len(leaderboard)} нафар):"]
     for idx, p in enumerate(leaderboard[:10], start=1):
         medal = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"{idx}."))
         nm = str(p.get("name", "Асаларичи")).strip()[:16]
         lines.append(f"{medal} {nm} — {p.get('score', 0)}/10")
     if len(leaderboard) > 10:
-        lines.append(f"...яна {len(leaderboard) - 10} нафар")
+        lines.append(f"👁 Барчасини кўриш: «Тўлиқ рўйхат» ёки «View Votes» ни босинг!")
     alert_txt = "\n".join(lines)
     if len(alert_txt) > 198:
         alert_txt = alert_txt[:195] + "..."
     await call.answer(alert_txt, show_alert=True)
+
+@dp.callback_query(F.data.startswith("sci_votes:"))
+async def on_sci_votes_cb(call: types.CallbackQuery):
+    parts = call.data.split(":")
+    action = parts[1] if len(parts) > 1 else "q"
+    if action == "all_users":
+        await call.answer()
+        await send_all_scientific_participants_list(call)
+        return
+    q_idx = 0
+    if len(parts) > 2 and parts[2].isdigit():
+        q_idx = int(parts[2])
+    txt, kb = build_scientific_view_votes_card(q_idx)
+    try:
+        await call.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        if "is not modified" not in str(e).lower():
+            await call.message.answer(txt, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
 
 @dp.callback_query(F.data == "sci_act:results")
 async def on_sci_results_cb(call: types.CallbackQuery):
