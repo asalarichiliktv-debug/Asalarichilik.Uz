@@ -97,6 +97,9 @@ _settings_cache = {
     "lock_forwards": "0",
     "lock_arabic": "1",
     "lock_service": "1",
+    "lock_apk": "1",
+    "bot_post_mode": "0",
+    "bot_post_target": "group",
     "auto_react": "1",
     "share_btn": "1",
     "expert_btn": "1",
@@ -392,6 +395,33 @@ def has_foreign_links(message):
 
     return False
 
+DANGEROUS_EXTENSIONS = (
+    ".apk", ".xapk", ".apks", ".apkm", ".aab",
+    ".exe", ".msi", ".bat", ".cmd", ".scr", ".vbs", ".ps1", ".jar"
+)
+
+def is_dangerous_apk_document(message):
+    """
+    Хабарда .apk ёки хавфли дастур (программа/спам) файли борлигини текширади.
+    """
+    doc = getattr(message, "document", None)
+    if not doc:
+        return False
+
+    raw_name = (getattr(doc, "file_name", "") or "").lower()
+    # Яширин юникод белгилари ва бўш жойларни тозалаймиз
+    clean_name = re.sub(r'[\s\u200b-\u200f\u202a-\u202e\ufeff]+', '', raw_name)
+    mime_type = (getattr(doc, "mime_type", "") or "").strip().lower()
+
+    if "android.package-archive" in mime_type or "x-msdownload" in mime_type:
+        return True
+    if clean_name.endswith(DANGEROUS_EXTENSIONS):
+        return True
+    if re.search(r'\.(apk|xapk|apks|apkm|exe|msi|bat|scr)$', clean_name):
+        return True
+
+    return False
+
 def get_mention(user):
     name = user.first_name or "Фойдаланувчи"
     name = name.replace("<", "").replace(">", "")
@@ -411,7 +441,7 @@ def delete_later(chat_id, message_id, delay=30):
         safe_delete_message(chat_id, message_id)
     threading.Thread(target=_worker, daemon=True).start()
 
-def mute_user_24h(chat_id, user_id, user_mention, user_name="", reason="3 тадан ортиқ расм/видео юборилди"):
+def mute_user_24h(chat_id, user_id, user_mention, user_name="", reason="3 тадан ортиқ расм/видео юборилди", footer_note=""):
     until_date = int(time.time()) + 86400  # 24 соат
     if not user_name:
         user_name = f"ID: {user_id}"
@@ -457,6 +487,9 @@ def mute_user_24h(chat_id, user_id, user_mention, user_name="", reason="3 тад
     except Exception as e:
         logging.error(f"Save mute db error: {e}")
 
+    if not footer_note:
+        footer_note = "Гуруҳ қоидаси: Реклама ёки кетма-кет 3 тадан ортиқ расм/видео ташлаш қатъиян ман этилади! Барча ташланган расмлар ўчирилди."
+
     notice_text = f"""
 ⚠️ <b>ҚАТЪИЙ ОГОҲЛАНТИРИШ ВА ЖАЗО!</b>
 ━━━━━━━━━━━━━━━━━━━━
@@ -465,7 +498,7 @@ def mute_user_24h(chat_id, user_id, user_mention, user_name="", reason="3 тад
 🔇 Жазо тури: <b>24 соатлик МУТ (1 кун ёзиш чеклови)</b>
 ⏳ Муддати: 1 сутка (24 соат)
 ━━━━━━━━━━━━━━━━━━━━
-<i>Гуруҳ қоидаси: Реклама ёки кетма-кет 3 тадан ортиқ расм/видео ташлаш қатъиян ман этилади! Барча ташланган расмлар ўчирилди.</i>
+<i>{footer_note}</i>
 """.strip()
 
     try:
@@ -641,6 +674,8 @@ def build_main_menu_text():
 
     l_photos_state = "🟢 Фаол" if get_setting("lock_photos", "1") == "1" else "🔴 Ўчирилган"
     l_videos_state = "🟢 Фаол" if get_setting("lock_videos", "1") == "1" else "🔴 Ўчирилган"
+    l_apk_state = "🟢 Фаол" if get_setting("lock_apk", "1") == "1" else "🔴 Ўчирилган"
+    l_post_state = "🟢 Ёқилган" if get_setting("bot_post_mode", "0") == "1" else "🔴 Ўчирилган"
     l_weather_state = "🟢 Фаол" if get_setting("weather_auto", "1") == "1" else "🔴 Ўчирилган"
     w_time_str = get_setting("weather_time", "07:30")
 
@@ -655,16 +690,27 @@ def build_main_menu_text():
 • ⛅️ <b>Об-ҳаво эълонлари:</b> <b>{l_weather_state}</b> (ҳар куни соат {w_time_str} да)
 • 📸 <b>Расмлар лимити (3 талик):</b> {l_photos_state}
 • 📹 <b>Видеолар лимити (3 талик):</b> {l_videos_state}
+• 📲 <b>APK / Программа ҳимояси (1 кун мут):</b> {l_apk_state}
+• 🎙 <b>Бот номидан ёзиш:</b> {l_post_state}
 • 🔒 <b>Қулфлар (Чекловлар):</b> 🟢 <b>Фаол</b> (Ҳавола, Овоз, Стикер, Форвард)
 • 🔇 <b>Ҳозир мутда:</b> <b>{active_mutes} та аъзо</b>
 • 👥 <b>Гуруҳ:</b> {MAIN_GROUP}
 ━━━━━━━━━━━━━━━━━━━━
 <i>Керакли бўлимни танланг:</i>"""
 
+def build_reply_keyboard():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row(types.KeyboardButton("🏠 Асосий меню"))
+    kb.row(types.KeyboardButton("⚙️ Гуруҳ созламалари"), types.KeyboardButton("🔒 Қулфлар (Чекловлар)"))
+    kb.row(types.KeyboardButton("🌙 Тунги Режим"), types.KeyboardButton("⛅️ Об-ҳаво"))
+    kb.row(types.KeyboardButton("🔇 Мутдагилар"), types.KeyboardButton("🎙 Бот номидан ёзиш"))
+    return kb
+
 def build_main_menu_markup():
     markup = InlineKeyboardMarkup()
     is_on = get_setting("night_mode", "1") == "1"
     btn_night_text = f"🌙 Тунги Режим ({'🟢 Ёқилган' if is_on else '🔴 Ўчирилган'})"
+    post_on = get_setting("bot_post_mode", "0") == "1"
 
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -685,7 +731,7 @@ def build_main_menu_markup():
         InlineKeyboardButton(f"🔇 Мутдагилар ({active_mutes} та)", callback_data="open_muted_list")
     )
     markup.row(
-        InlineKeyboardButton("📢 Жўнатма юбориш", callback_data="open_broadcast_menu"),
+        InlineKeyboardButton(f"🎙 Бот номидан ёзиш ({'🟢' if post_on else '🔴'})", callback_data="open_broadcast_menu"),
         InlineKeyboardButton("📊 Статистика", callback_data="open_stats")
     )
     markup.row(
@@ -695,13 +741,65 @@ def build_main_menu_markup():
     markup.row(InlineKeyboardButton("🔄 Маълумотларни янгилаш", callback_data="refresh_main_menu"))
     return markup
 
+def build_post_as_bot_text():
+    is_on = get_setting("bot_post_mode", "0") == "1"
+    status_str = "🟢 ЁҚИЛГАН" if is_on else "🔴 ЎЧИРИЛГАН"
+    target = get_setting("bot_post_target", "group")
+    target_str = {
+        "group": f"👥 Фақат Гуруҳ ({MAIN_GROUP})",
+        "channel": f"📢 Фақат Канал ({MAIN_CHANNEL})",
+        "both": f"🌐 Гуруҳ + Канал"
+    }.get(target, f"👥 Фақат Гуруҳ ({MAIN_GROUP})")
+
+    return f"""🎙 <b>БОТ НОМИДАН ЁЗИШ ВА ХАБАР ЮБОРИШ</b>
+━━━━━━━━━━━━━━━━━━━━
+• ⚡️ <b>Функция ҳолати:</b> <b>{status_str}</b>
+• 🎯 <b>Юбориш манзили:</b> <b>{target_str}</b>
+
+📌 <b>ҚАНДАЙ ИШЛАЙДИ?</b>
+Функция <b>🟢 ЁҚИЛГАН</b> ҳолатда бўлганда:
+1. Бошқа гуруҳ, канал ёки чатдан исталган <b>матн, расм, видео, альбом, овозли хабар, аудио, файл, стикер ёки сўровномани</b> тўғридан-тўғри шу бот чатига ташланг (forward қилинг) ёки ўзингиз ёзинг.
+2. Бот ушбу хабардан «Forwarded from» ёзувини олиб ташлаб, дарҳол <b>ўз номидан</b> танланган манзилга юборади!
+3. Ишингиз тугагач, хавфсизлик учун функцияни <b>🔴 ЎЧИРИЛГАН</b> ҳолатга қўйишингиз мумкин.
+━━━━━━━━━━━━━━━━━━━━"""
+
+def build_post_as_bot_markup():
+    is_on = get_setting("bot_post_mode", "0") == "1"
+    target = get_setting("bot_post_target", "group")
+    target_label = {
+        "group": "👥 Фақат Гуруҳ",
+        "channel": "📢 Фақат Канал",
+        "both": "🌐 Гуруҳ + Канал"
+    }.get(target, "👥 Фақат Гуруҳ")
+
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton(
+        f"🎙 Бот номидан ёзиш: {'🟢 Ёқилган' if is_on else '🔴 Ўчирилган'}",
+        callback_data="toggle_bot_post_mode"
+    ))
+    markup.row(InlineKeyboardButton(
+        f"🎯 Манзил: {target_label} 🔄",
+        callback_data="toggle_bot_post_target"
+    ))
+    markup.row(
+        InlineKeyboardButton("◀️ Гуруҳ Созламалари", callback_data="open_group_settings"),
+        InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu")
+    )
+    return markup
+
 # ==================== 2. ГУРУҲ СОЗЛАМАЛАРИ (GROUP SETTINGS) ====================
 def build_group_settings_text():
+    l_apk_state = "🟢 Ёқилган" if get_setting("lock_apk", "1") == "1" else "🔴 Ўчирилган"
+    l_post_state = "🟢 Ёқилган" if get_setting("bot_post_mode", "0") == "1" else "🔴 Ўчирилган"
+    target = get_setting("bot_post_target", "group")
+    target_str = "Гуруҳ" if target == "group" else ("Канал" if target == "channel" else "Гуруҳ + Канал")
     return f"""⚙️ <b>ГУРУҲ СОЗЛАМАЛАРИ (@Asalarichilik_Uzbekistan)</b>
 ━━━━━━━━━━━━━━━━━━━━
 Бот гуруҳ хавфсизлигини ва хизматларни 100% таъминлайди.
 
 Қуйидаги бўлимлардан кераклисини танланг:
+• 📲 <b>APK / Программа қулфи (Спам):</b> <b>{l_apk_state}</b> — зарарли .apk файлларни дарҳол ўчириш ва 1 кунлик (24 соат) мут бериш.
+• 🎙 <b>Бот номидан ёзиш:</b> <b>{l_post_state}</b> (Манзил: <b>{target_str}</b>) — бошқа гуруҳдан расм, видео, матн, овоз ва файлларни бот номидан юбориш.
 • 🔒 <b>Қулфлар (Чекловлар):</b> Расм, видео, ҳавола, овоз ва стикерлар чеклови.
 • 🌙 <b>Тунги режим:</b> Соат 00:00 дан 06:30 гача гуруҳни автоматик қулфлаш.
 • ⛅️ <b>Об-ҳаво:</b> Кунлик автоматик об-ҳаво ва агро-тавсияларни юбориш созламалари.
@@ -720,7 +818,17 @@ def build_group_settings_markup():
     except Exception:
         active_mutes = 0
 
+    l_apk = "🟢 Ёқилган" if get_setting("lock_apk", "1") == "1" else "🔴 Ўчирилган"
+    l_post = "🟢 Ёқилган" if get_setting("bot_post_mode", "0") == "1" else "🔴 Ўчирилган"
+    target = get_setting("bot_post_target", "group")
+    short_target = "👥 Гуруҳ" if target == "group" else ("📢 Канал" if target == "channel" else "🌐 Гуруҳ+Канал")
+
     markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton(f"📲 APK / Программа (Спам): {l_apk}", callback_data="toggle_gs_lock_apk"))
+    markup.row(
+        InlineKeyboardButton(f"🎙 Бот номидан ёзиш: {l_post}", callback_data="toggle_gs_bot_post"),
+        InlineKeyboardButton(f"🎯 {short_target}", callback_data="toggle_gs_bot_post_target")
+    )
     markup.row(InlineKeyboardButton("🔒 Қулфлар ва Чекловлар бўлими", callback_data="open_locks_menu"))
     markup.row(
         InlineKeyboardButton("🌙 Тунги Режим", callback_data="open_night_menu"),
@@ -754,6 +862,7 @@ def build_locks_menu_markup():
     l_forwards = "🟢" if get_setting("lock_forwards", "0") == "1" else "🔴"
     l_arabic = "🟢" if get_setting("lock_arabic", "1") == "1" else "🔴"
     l_service = "🟢" if get_setting("lock_service", "1") == "1" else "🔴"
+    l_apk = "🟢" if get_setting("lock_apk", "1") == "1" else "🔴"
     l_night = "🟢" if get_setting("night_mode", "1") == "1" else "🔴"
 
     markup.row(
@@ -772,7 +881,10 @@ def build_locks_menu_markup():
         InlineKeyboardButton(f"🌐 Арабча ёзув: {l_arabic}", callback_data="toggle_lock_arabic"),
         InlineKeyboardButton(f"🧹 Кирди-чиқди: {l_service}", callback_data="toggle_lock_service")
     )
-    markup.row(InlineKeyboardButton(f"🌙 Тунги Режим: {l_night}", callback_data="open_night_menu"))
+    markup.row(
+        InlineKeyboardButton(f"📲 APK / Программа: {l_apk}", callback_data="toggle_lock_apk"),
+        InlineKeyboardButton(f"🌙 Тунги Режим: {l_night}", callback_data="open_night_menu")
+    )
     markup.row(
         InlineKeyboardButton("◀️ Гуруҳ Созламалари", callback_data="open_group_settings"),
         InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu")
@@ -1519,14 +1631,252 @@ threading.Thread(target=weather_scheduler_worker, daemon=True).start()
 
 # ==================== ХАБАР ҲАНДЛЕРЛАРИ ====================
 
+_priv_post_albums = defaultdict(list)
+_priv_post_lock = threading.Lock()
+_sent_bot_posts = {}
+
+def get_bot_post_targets():
+    target = get_setting("bot_post_target", "group")
+    if target == "channel":
+        return [MAIN_CHANNEL], "📢 Фақат Канал"
+    elif target == "both":
+        return [MAIN_GROUP, MAIN_CHANNEL], "🌐 Гуруҳ + Канал"
+    return [MAIN_GROUP], "👥 Фақат Гуруҳ"
+
+def record_sent_batch(sent_pairs):
+    batch_id = str(int(time.time() * 1000))
+    _sent_bot_posts[batch_id] = sent_pairs
+    if len(_sent_bot_posts) > 150:
+        oldest_keys = list(_sent_bot_posts.keys())[:-100]
+        for k in oldest_keys:
+            _sent_bot_posts.pop(k, None)
+    return batch_id
+
+def send_post_confirmation(chat_id, sent_pairs, dest_str, extra_note=""):
+    if not sent_pairs:
+        bot.send_message(chat_id, "⚠️ Хабарни юборишда хатолик юз берди. Бот гуруҳ/каналда админ эканлигини текширинг.")
+        return
+    batch_id = record_sent_batch(sent_pairs)
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🗑 Юборилган хабарни ўчириш", callback_data=f"del_bpost_{batch_id}"))
+    markup.row(
+        InlineKeyboardButton("🔴 Бот номидан ёзишни ўчириш", callback_data="toggle_bot_post_mode"),
+        InlineKeyboardButton("🎙 Созламалар", callback_data="open_broadcast_menu")
+    )
+    bot.send_message(
+        chat_id,
+        f"✅ <b>Хабар бот номидан муваффақиятли юборилди!</b>\n🎯 Манзил: <b>{dest_str}</b>{extra_note}",
+        reply_markup=markup
+    )
+
+def flush_private_album(mg_id, chat_id):
+    time.sleep(1.1)
+    with _priv_post_lock:
+        msgs = _priv_post_albums.pop(mg_id, [])
+    if not msgs:
+        return
+
+    msgs.sort(key=lambda m: m.message_id)
+    targets, dest_str = get_bot_post_targets()
+
+    # Caption ва entities биринчи матнли элементдан олинади
+    cap_text = None
+    cap_entities = None
+    for m in msgs:
+        if getattr(m, "caption", None):
+            cap_text = m.caption
+            cap_entities = getattr(m, "caption_entities", None)
+            break
+
+    media_group = []
+    can_group = True
+    for idx, m in enumerate(msgs):
+        c = cap_text if idx == 0 else None
+        ce = cap_entities if idx == 0 else None
+        if m.content_type == "photo" and m.photo:
+            media_group.append(types.InputMediaPhoto(m.photo[-1].file_id, caption=c, caption_entities=ce))
+        elif m.content_type == "video" and m.video:
+            media_group.append(types.InputMediaVideo(m.video.file_id, caption=c, caption_entities=ce))
+        elif m.content_type == "document" and m.document:
+            media_group.append(types.InputMediaDocument(m.document.file_id, caption=c, caption_entities=ce))
+        elif m.content_type == "audio" and m.audio:
+            media_group.append(types.InputMediaAudio(m.audio.file_id, caption=c, caption_entities=ce))
+        else:
+            can_group = False
+            break
+
+    sent_pairs = []
+    for t_chat in targets:
+        if can_group and media_group:
+            try:
+                res_list = bot.send_media_group(t_chat, media_group)
+                for rm in res_list:
+                    sent_pairs.append((t_chat, rm.message_id))
+                continue
+            except Exception as e:
+                logging.warning(f"send_media_group fallback to copy_message: {e}")
+
+        for m in msgs:
+            try:
+                res = bot.copy_message(t_chat, chat_id, m.message_id)
+                sent_pairs.append((t_chat, res.message_id))
+            except Exception as e2:
+                logging.error(f"Album copy_message error: {e2}")
+
+    send_post_confirmation(chat_id, sent_pairs, dest_str, extra_note=f"\n📦 Жами: <b>{len(msgs)} та</b> медиа-файл")
+
+# Буйруқлар (Асосий Меню ва Созламалар)
+@bot.message_handler(commands=['start', 'settings', 'menu', 'sozlamalar', 'help'])
+def cmd_main_settings(message):
+    if message.chat.type == 'private':
+        try:
+            bot.send_message(message.chat.id, "🐝 <b>Бошқарув менюси янгиланди:</b>", reply_markup=build_reply_keyboard())
+        except Exception:
+            pass
+    text = build_main_menu_text()
+    markup = build_main_menu_markup()
+    bot.send_message(message.chat.id, text, reply_markup=markup)
+
+@bot.message_handler(commands=['tungi', 'night', 'tungirejim'])
+def cmd_night_shortcut(message):
+    text = build_night_menu_text()
+    markup = build_night_menu_markup()
+    bot.send_message(message.chat.id, text, reply_markup=markup)
+
+@bot.message_handler(commands=['qulflar', 'locks'])
+def cmd_locks_shortcut(message):
+    text = build_locks_menu_text()
+    markup = build_locks_menu_markup()
+    bot.send_message(message.chat.id, text, reply_markup=markup)
+
+@bot.message_handler(commands=['botnomidan', 'post', 'yuborish'])
+def cmd_post_as_bot_shortcut(message):
+    if message.chat.type != 'private':
+        return
+    user_id = message.from_user.id if message.from_user else 0
+    if user_id != OWNER_ID and not is_admin(MAIN_GROUP, user_id):
+        return
+    bot.send_message(message.chat.id, build_post_as_bot_text(), reply_markup=build_post_as_bot_markup())
+
+@bot.message_handler(commands=['news', 'yangiliklar', 'shifokor', 'viktorina'])
+def cmd_retired_sections(message):
+    if message.chat.type == 'private':
+        bot.send_message(
+            message.chat.id,
+            "🗑 Ушбу бўлим олиб ташланди. Янгиланган менюдан фойдаланинг:",
+            reply_markup=build_reply_keyboard()
+        )
+        bot.send_message(message.chat.id, build_main_menu_text(), reply_markup=build_main_menu_markup())
+
+# Шахсий чат (ReplyKeyboard тугмалари ва "Бот номидан ёзиш")
+RETIRED_MENU_TEXTS = {
+    "📰 Янгиликлар (/news)",
+    "🩺 Asalarichilik.Uz🇺🇿 шифокори 🐝",
+    "🐝 Викторина & Сўровнома 📊",
+    "Тилни ўзгартириш 🌐",
+    "Бот қўлланмаси 📖",
+    "👑 Гуруҳлар назорати 👥"
+}
+
+@bot.message_handler(
+    func=lambda m: m.chat.type == 'private',
+    content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'video_note', 'animation', 'sticker', 'poll', 'contact', 'location']
+)
+def handle_private_chat(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user else 0
+    txt = (message.text or "").strip()
+
+    # 1. Олиб ташланган эски меню тугмалари босилса — клавиатурани янгилаймиз
+    if txt in RETIRED_MENU_TEXTS or "шифокори" in txt or "Викторина" in txt or "Янгиликлар" in txt:
+        bot.send_message(
+            chat_id,
+            "🗑 Ушбу бўлим ўчирилган. Клавиатура янгиланди:",
+            reply_markup=build_reply_keyboard()
+        )
+        bot.send_message(chat_id, build_main_menu_text(), reply_markup=build_main_menu_markup())
+        return
+
+    # 2. Асосий ReplyKeyboard тугмалари (ҳам эски, ҳам янги номлари)
+    if txt in ["🏠 Асосий меню", "Асосий меню"]:
+        bot.send_message(chat_id, build_main_menu_text(), reply_markup=build_main_menu_markup())
+        return
+
+    if txt in ["⚙️ Гуруҳ созламалари", "Гуруҳ созламалари 🎛"]:
+        if txt == "Гуруҳ созламалари 🎛":
+            bot.send_message(chat_id, "⚙️ Клавиатура янгиланди:", reply_markup=build_reply_keyboard())
+        bot.send_message(chat_id, build_group_settings_text(), reply_markup=build_group_settings_markup())
+        return
+
+    if txt in ["🔒 Қулфлар (Чекловлар)", "🔒 Қулфлар"]:
+        bot.send_message(chat_id, build_locks_menu_text(), reply_markup=build_locks_menu_markup())
+        return
+
+    if txt in ["🌙 Тунги Режим", "🌙 Тунги режим"]:
+        bot.send_message(chat_id, build_night_menu_text(), reply_markup=build_night_menu_markup())
+        return
+
+    if txt in ["⛅️ Об-ҳаво", "⛅️ Об-ҳаво маълумотлари"]:
+        bot.send_message(chat_id, build_weather_menu_text(), reply_markup=build_weather_menu_markup())
+        return
+
+    if txt in ["🔇 Мутдагилар"]:
+        bot.send_message(chat_id, build_muted_list_text(), reply_markup=build_muted_list_markup())
+        return
+
+    if txt in ["🎙 Бот номидан ёзиш", "🎙 Бот номидан ёзиш 💬", "📢 Реклама тарқатиш ✉️"]:
+        if txt != "🎙 Бот номидан ёзиш":
+            bot.send_message(chat_id, "🎙 Клавиатура янгиланди:", reply_markup=build_reply_keyboard())
+        bot.send_message(chat_id, build_post_as_bot_text(), reply_markup=build_post_as_bot_markup())
+        return
+
+    # 3. Фақат эгаси ёки админ учун: "Бот номидан ёзиш" режими
+    if user_id != OWNER_ID and not is_admin(MAIN_GROUP, user_id):
+        bot.send_message(chat_id, "🐝 Бу бот @Asalarichilik_Uzbekistan гуруҳи назорати ва об-ҳаво эълонлари учун хизмат қилади.")
+        return
+
+    if get_setting("bot_post_mode", "0") != "1":
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🟢 Бот номидан ёзишни ёқиш", callback_data="toggle_bot_post_mode"))
+        markup.row(InlineKeyboardButton("🏠 Асосий Меню", callback_data="open_main_menu"))
+        bot.send_message(
+            chat_id,
+            "ℹ️ <b>Бот номидан ёзиш режими ҳозир 🔴 ЎЧИРИЛГАН.</b>\n\n"
+            "Юборган матн, расм, видео ёки бошқа гуруҳдан олинган хабарингиз бот номидан гуруҳга юборилиши учун пастдаги тугмани босиб ёқинг:",
+            reply_markup=markup
+        )
+        return
+
+    # Альбом (бир нечта расм/видео бирга ташланганда)
+    mg_id = getattr(message, "media_group_id", None)
+    if mg_id:
+        with _priv_post_lock:
+            is_first = mg_id not in _priv_post_albums
+            _priv_post_albums[mg_id].append(message)
+        if is_first:
+            threading.Thread(target=flush_private_album, args=(mg_id, chat_id), daemon=True).start()
+        return
+
+    # Якка хабар (матн, расм, видео, овоз, аудио, файл, стикер, сўровнома — "Forwarded from" сиз!)
+    targets, dest_str = get_bot_post_targets()
+    sent_pairs = []
+    for t_chat in targets:
+        try:
+            res = bot.copy_message(t_chat, chat_id, message.message_id)
+            sent_pairs.append((t_chat, res.message_id))
+        except Exception as e:
+            logging.error(f"copy_message error to {t_chat}: {e}")
+
+    send_post_confirmation(chat_id, sent_pairs, dest_str)
+
 # Сервис хабарлар
-@bot.message_handler(content_types=['new_chat_members', 'left_chat_member'])
+@bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['new_chat_members', 'left_chat_member'])
 def handle_service_messages(message):
     if get_setting("lock_service", "1") == "1":
         safe_delete_message(message.chat.id, message.message_id)
 
 # Расм ва видеолар (3 талик лимит ва 24с мут)
-@bot.message_handler(content_types=['photo', 'video'])
+@bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['photo', 'video'])
 def handle_media_control(message):
     if is_official_message(message):
         return
@@ -1592,18 +1942,47 @@ def handle_media_control(message):
         _user_media_history[user_key].clear()
         return
 
-# Овоз, стикер ва бошқа медиалар
-@bot.message_handler(content_types=['voice', 'audio', 'document', 'sticker', 'animation', 'video_note', 'contact', 'location', 'poll'])
+# Овоз, стикер ва бошқа медиалар (APK / программа ва ҳужжатлар)
+@bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['voice', 'audio', 'document', 'sticker', 'animation', 'video_note', 'contact', 'location', 'poll'])
 def handle_other_media(message):
     if is_official_message(message):
-        return
-
-    if check_night_mode_violation(message):
         return
 
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
     if message.chat.type == 'private' or is_admin(chat_id, user_id):
+        return
+
+    # 1. Зудлик билан APK / зарарли программа (Спам) назорати — 1 кунлик мут
+    if get_setting("lock_apk", "1") == "1" and is_dangerous_apk_document(message):
+        safe_delete_message(chat_id, message.message_id)
+        doc_name = (getattr(message.document, "file_name", "") or "APK файл").replace("<", "").replace(">", "")
+        if message.from_user:
+            user_mention = get_mention(message.from_user)
+            raw_name = message.from_user.first_name or f"User_{user_id}"
+            if message.from_user.username:
+                raw_name = f"{raw_name} (@{message.from_user.username})"
+            mute_user_24h(
+                chat_id,
+                user_id,
+                user_mention,
+                user_name=raw_name,
+                reason=f"Спам: APK / зарарли программа ({doc_name}) юборилди",
+                footer_note="Гуруҳ қоидаси: Гуруҳга APK (программа), вирус ёки шубҳали файллар юбориш қатъиян тақиқланган! Зарарли файл дарҳол ўчирилди ва 1 кунлик мут берилди."
+            )
+            try:
+                bot.send_message(
+                    OWNER_ID,
+                    f"🛡 <b>APK СПАМ БЛОКЛАНДИ!</b>\n"
+                    f"👤 Аъзо: {user_mention} (ID: <code>{user_id}</code>)\n"
+                    f"📄 Файл: <code>{doc_name}</code>\n"
+                    f"🔨 Чора: Файл ўчирилди ва <b>24 соатлик (1 кун) МУТ</b> берилди."
+                )
+            except Exception:
+                pass
+        return
+
+    if check_night_mode_violation(message):
         return
 
     # Агар файл ёки ҳужжат остидаги матнда бегона ҳавола бўлса:
@@ -1621,25 +2000,6 @@ def handle_other_media(message):
     if message.content_type in ['sticker', 'animation'] and get_setting("lock_stickers", "0") == "1":
         safe_delete_message(chat_id, message.message_id)
         return
-
-# Буйруқлар (Асосий Меню ва Созламалар)
-@bot.message_handler(commands=['start', 'settings', 'menu', 'sozlamalar', 'help'])
-def cmd_main_settings(message):
-    text = build_main_menu_text()
-    markup = build_main_menu_markup()
-    bot.send_message(message.chat.id, text, reply_markup=markup)
-
-@bot.message_handler(commands=['tungi', 'night', 'tungirejim'])
-def cmd_night_shortcut(message):
-    text = build_night_menu_text()
-    markup = build_night_menu_markup()
-    bot.send_message(message.chat.id, text, reply_markup=markup)
-
-@bot.message_handler(commands=['qulflar', 'locks'])
-def cmd_locks_shortcut(message):
-    text = build_locks_menu_text()
-    markup = build_locks_menu_markup()
-    bot.send_message(message.chat.id, text, reply_markup=markup)
 
 # Гуруҳ матнли хабарлари
 @bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['text'])
@@ -1830,6 +2190,47 @@ def handle_all_callbacks(call):
         safe_edit_or_send(chat_id, message_id, build_group_settings_text(), build_group_settings_markup())
         return
 
+    if data == "toggle_gs_lock_apk":
+        curr = get_setting("lock_apk", "1")
+        new_val = "0" if curr == "1" else "1"
+        set_setting("lock_apk", new_val)
+        safe_edit_or_send(chat_id, message_id, build_group_settings_text(), build_group_settings_markup())
+        try:
+            bot.answer_callback_query(
+                call.id,
+                f"📲 APK / Программа қулфи: {'🟢 Ёқилди' if new_val == '1' else '🔴 Ўчирилди'}"
+            )
+        except Exception:
+            pass
+        return
+
+    if data == "toggle_gs_bot_post":
+        curr = get_setting("bot_post_mode", "0")
+        new_val = "0" if curr == "1" else "1"
+        set_setting("bot_post_mode", new_val)
+        safe_edit_or_send(chat_id, message_id, build_group_settings_text(), build_group_settings_markup())
+        try:
+            bot.answer_callback_query(
+                call.id,
+                f"🎙 Бот номидан ёзиш: {'🟢 Ёқилди' if new_val == '1' else '🔴 Ўчирилди'}"
+            )
+        except Exception:
+            pass
+        return
+
+    if data == "toggle_gs_bot_post_target":
+        curr = get_setting("bot_post_target", "group")
+        next_map = {"group": "channel", "channel": "both", "both": "group"}
+        new_val = next_map.get(curr, "group")
+        set_setting("bot_post_target", new_val)
+        safe_edit_or_send(chat_id, message_id, build_group_settings_text(), build_group_settings_markup())
+        label = "Фақат Гуруҳ" if new_val == "group" else ("Фақат Канал" if new_val == "channel" else "Гуруҳ + Канал")
+        try:
+            bot.answer_callback_query(call.id, f"🎯 Манзил: {label}")
+        except Exception:
+            pass
+        return
+
     # 3. Қулфлар (Чекловлар) бўлими
     if data == "open_locks_menu":
         safe_edit_or_send(chat_id, message_id, build_locks_menu_text(), build_locks_menu_markup())
@@ -1842,6 +2243,13 @@ def handle_all_callbacks(call):
         new_val = "0" if curr == "1" else "1"
         set_setting(key, new_val)
         safe_edit_or_send(chat_id, message_id, build_locks_menu_text(), build_locks_menu_markup())
+        try:
+            bot.answer_callback_query(
+                call.id,
+                f"Ҳолат: {'🟢 Ёқилди' if new_val == '1' else '🔴 Ўчирилди'}"
+            )
+        except Exception:
+            pass
         return
 
     # 4. Тунги режим (2-расм)
@@ -1977,13 +2385,54 @@ def handle_all_callbacks(call):
         return
 
     if data == "open_broadcast_menu":
-        markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("◀️ Асосий Меню", callback_data="open_main_menu"))
-        safe_edit_or_send(
-            chat_id, message_id,
-            "📢 <b>Жўнатма юбориш:</b>\n\nКанал ва гуруҳга расм, видео, аудио ва хабар юбориш учун телефонингиздаги <b>Asalarichilik.Uz</b> Android иловасидан фойдаланинг!",
-            markup
-        )
+        safe_edit_or_send(chat_id, message_id, build_post_as_bot_text(), build_post_as_bot_markup())
+        return
+
+    if data == "toggle_bot_post_mode":
+        curr = get_setting("bot_post_mode", "0")
+        new_val = "0" if curr == "1" else "1"
+        set_setting("bot_post_mode", new_val)
+        safe_edit_or_send(chat_id, message_id, build_post_as_bot_text(), build_post_as_bot_markup())
+        try:
+            bot.answer_callback_query(
+                call.id,
+                f"🎙 Бот номидан ёзиш: {'🟢 Ёқилди' if new_val == '1' else '🔴 Ўчирилди'}"
+            )
+        except Exception:
+            pass
+        return
+
+    if data == "toggle_bot_post_target":
+        curr = get_setting("bot_post_target", "group")
+        next_map = {"group": "channel", "channel": "both", "both": "group"}
+        new_val = next_map.get(curr, "group")
+        set_setting("bot_post_target", new_val)
+        safe_edit_or_send(chat_id, message_id, build_post_as_bot_text(), build_post_as_bot_markup())
+        label = "Фақат Гуруҳ" if new_val == "group" else ("Фақат Канал" if new_val == "channel" else "Гуруҳ + Канал")
+        try:
+            bot.answer_callback_query(call.id, f"🎯 Манзил: {label}")
+        except Exception:
+            pass
+        return
+
+    if data.startswith("del_bpost_"):
+        batch_id = data.replace("del_bpost_", "")
+        pairs = _sent_bot_posts.pop(batch_id, [])
+        deleted_cnt = 0
+        for t_chat, m_id in pairs:
+            try:
+                bot.delete_message(t_chat, m_id)
+                deleted_cnt += 1
+            except Exception:
+                pass
+        try:
+            bot.edit_message_text(
+                f"🗑 <b>Юборилган хабар ({deleted_cnt} та) гуруҳ/каналдан ўчирилди!</b>",
+                chat_id=chat_id,
+                message_id=message_id
+            )
+        except Exception:
+            pass
         return
 
     # 5. Мутдагилар рўйхати (Muted users list)
