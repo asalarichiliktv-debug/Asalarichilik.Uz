@@ -87,17 +87,96 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-# Render avto-kutubxona tekshiruvi (aiogram yo'q bo'lsa darhol avtomatik o'rnatiladi)
+# Render / bulutli serverlar uchun darhol PORT tinglovchi yengil HTTP server (port timeout bo'lmasligi uchun)
+SERVER_STATUS: Dict[str, Any] = {
+    "state": "starting",
+    "bot": "",
+    "connected": False,
+    "error": "",
+    "python": sys.version.split()[0],
+}
+_RENDER_HTTP_STARTED = False
+
+def _start_instant_health_server() -> None:
+    global _RENDER_HTTP_STARTED
+    port_str = os.environ.get("PORT", "").strip()
+    if not port_str or not port_str.isdigit():
+        return
+    try:
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class _HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.startswith("/health"):
+                    body = json.dumps(SERVER_STATUS, ensure_ascii=False).encode("utf-8")
+                    ctype = "application/json; charset=utf-8"
+                else:
+                    body = (
+                        f"🐝 Asalarichilik.Uz Telegram Bot\n"
+                        f"Status: {SERVER_STATUS.get('state')} | Connected: {SERVER_STATUS.get('connected')} | "
+                        f"Bot: {SERVER_STATUS.get('bot') or '@Asalarichilikuz_bot'} | Python: {SERVER_STATUS.get('python')}\n"
+                    ).encode("utf-8")
+                    ctype = "text/plain; charset=utf-8"
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format, *args):
+                return
+
+        class _ReusableHTTPServer(ThreadingHTTPServer):
+            allow_reuse_address = True
+
+        srv = _ReusableHTTPServer(("0.0.0.0", int(port_str)), _HealthHandler)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        _RENDER_HTTP_STARTED = True
+        print(f"🌐 [SERVER] Healthcheck {port_str}-portda darhol ishga tushdi (Python {SERVER_STATUS['python']}).", flush=True)
+    except Exception as he:
+        print(f"⚠️ Early healthcheck bind notice: {he}", flush=True)
+
+_start_instant_health_server()
+
+# Render avto-kutubxona tekshiruvi (aiogram yo'q bo'lsa Python 3.11-3.14 mos g'ildiraklar bilan o'rnatiladi)
 try:
     import aiogram
 except ImportError:
-    print("📦 [RENDER AUTO-INSTALL] aiogram kutubxonasi o'rnatilmoqda...", flush=True)
+    SERVER_STATUS["state"] = "installing_deps"
+    print(f"📦 [RENDER AUTO-INSTALL] Python {sys.version.split()[0]} uchun aiogram o'rnatilmoqda...", flush=True)
+    import importlib
+    import site
+    import subprocess
+
+    _pkgs = ["aiogram>=3.17.0", "aiohttp>=3.10.0", "pydantic>=2.9.0", "certifi", "requests"]
+    _cmds = [
+        [sys.executable, "-m", "pip", "install", "--no-cache-dir", "--prefer-binary", "--upgrade", *_pkgs],
+        [sys.executable, "-m", "pip", "install", "--no-cache-dir", "--prefer-binary", "--user", "--break-system-packages", *_pkgs],
+    ]
+    _installed = False
+    for _cmd in _cmds:
+        try:
+            subprocess.check_call(_cmd)
+            _installed = True
+            break
+        except Exception as ie:
+            print(f"⚠️ Kutubxona o'rnatish urinishi ({' '.join(_cmd[:6])}): {ie}", flush=True)
+    importlib.invalidate_caches()
     try:
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "aiogram==3.12.0", "aiohttp>=3.9.0", "certifi", "requests"])
+        _usp = site.getusersitepackages()
+        if _usp and _usp not in sys.path:
+            sys.path.append(_usp)
+    except Exception:
+        pass
+    try:
         import aiogram
-    except Exception as ie:
-        print(f"⚠️ Kutubxona o'rnatishda xatolik: {ie}", flush=True)
+    except ImportError as final_ie:
+        SERVER_STATUS["state"] = "install_error"
+        SERVER_STATUS["error"] = str(final_ie)
+        print(f"❌ aiogram o'rnatilmadi: {final_ie}", flush=True)
+        raise
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -1837,6 +1916,8 @@ SYSTEM_INSTRUCTION = (
 )
 
 def get_proxy():
+    if any(k in os.environ for k in ("RENDER", "RENDER_SERVICE_ID", "RENDER_EXTERNAL_URL")):
+        return None
     if "PYTHONANYWHERE_DOMAIN" in os.environ or os.path.exists("/home/Asalarichiliktv"):
         return "http://proxy.server:3128"
     try:
@@ -12670,6 +12751,7 @@ async def main():
     print("📰 1000+ gacha yangilanuvchi Asalarichilik Yangiliklari va Shablonlar tizimi tayyor.", flush=True)
     print("=" * 70, flush=True)
 
+    SERVER_STATUS["state"] = "connecting"
     # Ulanishni sinash va eng yaxshi kanalni (Proxy yoki To'g'ridan-to'g'ri) aniqlash
     connected = False
     proxy_url = get_proxy()
@@ -12681,6 +12763,8 @@ async def main():
             print(f"✅ Proksi orqali muvaffaqiyatli ulandi: @{me.username} (ID: {me.id})", flush=True)
             bot = test_bot
             connected = True
+            SERVER_STATUS["bot"] = f"@{me.username}"
+            SERVER_STATUS["connected"] = True
         except Exception as pe:
             print(f"⚠️ Proksi vaqtinchalik xatolik berdi ({pe}). To'g'ridan-to'g'ri ulanish sinab ko'rilmoqda...", flush=True)
 
@@ -12692,8 +12776,11 @@ async def main():
             print(f"✅ To'g'ridan-to'g'ri muvaffaqiyatli ulandi: @{me.username} (ID: {me.id})", flush=True)
             bot = test_bot
             connected = True
+            SERVER_STATUS["bot"] = f"@{me.username}"
+            SERVER_STATUS["connected"] = True
         except Exception as de:
             print(f"⚠️ To'g'ridan-to'g'ri ulanishda ham uzilish: {de}", flush=True)
+            SERVER_STATUS["error"] = str(de)[:200]
             bot = get_bot_instance(use_proxy=bool(proxy_url))
 
     # Telegram menyu buyruqlarini /start belgisi bilan o'rnatish
@@ -12717,9 +12804,9 @@ async def main():
     except Exception as se:
         logging.warning(f"sync_bee_news_collection startup error: {se}")
 
-    # Render.com yoki boshqa bulutli serverlar uchun Web Healthcheck serveri (PORT tinglash)
+    # Render.com yoki boshqa bulutli serverlar uchun Web Healthcheck serveri (agar yuqorida ulanmagan bo'lsa)
     port = os.environ.get("PORT")
-    if port:
+    if port and not _RENDER_HTTP_STARTED:
         try:
             from aiohttp import web
             async def health_check(request):
@@ -12735,6 +12822,19 @@ async def main():
         except Exception as we:
             logging.warning(f"Render web server start error: {we}")
 
+    # Render self-ping loop (uxlab qolmaslikka yordam beradi)
+    ext_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
+    if ext_url:
+        async def _render_keep_alive():
+            ping_target = ext_url.rstrip("/") + "/health"
+            while True:
+                await asyncio.sleep(600)
+                try:
+                    await asyncio.to_thread(lambda: urllib.request.urlopen(ping_target, timeout=10).read())
+                except Exception:
+                    pass
+        asyncio.create_task(_render_keep_alive())
+
     # Сервер қайта ёқилганда ёки янгиланганда Telegram булут хотирасидан прогрессни тиклаш
     try:
         await restore_progress_from_telegram_checkpoint(bot)
@@ -12749,6 +12849,12 @@ async def main():
     retry_count = 0
     while True:
         try:
+            # Eski webhook qolib ketgan bo'lsa tozalash (getUpdates ishlashi uchun)
+            try:
+                await bot.delete_webhook(drop_pending_updates=False)
+            except Exception as wh_err:
+                logging.debug(f"delete_webhook notice: {wh_err}")
+
             # Гуруҳларда "/" босилганда буйруқлар чиқишини тўлиқ йўқотиш
             try:
                 await bot.delete_my_commands(scope=BotCommandScopeDefault())
@@ -12764,6 +12870,9 @@ async def main():
             except Exception as ce:
                 print(f"⚠️ Command scope update notice: {ce}", flush=True)
 
+            SERVER_STATUS["state"] = "running"
+            SERVER_STATUS["connected"] = True
+            SERVER_STATUS["error"] = ""
             print("🚀 Bot Telegram serveriga ulandi va xabarlarni qabul qilmoqda...", flush=True)
             # PythonAnywhere bepul proksisida 503 xatosi bo'lmasligi uchun polling_timeout=3 soniya o'rnatiladi
             await dp.start_polling(
@@ -12775,8 +12884,17 @@ async def main():
         except Exception as e:
             retry_count += 1
             err_msg = str(e)
-            print(f"⚠️ Ulanish uzildi ({err_msg}). #{retry_count} urinish: 3 soniyadan so'ng qayta ulanadi...", flush=True)
-            await asyncio.sleep(3)
+            SERVER_STATUS["error"] = err_msg[:200]
+            if "Conflict" in err_msg or "terminated by other getUpdates" in err_msg:
+                print(
+                    f"⚠️ 409 CONFLICT ({err_msg}). Eski Render akkaunti yoki boshqa nusxa ham shu bot tokenini ishlatmoqda! "
+                    f"Eski serverni o'chiring. #{retry_count} urinish: 5 soniyadan so'ng qayta ulanadi...",
+                    flush=True
+                )
+                await asyncio.sleep(5)
+            else:
+                print(f"⚠️ Ulanish uzildi ({err_msg}). #{retry_count} urinish: 3 soniyadan so'ng qayta ulanadi...", flush=True)
+                await asyncio.sleep(3)
             if "503" in err_msg or "ProxyError" in err_msg or "proxy" in err_msg.lower():
                 try:
                     alt_use_proxy = not bool(getattr(getattr(bot, "session", None), "proxy", None))
