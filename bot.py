@@ -92,6 +92,9 @@ _settings_cache = {
     "lock_photos": "1",
     "lock_videos": "1",
     "lock_links": "1",
+    "lock_tg_links": "1",
+    "lock_web_links": "1",
+    "lock_stories": "1",
     "lock_voice": "0",
     "lock_stickers": "0",
     "lock_forwards": "0",
@@ -255,7 +258,7 @@ _admin_cache = {}
 _night_warn_cache = {}
 
 def is_admin(chat_id, user_id):
-    if user_id in [OWNER_ID, 777000, 1087968824, 136817688]:
+    if user_id in [OWNER_ID, 777000, 1087968824]:
         return True
     now = time.time()
     cache_key = (chat_id, user_id)
@@ -285,6 +288,12 @@ OFFICIAL_USERNAMES = {
     "jamshidjondavronov"
 }
 
+OFFICIAL_CHAT_IDS = {
+    -1001261575171,  # @Uz_Asalarichilik
+    -1001548174542,  # @Asalarichilik_Uzbekistan
+    OWNER_ID         # 2047501151
+}
+
 OFFICIAL_ALLOWED_LINKS = [
     "t.me/uz_asalarichilik",
     "t.me/asalarichilik_uzbekistan",
@@ -293,9 +302,19 @@ OFFICIAL_ALLOWED_LINKS = [
     "t.me/jamshidjondavronov",
     "youtube.com/@asalarichilikuz",
     "youtube.com/@asalarichilik",
-    "youtube.com/channel/",
-    "youtu.be/"
+    "asalarichilik.uz",
 ]
+
+def _is_chat_official(chat_obj):
+    if not chat_obj:
+        return False
+    cid = getattr(chat_obj, 'id', None)
+    if cid in OFFICIAL_CHAT_IDS or cid in [MAIN_CHANNEL, MAIN_GROUP]:
+        return True
+    uname = (getattr(chat_obj, 'username', None) or '').lower()
+    if uname in OFFICIAL_USERNAMES:
+        return True
+    return False
 
 def is_official_message(message):
     """
@@ -311,8 +330,8 @@ def is_official_message(message):
 
     from_u = getattr(message, 'from_user', None)
     if from_u:
-        # 777000: Telegram Channel proxy, 1087968824: GroupAnonymousBot, 136817688: Channel Bot
-        if from_u.id in [777000, 1087968824, 136817688, OWNER_ID]:
+        # 777000: Linked Channel proxy, 1087968824: GroupAnonymousBot (136817688 бегона каналлар учун ҳам ишлайди!)
+        if from_u.id in [777000, 1087968824, OWNER_ID]:
             return True
         if from_u.username and from_u.username.lower() in OFFICIAL_USERNAMES:
             return True
@@ -320,77 +339,200 @@ def is_official_message(message):
     # 2. Sender chat (канал номидан пост келганда)
     sender_c = getattr(message, 'sender_chat', None)
     if sender_c:
-        if sender_c.id in [MAIN_CHANNEL, MAIN_GROUP, message.chat.id]:
+        if getattr(sender_c, 'id', None) == getattr(getattr(message, 'chat', None), 'id', None):
             return True
-        if sender_c.username and sender_c.username.lower() in OFFICIAL_USERNAMES:
+        if _is_chat_official(sender_c):
             return True
 
     # 3. Расмий канал ёки гуруҳдан форвард қилинган пост
-    fwd_chat = getattr(message, 'forward_from_chat', None)
-    if fwd_chat:
-        if fwd_chat.id in [MAIN_CHANNEL, MAIN_GROUP]:
-            return True
-        if fwd_chat.username and fwd_chat.username.lower() in OFFICIAL_USERNAMES:
+    if _is_chat_official(getattr(message, 'forward_from_chat', None)):
+        return True
+
+    fwd_origin = getattr(message, 'forward_origin', None)
+    if fwd_origin:
+        if _is_chat_official(getattr(fwd_origin, 'chat', None)) or _is_chat_official(getattr(fwd_origin, 'sender_chat', None)):
             return True
 
     return False
 
+def _is_official_link_item(item):
+    clean = (item or "").strip().lower().rstrip(".,!?;:")
+    if not clean:
+        return True
+    if clean.startswith("@"):
+        uname = clean[1:].strip().split("/")[0]
+        return uname in OFFICIAL_USERNAMES
+
+    norm = re.sub(r'^https?://', '', clean)
+    if norm.startswith("www."):
+        norm = norm[4:]
+    if norm.startswith("m."):
+        norm = norm[2:]
+    norm = norm.rstrip("/")
+
+    for allowed in OFFICIAL_ALLOWED_LINKS:
+        if norm == allowed or norm.startswith(allowed + "/") or norm.startswith(allowed + "?"):
+            return True
+    return False
+
+def _extract_links_from_text_and_entities(full_txt, entities):
+    found = []
+    if full_txt:
+        raw_lower = full_txt.lower()
+        # 1. Тўлиқ URL, Telegram силка ва tg:// ҳаволалар
+        found.extend(re.findall(r'(?:https?://|tg://)[^\s<>"\'\)\]]+', raw_lower))
+        found.extend(re.findall(r'(?:t\.me|telegram\.me|telegram\.dog|telesco\.pe)/[^\s<>"\'\)\]]+', raw_lower))
+        found.extend(re.findall(r'www\.[^\s<>"\'\)\]]+', raw_lower))
+
+        # 2. YouTube, Instagram, TikTok, WhatsApp ва бошқа ижтимоий тармоқлар (https:// сиз ҳам!)
+        found.extend(re.findall(
+            r'(?:[a-z0-9-]+\.)*(?:youtube\.com|youtu\.be|instagram\.com|instagr\.am|tiktok\.com|vm\.tiktok\.com|facebook\.com|fb\.com|fb\.watch|wa\.me|chat\.whatsapp\.com|whatsapp\.com|vk\.com|ok\.ru|twitter\.com|x\.com|threads\.net|bit\.ly|clck\.ru|tinyurl\.com|cutt\.ly|goo\.gl)(?:/[^\s<>"\'\)\]]*)?',
+            raw_lower
+        ))
+
+        # 3. Бошқа интернет сайт доменлари (масалан: sayt.uz, promo.com)
+        found.extend(re.findall(
+            r'(?<![\w@./])[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|uz|ru|io|me|info|biz|co|app|dev|xyz|online|site|shop|club|tv|cc|pro|top|vip|click|link)(?:/[^\s<>"\'\)\]]*)?',
+            raw_lower
+        ))
+
+        # 4. Юзернеймлар: @kanal, @guruh, @bot (youtube.com/@kanal ёки email'дан ажратиб олиш учун)
+        for m in re.findall(r'(?<![a-zA-Z0-9_./-])@([a-zA-Z0-9_]{3,})', raw_lower):
+            found.append(f"@{m.lower()}")
+
+    if entities:
+        for ent in entities:
+            etype = getattr(ent, 'type', '')
+            if etype == 'text_link' and getattr(ent, 'url', None):
+                found.append(ent.url.lower())
+            elif etype in ('url', 'mention') and full_txt:
+                extracted = full_txt[ent.offset:ent.offset + ent.length].lower()
+                if extracted:
+                    found.append(extracted)
+    return found
+
+def classify_foreign_links(message):
+    """
+    Хабарда бегона Telegram (гуруҳ/канал/бот) ва Интернет (YouTube/Instagram/сайт) ҳаволаларини ажратиб аниқлайди.
+    Қайтаради: (has_foreign_tg_link, has_foreign_web_link)
+    """
+    if is_official_message(message):
+        return False, False
+
+    urls_found = []
+
+    text = getattr(message, 'text', None) or ''
+    caption = getattr(message, 'caption', None) or ''
+    if text or getattr(message, 'entities', None):
+        urls_found.extend(_extract_links_from_text_and_entities(text, getattr(message, 'entities', None)))
+    if caption or getattr(message, 'caption_entities', None):
+        urls_found.extend(_extract_links_from_text_and_entities(caption, getattr(message, 'caption_entities', None)))
+
+    # Quote / external_reply матн ва ҳаволалари
+    quote = getattr(message, 'quote', None)
+    if quote:
+        urls_found.extend(_extract_links_from_text_and_entities(getattr(quote, 'text', '') or '', getattr(quote, 'entities', None)))
+
+    ext_reply = getattr(message, 'external_reply', None)
+    if ext_reply:
+        ext_origin = getattr(ext_reply, 'origin', None)
+        ext_chat = getattr(ext_origin, 'chat', None) or getattr(ext_origin, 'sender_chat', None) or getattr(ext_reply, 'chat', None)
+        if ext_chat and getattr(ext_chat, 'username', None):
+            urls_found.append(f"@{ext_chat.username.lower()}")
+        ext_lpo = getattr(ext_reply, 'link_preview_options', None)
+        if ext_lpo and getattr(ext_lpo, 'url', None):
+            urls_found.append(ext_lpo.url.lower())
+
+    # Бегона канал номидан ёзилган хабарлар (Send as Channel)
+    sender_c = getattr(message, 'sender_chat', None)
+    if sender_c and getattr(sender_c, 'username', None):
+        urls_found.append(f"@{sender_c.username.lower()}")
+
+    # Link preview URL
+    lpo = getattr(message, 'link_preview_options', None)
+    if lpo and getattr(lpo, 'url', None):
+        urls_found.append(lpo.url.lower())
+
+    # Inline тугмалардаги URL лар (бошқа бот/канал постлари форвард қилинганда)
+    rm = getattr(message, 'reply_markup', None)
+    if rm and getattr(rm, 'inline_keyboard', None):
+        for row in rm.inline_keyboard:
+            for btn in row:
+                burl = getattr(btn, 'url', None)
+                if burl:
+                    urls_found.append(burl.lower())
+
+    # Story ичидаги чат юзернейми
+    story_obj = getattr(message, 'story', None)
+    if story_obj:
+        s_chat = getattr(story_obj, 'chat', None)
+        if s_chat and getattr(s_chat, 'username', None):
+            urls_found.append(f"@{s_chat.username.lower()}")
+
+    has_tg = False
+    has_web = False
+
+    for item in urls_found:
+        if _is_official_link_item(item):
+            continue
+        clean = item.strip().lower().rstrip(".,!?;:")
+        if (
+            clean.startswith("@")
+            or clean.startswith("tg://")
+            or "t.me/" in clean
+            or "telegram.me/" in clean
+            or "telegram.dog/" in clean
+            or "telesco.pe/" in clean
+        ):
+            has_tg = True
+        else:
+            has_web = True
+
+    return has_tg, has_web
+
 def has_foreign_links(message):
     """
-    Хабарда бегона реклама, ҳавола ёки бошқа канал/гуруҳ борлигини кучайтирилган тарзда текширади.
-    Гуруҳ ва каналнинг ўз ҳаволаларига тегмайди.
+    Хабарда бегона реклама, ҳавола ёки бошқа канал/гуруҳ борлигини текширади.
+    """
+    has_tg, has_web = classify_foreign_links(message)
+    return has_tg or has_web
+
+def check_and_enforce_links_or_story(message):
+    """
+    Бегона Telegram гуруҳ/канал, YouTube/Instagram/интернет ҳаволалари ва Story'ларни текширади ва ўчиради.
+    Агар қоида бузилган бўлса True қайтаради.
     """
     if is_official_message(message):
         return False
 
-    text = (getattr(message, 'text', '') or '') + " " + (getattr(message, 'caption', '') or '')
-    all_entities = (getattr(message, 'entities', None) or []) + (getattr(message, 'caption_entities', None) or [])
-
-    urls_found = []
-
-    # Регуляр ифода: ҳаволалар ва t.me силкалари
-    raw_lower = text.lower()
-    url_matches = re.findall(r'(https?://[^\s]+|t\.me/[^\s]+|telegram\.me/[^\s]+|www\.[^\s]+)', raw_lower)
-    urls_found.extend(url_matches)
-
-    # Канал/гуруҳ юзернеймлари: @kanal_nomi
-    mention_matches = re.findall(r'@([a-zA-Z0-9_]{4,})', raw_lower)
-    for m in mention_matches:
-        urls_found.append(f"@{m.lower()}")
-
-    # Telegram Entities (яширин форматланган ҳаволалар)
-    for ent in all_entities:
-        if ent.type == 'text_link' and getattr(ent, 'url', None):
-            urls_found.append(ent.url.lower())
-        elif ent.type == 'url':
-            full_txt = message.text or message.caption or ""
-            extracted = full_txt[ent.offset:ent.offset+ent.length].lower()
-            urls_found.append(extracted)
-        elif ent.type == 'mention':
-            full_txt = message.text or message.caption or ""
-            extracted = full_txt[ent.offset:ent.offset+ent.length].lower()
-            urls_found.append(extracted)
-
-    if not urls_found:
+    chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user else 0
+    if message.chat.type == 'private' or is_admin(chat_id, user_id):
         return False
 
-    # Ҳар бир ҳаволани расмий ҳаволалар оқ рўйхати билан текширамиз
-    for item in urls_found:
-        clean = item.strip().lower()
+    # 1. Пересланная история (Telegram Story)
+    is_story = (getattr(message, 'content_type', '') == 'story') or (getattr(message, 'story', None) is not None)
+    if is_story and get_setting("lock_stories", "1") == "1":
+        safe_delete_message(chat_id, message.message_id)
+        if message.from_user:
+            warn_user(chat_id, user_id, message.from_user)
+        return True
 
-        is_own = False
-        for allowed in OFFICIAL_ALLOWED_LINKS:
-            if allowed in clean:
-                is_own = True
-                break
+    # 2. Бегона TG гуруҳ/канал ва YouTube/Instagram/Интернет силкалари
+    has_tg, has_web = classify_foreign_links(message)
+    tg_blocked = has_tg and get_setting("lock_tg_links", "1") == "1"
+    web_blocked = has_web and get_setting("lock_web_links", "1") == "1"
 
-        if clean.startswith("@"):
-            uname = clean[1:].strip()
-            if uname in OFFICIAL_USERNAMES:
-                is_own = True
+    if tg_blocked or web_blocked:
+        safe_delete_message(chat_id, message.message_id)
+        if message.from_user:
+            warn_user(chat_id, user_id, message.from_user)
+        return True
 
-        # Агар ўзимизнинг канал ёки гуруҳ бўлмаса — демак БЕГОНА реклама/канал!
-        if not is_own:
+    # 3. Форвардлар қулфи
+    if getattr(message, 'forward_from', None) or getattr(message, 'forward_from_chat', None) or getattr(message, 'forward_origin', None):
+        if get_setting("lock_forwards", "0") == "1":
+            safe_delete_message(chat_id, message.message_id)
             return True
 
     return False
@@ -692,7 +834,7 @@ def build_main_menu_text():
 • 📹 <b>Видеолар лимити (3 талик):</b> {l_videos_state}
 • 📲 <b>APK / Программа ҳимояси (1 кун мут):</b> {l_apk_state}
 • 🎙 <b>Бот номидан ёзиш:</b> {l_post_state}
-• 🔒 <b>Қулфлар (Чекловлар):</b> 🟢 <b>Фаол</b> (Ҳавола, Овоз, Стикер, Форвард)
+• 🔒 <b>Қулфлар (Чекловлар):</b> 🟢 <b>Фаол</b> (TG гуруҳ/канал, YouTube/Insta, История, Овоз)
 • 🔇 <b>Ҳозир мутда:</b> <b>{active_mutes} та аъзо</b>
 • 👥 <b>Гуруҳ:</b> {MAIN_GROUP}
 ━━━━━━━━━━━━━━━━━━━━
@@ -847,8 +989,12 @@ def build_locks_menu_text():
 ━━━━━━━━━━━━━━━━━━━━
 Керакли қулф устига босиб уни ёқишингиз (🟢) ёки ўчиришингиз (🔴) мумкин.
 
-🟢 = Қулфланган / Чеклов фаол (3 тадан ошса ёки ташланса жазоланади)
-🔴 = Рухсат берилган / Чеклов ўчирилган
+• 🔗 <b>Бегона TG гуруҳ/канал:</b> Бегона Telegram гуруҳ, канал, бот ва @username ҳаволаларини ўчириш.
+• 🌐 <b>YouTube/Insta/Сайт:</b> YouTube, Instagram, TikTok ва барча интернет силкаларини ўчириш.
+• 📖 <b>История (Stories):</b> Гуруҳга ташланган «Пересланная история» рекламаларини ўчириш.
+
+🟢 = Ёқилган (Қулфланган / Чеклов фаол)
+🔴 = Ўчирилган (Рухсат берилган)
 ━━━━━━━━━━━━━━━━━━━━"""
 
 def build_locks_menu_markup():
@@ -856,7 +1002,9 @@ def build_locks_menu_markup():
 
     l_photos = "🟢" if get_setting("lock_photos", "1") == "1" else "🔴"
     l_videos = "🟢" if get_setting("lock_videos", "1") == "1" else "🔴"
-    l_links = "🟢" if get_setting("lock_links", "1") == "1" else "🔴"
+    l_tg_links = "🟢" if get_setting("lock_tg_links", "1") == "1" else "🔴"
+    l_web_links = "🟢" if get_setting("lock_web_links", "1") == "1" else "🔴"
+    l_stories = "🟢" if get_setting("lock_stories", "1") == "1" else "🔴"
     l_voice = "🟢" if get_setting("lock_voice", "0") == "1" else "🔴"
     l_stickers = "🟢" if get_setting("lock_stickers", "0") == "1" else "🔴"
     l_forwards = "🟢" if get_setting("lock_forwards", "0") == "1" else "🔴"
@@ -866,16 +1014,20 @@ def build_locks_menu_markup():
     l_night = "🟢" if get_setting("night_mode", "1") == "1" else "🔴"
 
     markup.row(
+        InlineKeyboardButton(f"🔗 Бегона TG гуруҳ/канал: {l_tg_links}", callback_data="toggle_lock_tg_links"),
+        InlineKeyboardButton(f"🌐 YouTube/Insta/Сайт: {l_web_links}", callback_data="toggle_lock_web_links")
+    )
+    markup.row(
+        InlineKeyboardButton(f"📖 История (Stories): {l_stories}", callback_data="toggle_lock_stories"),
+        InlineKeyboardButton(f"⏩ Форвардлар: {l_forwards}", callback_data="toggle_lock_forwards")
+    )
+    markup.row(
         InlineKeyboardButton(f"📸 Расмлар лимити (3 та): {l_photos}", callback_data="toggle_lock_photos"),
         InlineKeyboardButton(f"📹 Видеолар лимити (3 та): {l_videos}", callback_data="toggle_lock_videos")
     )
     markup.row(
-        InlineKeyboardButton(f"🔗 Реклама/Ҳавола: {l_links}", callback_data="toggle_lock_links"),
-        InlineKeyboardButton(f"🎙 Овозли хабар: {l_voice}", callback_data="toggle_lock_voice")
-    )
-    markup.row(
-        InlineKeyboardButton(f"🎭 Стикер & GIF: {l_stickers}", callback_data="toggle_lock_stickers"),
-        InlineKeyboardButton(f"⏩ Форвардлар: {l_forwards}", callback_data="toggle_lock_forwards")
+        InlineKeyboardButton(f"🎙 Овозли хабар: {l_voice}", callback_data="toggle_lock_voice"),
+        InlineKeyboardButton(f"🎭 Стикер & GIF: {l_stickers}", callback_data="toggle_lock_stickers")
     )
     markup.row(
         InlineKeyboardButton(f"🌐 Арабча ёзув: {l_arabic}", callback_data="toggle_lock_arabic"),
@@ -1890,10 +2042,8 @@ def handle_media_control(message):
     if message.chat.type == 'private' or is_admin(chat_id, user_id):
         return
 
-    # Агар расм/видео остидаги матнда бегона ҳавола бўлса — дарҳол ўчириш ва огоҳлантириш:
-    if get_setting("lock_links", "1") == "1" and has_foreign_links(message):
-        safe_delete_message(chat_id, message.message_id)
-        warn_user(chat_id, user_id, message.from_user)
+    # Агар расм/видео остидаги матнда бегона ҳавола, TG гуруҳ/канал ёки Story бўлса:
+    if check_and_enforce_links_or_story(message):
         return
 
     is_photo = message.content_type == 'photo'
@@ -1942,8 +2092,11 @@ def handle_media_control(message):
         _user_media_history[user_key].clear()
         return
 
-# Овоз, стикер ва бошқа медиалар (APK / программа ва ҳужжатлар)
-@bot.message_handler(func=lambda m: m.chat.type != 'private', content_types=['voice', 'audio', 'document', 'sticker', 'animation', 'video_note', 'contact', 'location', 'poll'])
+# Овоз, стикер, Story ва бошқа медиалар (APK / программа, История ва ҳужжатлар)
+@bot.message_handler(
+    func=lambda m: m.chat.type != 'private',
+    content_types=['voice', 'audio', 'document', 'sticker', 'animation', 'video_note', 'contact', 'location', 'poll', 'story', 'game', 'venue', 'dice', 'giveaway', 'giveaway_winners', 'paid_media']
+)
 def handle_other_media(message):
     if is_official_message(message):
         return
@@ -1985,10 +2138,8 @@ def handle_other_media(message):
     if check_night_mode_violation(message):
         return
 
-    # Агар файл ёки ҳужжат остидаги матнда бегона ҳавола бўлса:
-    if get_setting("lock_links", "1") == "1" and has_foreign_links(message):
-        safe_delete_message(chat_id, message.message_id)
-        warn_user(chat_id, user_id, message.from_user)
+    # 2. История (Пересланная история) ёки бегона TG / YouTube / Instagram / интернет силкаси:
+    if check_and_enforce_links_or_story(message):
         return
 
     # Овозли хабар қулфи
@@ -2020,12 +2171,6 @@ def handle_group_text(message):
     now = time.time()
     user_key = (chat_id, user_id)
 
-    # Форвард хабар қулфи (бегона каналлардан форвард қилинганда)
-    if getattr(message, 'forward_from', None) or getattr(message, 'forward_from_chat', None):
-        if not is_official_message(message) and get_setting("lock_forwards", "0") == "1":
-            safe_delete_message(chat_id, message.message_id)
-            return
-
     # Арабча/Форсча матн қулфи
     if get_setting("lock_arabic", "1") == "1":
         if re.search(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]', text):
@@ -2040,16 +2185,25 @@ def handle_group_text(message):
         mute_user_24h(chat_id, user_id, get_mention(message.from_user), reason="Флуд (Тез-тез хабар ёзиш)")
         return
 
-    # Реклама ва ҳаволалар (Кучайтирилган назорат — бегона канал ва ҳаволалар учун)
-    if get_setting("lock_links", "1") == "1":
-        if has_foreign_links(message):
-            safe_delete_message(chat_id, message.message_id)
-            warn_user(chat_id, user_id, message.from_user)
-            return
+    # Бегона TG гуруҳ/канал, YouTube/Instagram/интернет силкалари ва форвард назорати
+    if check_and_enforce_links_or_story(message):
+        return
+
+# Таҳрирланган хабарлар (агар фойдаланувчи кейин таҳрирлаб силка қўшса)
+@bot.edited_message_handler(
+    func=lambda m: m.chat.type != 'private',
+    content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'animation']
+)
+def handle_edited_group_message(message):
+    if is_official_message(message):
+        return
+    if check_night_mode_violation(message):
+        return
+    check_and_enforce_links_or_story(message)
 
 def warn_user(chat_id, user_id, user_obj):
     # Telegram Channel proxy, botlar ёки расмий админ бўлса огоҳлантирилмайди
-    if user_id in [777000, 1087968824, 136817688, OWNER_ID]:
+    if not user_id or user_id in [777000, 1087968824, 136817688, OWNER_ID]:
         return
 
     conn = sqlite3.connect(DB_PATH)
@@ -2057,23 +2211,30 @@ def warn_user(chat_id, user_id, user_obj):
     cur.execute("SELECT warn_count FROM warnings WHERE user_id = ? AND chat_id = ?", (user_id, chat_id))
     row = cur.fetchone()
     count = (row[0] if row else 0) + 1
-    cur.execute("INSERT OR REPLACE INTO warnings (user_id, chat_id, warn_count) VALUES (?, ?, ?)", (user_id, chat_id, count))
+    if count >= 3:
+        cur.execute("INSERT OR REPLACE INTO warnings (user_id, chat_id, warn_count) VALUES (?, ?, 0)", (user_id, chat_id))
+    else:
+        cur.execute("INSERT OR REPLACE INTO warnings (user_id, chat_id, warn_count) VALUES (?, ?, ?)", (user_id, chat_id, count))
     conn.commit()
     conn.close()
 
     mention = get_mention(user_obj)
+    raw_name = (user_obj.first_name if user_obj else None) or f"User_{user_id}"
+    if user_obj and getattr(user_obj, "username", None):
+        raw_name = f"{raw_name} (@{user_obj.username})"
+
     if count >= 3:
-        mute_user_24h(chat_id, user_id, mention, reason="3 марта бегона канал ва реклама тарқатиш")
+        mute_user_24h(chat_id, user_id, mention, user_name=raw_name, reason="3 марта бегона ҳавола, гуруҳ ёки реклама тарқатиш")
         msg = bot.send_message(
             chat_id,
             f"🚫 {mention}, сизга 3 марта огоҳлантириш берилди!\n"
-            f"Гуруҳда бегона реклама ва канал тарқатганингиз сабабли <b>24 соатлик МУТ</b> берилди."
+            f"Гуруҳда бегона ҳавола, канал ёки реклама тарқатганингиз сабабли <b>24 соатлик МУТ</b> берилди."
         )
         delete_later(chat_id, msg.message_id, delay=35)
     else:
         msg = bot.send_message(
             chat_id,
-            f"⚠️ {mention}, гуруҳда бегона реклама, канал ва ҳавола тарқатиш қатъиян тақиқланган!\n"
+            f"⚠️ {mention}, гуруҳда бегона Telegram гуруҳ/канал, YouTube, Instagram ёки бошқа ҳавола тарқатиш тақиқланган!\n"
             f"Огоҳлантириш: <b>{count}/3</b> (3 тадан сўнг 24 соатлик мут берилади)."
         )
         delete_later(chat_id, msg.message_id, delay=35)
@@ -2692,7 +2853,7 @@ def run_bot():
                 timeout=20,
                 long_polling_timeout=20,
                 skip_pending=False,
-                allowed_updates=['message', 'callback_query', 'chat_member', 'my_chat_member']
+                allowed_updates=['message', 'edited_message', 'callback_query', 'chat_member', 'my_chat_member']
             )
         except Exception as e:
             err_msg = str(e)
