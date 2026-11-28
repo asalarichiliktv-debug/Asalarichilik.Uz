@@ -365,7 +365,18 @@ def get_settings() -> dict:
         "apitherapy_seq_index": 0,
         "quiz_seq_index": 0,
         "poll_seq_index": 0,
-        "video_seq_index": 0
+        "video_seq_index": 0,
+        "advanced_lock_enabled": True,
+        "advanced_lock_links": True,
+        "advanced_lock_blacklist": True,
+        "advanced_lock_forwards": False,
+        "advanced_lock_stickers": False,
+        "advanced_lock_full_mute": False,
+        "advanced_lock_blacklist_words": [
+            "crypto", "крипто", "pul ishlash", "пул ишлаш", "stavka", "ставка", "1xbet",
+            "parol", "пароль", "karta raqam", "карта рақам", "investitsiya", "инвестиция",
+            "kazino", "казино", "tekin pul", "текин пул", "reklama", "реклама"
+        ]
     }
     data = load_json_file(SETTINGS_FILE, defaults)
     for k, v in defaults.items():
@@ -641,6 +652,7 @@ async def sync_progress_to_telegram_checkpoint(bot_inst: Optional[Bot] = None):
             short_vals = [x for x in vals if isinstance(x, int) or (isinstance(x, str) and len(x) <= 24)]
             compact_sh[sh_k] = short_vals[-120:]
 
+        media_cfg = get_media_limits_settings() if "get_media_limits_settings" in globals() else {}
         payload = {
             "n": int(prog.get("news_seq_index", settings.get("news_seq_index", 0))),
             "a": int(prog.get("apitherapy_seq_index", settings.get("apitherapy_seq_index", 0))),
@@ -652,6 +664,16 @@ async def sync_progress_to_telegram_checkpoint(bot_inst: Optional[Bot] = None):
             "ss": int(sci_s.get("selected_set_id", 1)),
             "sc": str(sci_s.get("current_category", "young_beekeepers")),
             "nlp": str(settings.get("night_lock_preset", "1")),
+            "gmle": bool(media_cfg.get("enabled", True)),
+            "gmll": max(1, int(media_cfg.get("daily_limit", 3))),
+            "advl": {
+                "en": bool(settings.get("advanced_lock_enabled", True)),
+                "lnk": bool(settings.get("advanced_lock_links", True)),
+                "blk": bool(settings.get("advanced_lock_blacklist", True)),
+                "fwd": bool(settings.get("advanced_lock_forwards", False)),
+                "stk": bool(settings.get("advanced_lock_stickers", False)),
+                "fm": bool(settings.get("advanced_lock_full_mute", False)),
+            },
             "ts": int(time.time()),
             "sh": compact_sh
         }
@@ -773,6 +795,29 @@ async def restore_progress_from_telegram_checkpoint(bot_inst: Optional[Bot] = No
                     save_json_file(SCIENTIFIC_SETTINGS_FILE, sci_s)
             except Exception as sc_e:
                 logging.debug(f"Sci checkpoint restore skip: {sc_e}")
+
+        if ("gmle" in payload or "gmll" in payload) and (is_fresh_container or cloud_ts > local_ts):
+            m_cfg = settings.setdefault("group_media_limits_config", {})
+            if "gmle" in payload:
+                m_cfg["enabled"] = bool(payload["gmle"])
+                updated = True
+            if "gmll" in payload:
+                m_cfg["daily_limit"] = max(1, int(payload["gmll"]))
+                updated = True
+        if isinstance(payload.get("advl"), dict) and (is_fresh_container or cloud_ts > local_ts):
+            adv = payload["advl"]
+            adv_map = {
+                "en": "advanced_lock_enabled",
+                "lnk": "advanced_lock_links",
+                "blk": "advanced_lock_blacklist",
+                "fwd": "advanced_lock_forwards",
+                "stk": "advanced_lock_stickers",
+                "fm": "advanced_lock_full_mute",
+            }
+            for ak, full_ak in adv_map.items():
+                if ak in adv:
+                    settings[full_ak] = bool(adv[ak])
+                    updated = True
 
         if cloud_ts:
             prog["updated_ts"] = max(local_ts, cloud_ts)
@@ -2800,6 +2845,87 @@ async def notify_owner_success(bot_inst: Bot, title: str, details: str, target_m
     except Exception as e:
         logging.warning(f"notify_owner_success error: {e}")
 
+def _format_uz_vote_ts(ts_val: Any) -> str:
+    """Тошкент вақти билан овоз бериш санаси ва соатини (01 нояб. 22:46) кўринишда чиқариш."""
+    try:
+        ts_num = float(ts_val or 0)
+        if ts_num <= 0:
+            return ""
+        dt = datetime.fromtimestamp(ts_num, tz=timezone(timedelta(hours=5)))
+        months = ["янв.", "фев.", "мар.", "апр.", "май", "июнь", "июль", "авг.", "сент.", "окт.", "нояб.", "дек."]
+        m_lbl = months[dt.month - 1]
+        return f"{dt.day:02d} {m_lbl} {dt.strftime('%H:%M')}"
+    except Exception:
+        return ""
+
+def build_bot_capabilities_status_block(markdown: bool = True) -> str:
+    """/start ва бошқарув менюлари учун жонли чекловлар, лимитлар ва вазифалар ҳолати."""
+    settings = get_settings()
+    m_cfg = get_media_limits_settings() if "get_media_limits_settings" in globals() else {}
+    m_en = bool(m_cfg.get("enabled", True))
+    m_lim = max(1, int(m_cfg.get("daily_limit", 3)))
+    if m_en:
+        m_line = (
+            f"🟢 Расм ва видео лимитлари: **Ёқилган** (Кунига макс {m_lim} та, {m_lim + 1}-сида мут)"
+            if markdown else
+            f"🟢 Расм ва видео лимитлари: Ёқилган (Бир кунда {m_lim} тадан кўп юборса {m_lim + 1}-чисида МУТЕ!)"
+        )
+    else:
+        m_line = (
+            "🔴 Расм ва видео лимитлари: **Ўчирилган** (Лимитсиз)"
+            if markdown else
+            "🔴 Расм ва видео лимитлари: Ўчирилган (Чеклов йўқ)"
+        )
+
+    adv_en = bool(settings.get("advanced_lock_enabled", True))
+    sub_parts = []
+    if settings.get("advanced_lock_links", True):
+        sub_parts.append("ҳаволалар")
+    if settings.get("advanced_lock_blacklist", True):
+        sub_parts.append("тақиқланган сўзлар")
+    if settings.get("advanced_lock_forwards", False):
+        sub_parts.append("forward")
+    if settings.get("advanced_lock_stickers", False):
+        sub_parts.append("стикер/GIF")
+    if settings.get("advanced_lock_full_mute", False):
+        sub_parts.append("тўлиқ қулф")
+    sub_str = ", ".join(sub_parts) if sub_parts else "қўшимча фильтр йўқ"
+    if adv_en:
+        adv_line = (
+            f"🟢 Илғор қулфлаш ва чеклаш тизими: **Ёқилган** ({sub_str})"
+            if markdown else
+            f"🟢 Илғор қулфлаш ва чеклаш тизими: Ёқилган ({sub_str})"
+        )
+    else:
+        adv_line = (
+            "🔴 Илғор қулфлаш ва чеклаш тизими: **Ўчирилган**"
+            if markdown else
+            "🔴 Илғор қулфлаш ва чеклаш тизими: Ўчирилган"
+        )
+
+    nl_en = bool(settings.get("night_lock_enabled", True))
+    nl_s = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+    nl_e = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+    if nl_en:
+        nl_line = (
+            f"🟢 Гуруҳ тунги чеклови: **Ёқилган** ({nl_s}–{nl_e})"
+            if markdown else
+            f"🟢 Гуруҳ тунги чеклови: Ёқилган ({nl_s}–{nl_e})"
+        )
+    else:
+        nl_line = (
+            "🔴 Гуруҳ тунги чеклови: **Ўчирилган**"
+            if markdown else
+            "🔴 Гуруҳ тунги чеклови: Ўчирилган"
+        )
+
+    weather_line = (
+        "🟢 1, 3 ва 10 кунлик аниқ об-ҳаво маълумотлари: **Фаол**"
+        if markdown else
+        "🟢 1, 3 ва 10 кунлик аниқ об-ҳаво маълумотлари: Фаол"
+    )
+    return "\n".join([m_line, adv_line, nl_line, weather_line])
+
 # ==============================================================================
 # 10. ASOSIY MENYU KLAVIATURASI (SKRINSHOTDAGI KABI 1-GA-1)
 # ==============================================================================
@@ -2826,6 +2952,10 @@ def build_main_menu_inline() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📢 Реклама тарқатиш", callback_data="ad_broadcast_open")
         ],
         [
+            InlineKeyboardButton(text="📷 Медиа лимити (Сони/Ёқиш)", callback_data="grp_lim_menu:from_main"),
+            InlineKeyboardButton(text="🛡 Илғор қулфлаш тизими", callback_data="adv_lock:menu:from_main")
+        ],
+        [
             InlineKeyboardButton(text="🌙 Гуруҳ тунги чеклови", callback_data="night_lock_menu"),
             InlineKeyboardButton(text="📅 Режалар жадвали", callback_data="sched_dashboard_menu")
         ],
@@ -2847,6 +2977,7 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="📰 Асаларичилик янгиликлари"), KeyboardButton(text="🌿 Апитерапия янгиликлари")],
         [KeyboardButton(text="🎓 Илмий тадқиқот тестлари"), KeyboardButton(text="🐝 Викторина & Сўровнома")],
         [KeyboardButton(text="🎬 Асаларичилик видеолари"), KeyboardButton(text="📢 Реклама тарқатиш")],
+        [KeyboardButton(text="📷 Медиа лимити"), KeyboardButton(text="🛡 Илғор қулфлаш")],
         [KeyboardButton(text="🌙 Гуруҳ тунги чеклови"), KeyboardButton(text="📅 Режалар жадвали")],
         [KeyboardButton(text="👑 Гуруҳлар назорати"), KeyboardButton(text="👑 Бот эгаси")],
         [KeyboardButton(text="🌐 Тилни ўзгартириш"), KeyboardButton(text="📖 Бот қўлланмаси")]
@@ -3147,7 +3278,10 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
                 logging.error(f"Error sending night lock user warning: {e}")
             return
 
-    # B) КУНДУЗГИ ВАҚТДА — МЕДИА ЛИМИТИ НАЗОРАТИ:
+    # B) КУНДУЗГИ ВАҚТДА — ИЛҒОР ҚУЛФЛАШ ВА МЕДИА ЛИМИТИ НАЗОРАТИ:
+    if is_group and await enforce_advanced_group_locks(message):
+        return
+
     is_media = bool(
         message.photo or 
         message.video or 
@@ -3157,6 +3291,10 @@ async def group_night_lock_and_auto_forward_handler(message: types.Message):
     )
     if is_media:
         await group_media_limiter_handler(message)
+        return
+
+    if message.text:
+        await group_handler(message)
 
 # 13. KANAL VA GURUHLARDA POSTLARGA AVTOMATIK TUGMALAR QO'YISH
 # ==============================================================================
@@ -3276,10 +3414,9 @@ async def start_cmd(message: types.Message, state: FSMContext = None):
         group_count = 2
         channel_count = 3
 
+    live_caps = build_bot_capabilities_status_block(markdown=False)
     welcome_text = (
-        "✅ Расм ва видео лимитлари (Бир кунда 3 тадан кўп юборса 4-чисида 1 кунлик МУТЕ!)\n"
-        "✅ Илғор қулфлаш ва чеклаш тизими\n"
-        "✅ 1, 3 ва 10 кунлик аниқ об-ҳаво маълумотлари\n\n"
+        f"{live_caps}\n\n"
         "👑 Бот эгаси: @JamshidjonDavronov\n\n"
         "⚠️ МУҲИМ ЭСЛАТМА:\n"
         "Агар ботни ўз гуруҳингизга қўшмоқчи бўлсангиз, аввал бот эгаси @JamshidjonDavronov билан боғланинг "
@@ -3351,7 +3488,6 @@ def build_viktorina_channel_prepend_rows(vk_id: str, vp: dict, bot_user: str) ->
 
     letters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
     rows = []
-    # Фақат овоз бериш тугмалари (View Votes / Қатнашчилар тугмаларисиз — савол остида тўлиқ кўринади!)
     vote_btns = []
     for i in range(min(len(options), 10)):
         lbl = letters[i] if i < len(letters) else str(i + 1)
@@ -3361,6 +3497,12 @@ def build_viktorina_channel_prepend_rows(vk_id: str, vp: dict, bot_user: str) ->
     if vote_btns:
         for i in range(0, len(vote_btns), 5):
             rows.append(vote_btns[i:i + 5])
+    total_v = len(votes)
+    clean_bot = str(bot_user or "Asalarichilikuz_bot").lstrip("@")
+    rows.append([
+        InlineKeyboardButton(text=f"👁 View Votes ({total_v})", url=f"https://t.me/{clean_bot}?start=vpoll_{vk_id}"),
+        InlineKeyboardButton(text=f"👥 Қатнашчилар ({total_v})", callback_data=f"vlist:{vk_id}")
+    ])
     return rows
 
 def build_viktorina_voters_under_card(vp: dict) -> str:
@@ -3369,10 +3511,10 @@ def build_viktorina_voters_under_card(vp: dict) -> str:
     letters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
     total_v = len(votes)
     lines = [
-        f"📋 <b>Сўровнома овозлари ва қатнашчилар ({total_v} нафар):</b>"
+        f"📊 <b>Результаты • {total_v} answers</b>"
     ]
     if total_v == 0:
-        lines.append("<i>Ҳозирча овоз берилмади — иштирок этганлар шу ерда кўринади.</i>")
+        lines.append("<i>Овоз берилгач, ҳар бир вариант остида қатнашчилар исми, фоизи ва вақти шу ерда кўринади.</i>")
         return chr(10).join(lines)
     buckets: dict[int, list[str]] = {i: [] for i in range(len(options))}
     for uid, v in sorted(votes.items(), key=lambda kv: kv[1].get("ts", 0)):
@@ -3380,17 +3522,26 @@ def build_viktorina_voters_under_card(vp: dict) -> str:
         if sel in buckets:
             nm = html.escape(str(v.get("name", "Асаларичи")).strip() or "Асаларичи")
             uname = str(v.get("username", "")).replace("@", "").strip()
+            ts_str = _format_uz_vote_ts(v.get("ts"))
             tag = f'<a href="tg://user?id={uid}">{nm}</a>' if str(uid).isdigit() else nm
             if uname:
                 tag += f" (@{html.escape(uname)})"
+            if ts_str:
+                tag += f" — <i>{ts_str}</i>"
             buckets[sel].append(tag)
     for i, opt_txt in enumerate(options):
         voters = buckets.get(i, [])
         if not voters:
             continue
+        pct = int(round((len(voters) * 100.0) / total_v)) if total_v > 0 else 0
         lbl = letters[i] if i < len(letters) else str(i + 1)
-        lines.append(f"🔹 <b>{lbl}) {html.escape(str(opt_txt))}</b> — <b>{len(voters)} та</b>:")
-        lines.append("   👤 " + ", ".join(voters))
+        clean_opt = re.sub(r"^[A-Ja-j][\)\.\s]+", "", str(opt_txt)).strip()[:52]
+        ans_word = "answer" if len(voters) == 1 else "answers"
+        lines.append(f"\n<b>{lbl}) {html.escape(clean_opt)} — {pct}%</b> ({len(voters)} {ans_word})")
+        for idx_v, v_tag in enumerate(voters[:25], start=1):
+            lines.append(f"   {idx_v}. {v_tag}")
+        if len(voters) > 25:
+            lines.append(f"   <i>...яна {len(voters) - 25} та (View Votes орқали тўлиқ кўринг)</i>")
     out = chr(10).join(lines)
     if len(out) > 3950:
         out = out[:3940] + "..."
@@ -3461,19 +3612,21 @@ async def send_viktorina_view_votes_report(target_msg_or_call: Any, vk_id: str):
     mode = vp.get("mode", "quiz")
     votes = vp.get("votes", {})
     total_votes = len(votes)
+    letters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
 
     buckets: dict[int, list[dict]] = {i: [] for i in range(len(options))}
-    for uid, v in votes.items():
+    for uid, v in sorted(votes.items(), key=lambda kv: kv[1].get("ts", 0)):
         sel = int(v.get("selected", -1))
         if sel in buckets:
             buckets[sel].append({
                 "uid": uid,
                 "name": str(v.get("name", "Асаларичи")).strip() or "Асаларичи",
-                "username": str(v.get("username", "")).replace("@", "").strip()
+                "username": str(v.get("username", "")).replace("@", "").strip(),
+                "ts": v.get("ts", 0)
             })
 
     header = (
-        f"👁 <b>ОВОЗЛАРНИ КЎРИШ (View Votes • {total_votes} нафар қатнашчи)</b>\n"
+        f"👁 <b>Результаты • {total_votes} answers</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"❓ <b>{html.escape(q_text)}</b>\n\n"
     )
@@ -3484,7 +3637,10 @@ async def send_viktorina_view_votes_report(target_msg_or_call: Any, vk_id: str):
         cnt = len(voters)
         pct = int(round((cnt * 100.0) / total_votes)) if total_votes > 0 else 0
         mark = "✅ " if (mode == "quiz" and i == correct_id) else ""
-        opt_header = f"{mark}<b>{html.escape(str(opt_txt))}</b> — <b>{pct}%</b> ({cnt} та овоз)\n"
+        lbl = letters[i] if i < len(letters) else str(i + 1)
+        clean_opt = re.sub(r"^[A-Ja-j][\)\.\s]+", "", str(opt_txt)).strip()
+        ans_word = "answer" if cnt == 1 else "answers"
+        opt_header = f"{mark}<b>{lbl}) {html.escape(clean_opt)} — {pct}%</b>   {cnt} {ans_word}\n"
         if len(cur) + len(opt_header) > 3700:
             chunks.append(cur)
             cur = opt_header
@@ -3493,27 +3649,21 @@ async def send_viktorina_view_votes_report(target_msg_or_call: Any, vk_id: str):
         if not voters:
             cur += "   <i>Овоз йўқ</i>\n\n"
         else:
-            voter_parts = []
-            for v in voters:
+            for idx_v, v in enumerate(voters, start=1):
                 nm = html.escape(v["name"])
                 v_uid = v["uid"]
                 uname = v["username"]
+                ts_str = _format_uz_vote_ts(v.get("ts"))
                 tag = f'<a href="tg://user?id={v_uid}">{nm}</a>' if (v_uid and str(v_uid).isdigit()) else nm
                 if uname:
                     tag += f" (@{html.escape(uname)})"
-                voter_parts.append(tag)
-            block = "   👤 " + ", ".join(voter_parts) + "\n\n"
-            if len(cur) + len(block) <= 3850:
-                cur += block
-            else:
-                for idx_v, vp_tag in enumerate(voter_parts):
-                    line_v = ("   👤 " if idx_v == 0 else "   • ") + vp_tag + "\n"
-                    if len(cur) + len(line_v) > 3800:
-                        chunks.append(cur)
-                        cur = line_v
-                    else:
-                        cur += line_v
-                cur += "\n"
+                line_v = f"   {idx_v}. {tag}" + (f"   <i>{ts_str}</i>" if ts_str else "") + "\n"
+                if len(cur) + len(line_v) > 3800:
+                    chunks.append(cur)
+                    cur = line_v
+                else:
+                    cur += line_v
+            cur += "\n"
     if cur.strip():
         chunks.append(cur)
 
@@ -3816,7 +3966,9 @@ async def send_quiz_poll_to_chat(chat_id: Any, quiz: dict, poll_mode: Optional[s
         except Exception:
             pass
 
-    if poll_msg:
+    # Каналда сўровномалар Telegram қоидасига кўра аноним бўлгани учун остида жонли овоз картаси юборилади;
+    # Гуруҳда эса Telegram'нинг ўзи View Votes, фоиз ва аватарларни (4-расмдек) бевосита кўрсатади.
+    if poll_msg and is_chan:
         try:
             uc_msg = await bot.send_message(
                 chat_id=poll_msg.chat.id,
@@ -6734,6 +6886,97 @@ async def group_media_limiter_handler(message: types.Message):
 
         save_group_media_limits(db)
 
+_ADV_CHECKED_MSG_KEYS: set = set()
+
+async def enforce_advanced_group_locks(message: types.Message) -> bool:
+    """Гуруҳда илғор қулфлаш ва чеклаш тизимини (ҳаволалар, қорa рўйхат, forward, стикер, тўлиқ мут) ижро этиш."""
+    global _ADV_CHECKED_MSG_KEYS
+    chat_id = message.chat.id
+    user = message.from_user
+    msg_key = f"{chat_id}:{message.message_id}"
+    if msg_key in _ADV_CHECKED_MSG_KEYS:
+        return False
+    _ADV_CHECKED_MSG_KEYS.add(msg_key)
+    if len(_ADV_CHECKED_MSG_KEYS) > 500:
+        _ADV_CHECKED_MSG_KEYS.clear()
+
+    if await is_group_admin_or_exempt(chat_id, user, message):
+        return False
+
+    settings = get_settings()
+    if not settings.get("advanced_lock_enabled", True):
+        return False
+
+    user_name = html.escape(user.first_name if user and user.first_name else "Фойдаланувчи")
+    u_mention = f'<a href="tg://user?id={user.id}"><b>{user_name}</b></a>' if user else f"<b>{user_name}</b>"
+
+    async def _delete_and_warn(reason_html: str, delay_sec: int = 25):
+        try:
+            await message.delete()
+        except Exception:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+            except Exception:
+                pass
+        try:
+            w = await bot.send_message(
+                chat_id=chat_id,
+                text=f"🛡 {u_mention}, {reason_html}",
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+            asyncio.create_task(auto_delete_message_after_delay(chat_id, w.message_id, delay_sec))
+        except Exception:
+            pass
+
+    if settings.get("advanced_lock_full_mute", False):
+        await _delete_and_warn("гуруҳда ёзишмалар админ томонидан вақтинча тўлиқ қулфланган. 🔒", 20)
+        return True
+
+    if settings.get("advanced_lock_forwards", False):
+        has_fwd = bool(
+            getattr(message, "forward_origin", None)
+            or getattr(message, "forward_from", None)
+            or getattr(message, "forward_from_chat", None)
+        )
+        if has_fwd:
+            await _delete_and_warn("гуруҳга бошқа чатлардан хабар узатиш (Forward) тақиқланган! 🚫", 25)
+            return True
+
+    if settings.get("advanced_lock_stickers", False) and (message.sticker or message.animation):
+        await _delete_and_warn("гуруҳда стикер ва GIF анимация юбориш чекланган! 🚫", 25)
+        return True
+
+    txt = (message.text or message.caption or "").strip()
+    txt_lower = txt.lower()
+
+    if settings.get("advanced_lock_links", True):
+        has_bad_link = bool(txt and SPAM_LINK_REGEX.search(txt))
+        if not has_bad_link:
+            for ent in list(message.entities or []) + list(message.caption_entities or []):
+                ent_type = getattr(ent, "type", "")
+                if ent_type in ("url", "text_link"):
+                    url_val = getattr(ent, "url", None) or (
+                        txt[ent.offset:ent.offset + ent.length] if ent.offset is not None and ent.length else ""
+                    )
+                    ul = str(url_val).lower()
+                    if ul and ("asalarichilik" not in ul) and ("uz_asalarichilik" not in ul):
+                        has_bad_link = True
+                        break
+        if has_bad_link:
+            await _delete_and_warn("гуруҳда бегона ҳавола ва реклама тарқатиш тақиқланган! 🔗🚫", 30)
+            return True
+
+    if settings.get("advanced_lock_blacklist", True) and txt_lower:
+        words = settings.get("advanced_lock_blacklist_words", SPAM_WORDS)
+        for bw in words:
+            bw_c = str(bw).strip().lower()
+            if bw_c and bw_c in txt_lower:
+                await _delete_and_warn("хабарингиз тақиқланган сўзлар сабабли ўчирилди! 🚫", 25)
+                return True
+
+    return False
+
 @dp.message(F.chat.type.in_({"group", "supergroup"}) & F.text)
 async def group_handler(message: types.Message):
     chat_id = message.chat.id
@@ -6784,8 +7027,8 @@ async def group_handler(message: types.Message):
     if user and not is_admin:
         record_user_group_message(chat_id, user.id, message.message_id)
 
-    # Гуруҳ ҳаволаларини тозалаш ва муте қилиш бошқа махсус ботга топширилган.
-    # Ushbu bot guruhda begona havolalarni o'chirmaydi va a'zolarni mute qilmaydi.
+    if await enforce_advanced_group_locks(message):
+        return
 
     is_trade_ad = bool(TRADE_REGEX.search(text_lower))
     is_reply_to_bot = (
@@ -7590,13 +7833,14 @@ async def on_chat_auth_ok(call: types.CallbackQuery):
 
     save_allowed_chat(chat_id, p_info.get("title", "Tasdiqlangan Guruh"), p_info.get("type", "group"))
     try:
+        live_caps = build_bot_capabilities_status_block(markdown=False)
         await bot.send_message(
             chat_id=chat_id,
             text=(
-                "✅ **Asalarichilik.Uz 🇺🇿 Мутахассиси фаоллаштирилди!**\n\n"
+                "✅ Asalarichilik.Uz 🇺🇿 Мутахассиси фаоллаштирилди!\n\n"
                 f"Ушбу чат бот эгаси ({OWNER_USERNAME}) томонидан расмий тасдиқланди.\n\n"
-                "🛡 Фаол ҳимоялар:\n"
-                "• Расм ва видео лимитлари (кунига 3 тадан кўп юборилса 24 соатга МУТЕ!)\n"
+                "🛡 Фаол чекловлар ва имкониятлар:\n"
+                f"{live_caps}\n"
                 "• Кунлик илмий викториналар, янгиликлар ва апитерапия мақолалари."
             )
         )
@@ -7688,13 +7932,15 @@ async def group_control_menu(message: types.Message):
     rows.append([InlineKeyboardButton(text="➕ Янги гуруҳга қўшиш қўлланмаси", callback_data="grp_add_guide")])
     rows.append([InlineKeyboardButton(text="« Орқага", callback_data="set_close")])
 
+    live_caps = build_bot_capabilities_status_block(markdown=True)
     lines_txt = [
         "👑 **БОТ ҚЎШИЛГАН ГУРУҲЛАР НАЗОРАТИ ВА ХАВФСИЗЛИГИ**\n",
         f"Бот ҳозирда уланган гуруҳлар сони: **{len(all_groups)} та**",
         f"Тасдиқ кутилаётган таклифлар: **{len(pending)} та**\n",
         "• **Гуруҳни тарк этиш:** Агар бегона ёки номаъқул гуруҳ бўлса, «🚪 Тарк этиш» тугмасини босинг. Бот ушбу гуруҳдан дарҳол чиқиб кетади.",
-        "• **Хавфсизлик:** Админ розилигисиз бот бегона гуруҳларда ишламайди.",
-        "• **Спам ҳимояси:** Бир кунда 3 тадан ортиқ медиа юборган аъзо 24 соатга МУТЕ қилинади."
+        "• **Хавфсизлик:** Админ розилигисиз бот бегона гуруҳларда ишламайди.\n",
+        "🛡 **ЖОРИЙ ЧЕКЛОВЛАР ВА ҚУЛФЛАШ ҲОЛАТИ:**",
+        live_caps
     ]
     text = "\n".join(lines_txt)
     if isinstance(message, types.CallbackQuery):
@@ -8049,9 +8295,24 @@ def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, Inli
     vid_status = "🟢 Ёқилган" if vid_en else "🔴 Ўчирилган"
     vid_btn_icon = "🟢" if vid_en else "🔴"
 
+    media_cfg = get_media_limits_settings()
+    m_en = bool(media_cfg.get("enabled", True))
+    m_lim = max(1, int(media_cfg.get("daily_limit", 3)))
+    m_btn_lbl = f"📷 Медиа лимити: {'🟢 ' + str(m_lim) + ' та' if m_en else '🔴 Ўчирилган'}"
+
+    adv_en = bool(settings.get("advanced_lock_enabled", True))
+    adv_btn_lbl = f"🛡 Илғор қулфлаш: {'🟢 Ёқилган' if adv_en else '🔴 Ўчирилган'}"
+
+    nl_en = bool(settings.get("night_lock_enabled", True))
+    nl_s = normalize_hhmm(settings.get("night_lock_start", "23:00"))
+    nl_e = normalize_hhmm(settings.get("night_lock_end", "06:30"))
+    nl_btn_lbl = f"🌙 Тунги чеклов: {'🟢 ' + nl_s + '-' + nl_e if nl_en else '🔴 Ўчирилган'}"
+
+    live_caps = build_bot_capabilities_status_block(markdown=True)
+
     text = (
         f"⚙️ **АСАЛАРИЧИЛИК БОТ ВА КАНАЛ/ГУРУҲ СОЗЛАМАЛАРИ**\n\n"
-        f"Ушбу ягона панел орқали ботнинг барча канал ва гуруҳларга хабар жўнатиш тартиби, расмий манзиллар, реакциялар ҳамда 4 та асосий бўлим авто-жўнатиш вақтларини созлашингиз мумкин:\n\n"
+        f"Ушбу ягона панел орқали ботнинг барча канал ва гуруҳларга хабар жўнатиш тартиби, расмий манзиллар, чекловлар, реакциялар ҳамда 4 та асосий бўлим авто-жўнатиш вақтларини созлашингиз мумкин:\n\n"
         f"🎯 **Жўнатмалар манзили:** {dest_str}\n"
         f"📢 **Расмий Канал:** `{off_channel}`\n"
         f"👥 **Расмий Группа:** `{off_group}`\n"
@@ -8061,6 +8322,8 @@ def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, Inli
         f"↗️ **Улашиш тугмаси:** {share_status_txt}\n"
         f"💬 **Мутахассис тугмаси:** {expert_status_txt} *(Барча ёзишмалар ботга йўналади)*\n"
         f"📷 **Гуруҳ расмларига фақат смайклар:** {'🟢 Ёқилган' if settings.get('group_photo_reactions_enabled', True) else '🔴 Ўчирилган'}\n\n"
+        f"🛡 **ГУРУҲ ЧЕКЛОВЛАРИ ВА ХАВФСИЗЛИК ҲОЛАТИ:**\n"
+        f"{live_caps}\n\n"
         f"⏰ **Бўлимлар бўйича кунлик авто-жўнатиш вақтлари:**\n"
         f"• 📰 1-Асаларичилик янгиликлари: {news_status} ({news_time})\n"
         f"• 🌿 2-Апитерапия янгиликлари: {api_status} ({api_time})\n"
@@ -8078,6 +8341,13 @@ def build_group_settings_dashboard(from_screen: str = "main") -> tuple[str, Inli
         ],
         [
             InlineKeyboardButton(text=f"🏷 Канал номи: {chan_title}", callback_data="set_change_channel_title")
+        ],
+        [
+            InlineKeyboardButton(text=m_btn_lbl, callback_data="grp_lim_menu:from_settings"),
+            InlineKeyboardButton(text=adv_btn_lbl, callback_data="adv_lock:menu:from_settings")
+        ],
+        [
+            InlineKeyboardButton(text=nl_btn_lbl, callback_data="night_lock_menu")
         ],
         [
             InlineKeyboardButton(text=f"🔄 Авто-реакциялар: {react_icon}", callback_data="set_toggle:auto_reactions"),
@@ -8237,11 +8507,15 @@ def build_group_limits_dashboard(from_screen: str = "main") -> tuple[str, Inline
             InlineKeyboardButton(text="➕ 1 та кўпайтириш", callback_data=f"grp_lim:inc:{from_screen}")
         ],
         [
-            InlineKeyboardButton(text="1 та", callback_data=f"grp_lim:set_1:{from_screen}"),
-            InlineKeyboardButton(text="2 та", callback_data=f"grp_lim:set_2:{from_screen}"),
-            InlineKeyboardButton(text="3 та", callback_data=f"grp_lim:set_3:{from_screen}"),
-            InlineKeyboardButton(text="5 та", callback_data=f"grp_lim:set_5:{from_screen}"),
-            InlineKeyboardButton(text="10 та", callback_data=f"grp_lim:set_10:{from_screen}")
+            InlineKeyboardButton(text=("✅ 1 та" if limit == 1 else "1 та"), callback_data=f"grp_lim:set_1:{from_screen}"),
+            InlineKeyboardButton(text=("✅ 2 та" if limit == 2 else "2 та"), callback_data=f"grp_lim:set_2:{from_screen}"),
+            InlineKeyboardButton(text=("✅ 3 та" if limit == 3 else "3 та"), callback_data=f"grp_lim:set_3:{from_screen}"),
+            InlineKeyboardButton(text=("✅ 5 та" if limit == 5 else "5 та"), callback_data=f"grp_lim:set_5:{from_screen}"),
+            InlineKeyboardButton(text=("✅ 10 та" if limit == 10 else "10 та"), callback_data=f"grp_lim:set_10:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="🔢 Бошқа сон киритиш", callback_data=f"grp_lim:custom_num:{from_screen}"),
+            InlineKeyboardButton(text="🛡 Илғор қулфлаш", callback_data=f"adv_lock:menu:{from_screen}")
         ],
         [
             InlineKeyboardButton(text="✏️ Огоҳлантириш хабарини ўзгартириш", callback_data=f"grp_lim:edit_warn:{from_screen}")
@@ -8300,6 +8574,7 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
         if c_type in ["group", "supergroup", "Guruh"]:
             group_list.append(f"• 🔹 **{c_title}**\n  ├ ID: `{cid}`\n  └ Ҳолати: ✅ Уланган")
 
+    live_caps = build_bot_capabilities_status_block(markdown=True)
     grps_text = "\n\n".join(group_list)
     text = (
         "👥 **ГУРУҲЛАР НАЗОРАТИ ВА БОШҚАРУВИ**\n\n"
@@ -8308,8 +8583,8 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
         f"📋 **НАЗОРАТДАГИ ГУРУҲЛАР ({len(group_list)} та):**\n"
         f"{grps_text}\n\n"
         "────────────────────────\n"
-        "🛡 **Гуруҳ хавфсизлиги ва Медиа чеклови:**\n"
-        "  ├ 📷 Расм ва видео лимити: 🟢 ФАОЛ (Кунига макс 3 та)\n"
+        "🛡 **Гуруҳ хавфсизлиги, Лимитлар ва Чекловлар (Жонли):**\n"
+        f"{live_caps}\n"
         "  ├ ⏳ 1-қоидабузарлик: 2 соатлик мут + ортиқча медиани ўчириш\n"
         "  ├ 🚫 2-қоидабузарлик: 24 соатлик мут + барча ёзишмаларни ўчириш\n"
         "  └ ⏱ Огоҳлантириш: 1 дақиқадан сўнг автоматик ўчирилади\n"
@@ -8321,11 +8596,14 @@ def build_groups_control_dashboard() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton(text="⚙️ Гуруҳ созламалари", callback_data="grp_set_dest:open")
         ],
         [
+            InlineKeyboardButton(text="📷 Медиа лимити", callback_data="grp_lim_menu:from_groups"),
+            InlineKeyboardButton(text="🛡 Илғор қулфлаш", callback_data="adv_lock:menu:from_groups")
+        ],
+        [
             InlineKeyboardButton(text="🚀 Гуруҳга тест бошлаш", callback_data="sci_act:dashboard"),
             InlineKeyboardButton(text="🔄 Рўйхатни янгилаш", callback_data="groups_ctrl:refresh")
         ],
         [
-            InlineKeyboardButton(text="🔙 Орқага (Асосийга қайтиш)", callback_data="main_menu"),
             InlineKeyboardButton(text="🔙 Орқага (Асосий Меню)", callback_data="main_menu")
         ]
     ])
@@ -8466,13 +8744,209 @@ async def on_grp_set_dest_select(call: types.CallbackQuery):
     text, kb = build_group_settings_dashboard()
     await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
-@dp.callback_query(F.data == "grp_nav:refresh")
+@dp.callback_query(F.data.startswith("grp_nav:refresh"))
 async def on_grp_nav_refresh(call: types.CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
+    parts = call.data.split(":")
+    from_screen = parts[2] if len(parts) > 2 else "main"
     await call.answer("🔄 Янгиланмоқда...", show_alert=False)
-    text, kb = build_group_settings_dashboard()
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    if from_screen == "from_night":
+        text, kb = build_night_lock_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="HTML")
+    elif from_screen == "from_groups":
+        text, kb = build_groups_control_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+    else:
+        text, kb = build_group_settings_dashboard()
+        await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+def build_advanced_lock_dashboard(from_screen: str = "main") -> tuple[str, InlineKeyboardMarkup]:
+    settings = get_settings()
+    en = bool(settings.get("advanced_lock_enabled", True))
+    links_en = bool(settings.get("advanced_lock_links", True))
+    blk_en = bool(settings.get("advanced_lock_blacklist", True))
+    fwd_en = bool(settings.get("advanced_lock_forwards", False))
+    stk_en = bool(settings.get("advanced_lock_stickers", False))
+    fm_en = bool(settings.get("advanced_lock_full_mute", False))
+    words = settings.get("advanced_lock_blacklist_words", SPAM_WORDS)
+    words_preview = ", ".join(str(w) for w in words[:10]) + (f" ... (+{len(words) - 10})" if len(words) > 10 else "")
+
+    status_str = "🟢 ЁҚИЛГАН (ФАОЛ)" if en else "🔴 ЎЧИРИЛГАН (НАЗОРАТ ТЎХТАТИЛГАН)"
+    toggle_btn = "🔴 Илғор қулфлашни ўчириш" if en else "🟢 Илғор қулфлашни ёқиш"
+
+    text = (
+        "🛡 **ИЛҒОР ҚУЛФЛАШ ВА ЧЕКЛАШ ТИЗИМИ**\n\n"
+        "Ушбу тизим орқали гуруҳдаги реклама ҳаволалари, тақиқланган сўзлар, бошқа чатлардан узатилган хабарлар (Forward), стикер/GIF ва умумий ёзишмаларни 1 та тугма билан ёқиб/ўчиришингиз мумкин.\n"
+        "*(Админлар ва расмий канал постлари мутлақо дахлсиз!)*\n\n"
+        "────────────────────────\n"
+        f"⚙️ **Умумий тизим ҳолати:** {status_str}\n"
+        f"🔗 **Бегона ҳавола ва рекламалар:** {'🟢 Блокланади' if links_en else '🔴 Очиқ'}\n"
+        f"🚫 **Қора рўйхат сўзлари:** {'🟢 Ўчирилади' if blk_en else '🔴 Очиқ'} ({len(words)} та сўз)\n"
+        f"↪️ **Forward (Узатилган хабарлар):** {'🟢 Чекланган' if fwd_en else '🔴 Рухсат этилган'}\n"
+        f"🎭 **Стикер ва GIF анимациялар:** {'🟢 Чекланган' if stk_en else '🔴 Рухсат этилган'}\n"
+        f"🔒 **Гуруҳни тўлиқ қулфлаш (Мут):** {'🔴 ҚУЛФЛАНГАН' if fm_en else '🟢 Очиқ (Мулоқот фаол)'}\n\n"
+        f"📝 **Қора рўйхат намунаси:** `{words_preview}`"
+    )
+    rows = [
+        [InlineKeyboardButton(text=toggle_btn, callback_data=f"adv_lock:toggle:{from_screen}")],
+        [
+            InlineKeyboardButton(text=f"🔗 Ҳаволалар: {'🟢' if links_en else '🔴'}", callback_data=f"adv_lock:toggle_links:{from_screen}"),
+            InlineKeyboardButton(text=f"🚫 Қора рўйхат: {'🟢' if blk_en else '🔴'}", callback_data=f"adv_lock:toggle_blacklist:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text=f"↪️ Forward: {'🟢' if fwd_en else '🔴'}", callback_data=f"adv_lock:toggle_forwards:{from_screen}"),
+            InlineKeyboardButton(text=f"🎭 Стикер/GIF: {'🟢' if stk_en else '🔴'}", callback_data=f"adv_lock:toggle_stickers:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text=f"🔒 Тўлиқ гуруҳ мути: {'🟢 ЁҚИЛГАН' if fm_en else '🔴 Ўчирилган'}", callback_data=f"adv_lock:toggle_full_mute:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Қора рўйхат сўзларини таҳрирлаш", callback_data=f"adv_lock:edit_words:{from_screen}"),
+            InlineKeyboardButton(text="🔄 Стандарт сўзлар", callback_data=f"adv_lock:reset_words:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="📷 Медиа лимити созламаси", callback_data=f"grp_lim_menu:{from_screen}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Орқага", callback_data=f"grp_nav:refresh:{from_screen}"),
+            InlineKeyboardButton(text="🏠 Асосий Меню", callback_data="main_menu")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+@dp.callback_query(F.data.startswith("grp_lim_menu:"))
+async def on_grp_lim_menu_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    from_screen = call.data.split(":")[1] if ":" in call.data else "main"
+    await call.answer()
+    text, kb = build_group_limits_dashboard(from_screen)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("grp_lim:"))
+async def on_grp_lim_action_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    parts = call.data.split(":")
+    act = parts[1] if len(parts) > 1 else "refresh"
+    from_screen = parts[2] if len(parts) > 2 else "main"
+    cfg = get_media_limits_settings()
+
+    if act == "toggle":
+        new_en = not bool(cfg.get("enabled", True))
+        update_media_limits_setting("enabled", new_en)
+        await call.answer(f"Медиа лимити {'ёқилди 🟢' if new_en else 'ўчирилди 🔴'}")
+    elif act == "dec":
+        cur = max(1, int(cfg.get("daily_limit", 3)))
+        nxt = max(1, cur - 1)
+        update_media_limits_setting("daily_limit", nxt)
+        await call.answer(f"Кунлик лимит: {nxt} та")
+    elif act == "inc":
+        cur = max(1, int(cfg.get("daily_limit", 3)))
+        nxt = min(50, cur + 1)
+        update_media_limits_setting("daily_limit", nxt)
+        await call.answer(f"Кунлик лимит: {nxt} та")
+    elif act.startswith("set_") and act.split("_")[1].isdigit():
+        nxt = max(1, min(50, int(act.split("_")[1])))
+        update_media_limits_setting("daily_limit", nxt)
+        update_media_limits_setting("enabled", True)
+        await call.answer(f"Кунлик лимит: {nxt} тага ўрнатилди 🟢")
+    elif act == "custom_num":
+        ADMIN_WAITING_INPUT[call.from_user.id] = f"media_limit_custom:{from_screen}"
+        await call.answer()
+        await call.message.answer(
+            "🔢 <b>Кунлик расм ва видео лимити сонини киритинг (1 дан 50 гача):</b>\nМасалан: <code>4</code> ёки <code>7</code>",
+            parse_mode="HTML"
+        )
+        return
+    elif act == "edit_warn":
+        ADMIN_WAITING_INPUT[call.from_user.id] = f"media_warn_text:{from_screen}"
+        await call.answer()
+        await call.message.answer(
+            "✏️ <b>Янги огоҳлантириш хабари матнини юборинг:</b>\n"
+            "*(Матнда `{user_mention}` ва `{limit}` тегларидан фойдаланишингиз мумкин)*",
+            parse_mode="Markdown"
+        )
+        return
+    elif act == "reset_warn":
+        update_media_limits_setting("warn_text", DEFAULT_MEDIA_LIMITS_CONFIG["warn_text"])
+        await call.answer("✅ Стандарт огоҳлантириш матни тикланди!", show_alert=True)
+    else:
+        await call.answer("🔄 Янгиланди!")
+
+    try:
+        asyncio.create_task(sync_progress_to_telegram_checkpoint(bot))
+    except Exception:
+        pass
+    text, kb = build_group_limits_dashboard(from_screen)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("adv_lock:"))
+async def on_adv_lock_action_cb(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+    parts = call.data.split(":")
+    act = parts[1] if len(parts) > 1 else "menu"
+    from_screen = parts[2] if len(parts) > 2 else "main"
+    settings = get_settings()
+
+    toggle_map = {
+        "toggle": ("advanced_lock_enabled", "Илғор қулфлаш тизими"),
+        "toggle_links": ("advanced_lock_links", "Ҳаволалар чеклови"),
+        "toggle_blacklist": ("advanced_lock_blacklist", "Қора рўйхат фильтри"),
+        "toggle_forwards": ("advanced_lock_forwards", "Forward чеклови"),
+        "toggle_stickers": ("advanced_lock_stickers", "Стикер ва GIF чеклови"),
+    }
+
+    if act in toggle_map:
+        key, label = toggle_map[act]
+        new_val = not bool(settings.get(key, key in ("advanced_lock_enabled", "advanced_lock_links", "advanced_lock_blacklist")))
+        update_setting(key, new_val)
+        await call.answer(f"{label}: {'Ёқилди 🟢' if new_val else 'Ўчирилди 🔴'}")
+    elif act == "toggle_full_mute":
+        new_val = not bool(settings.get("advanced_lock_full_mute", False))
+        update_setting("advanced_lock_full_mute", new_val)
+        # Расмий гуруҳда ёзишма рухсатини ҳам янгилаш (агар бот админ бўлса)
+        try:
+            perms = ChatPermissions(
+                can_send_messages=not new_val,
+                can_send_audios=not new_val,
+                can_send_documents=not new_val,
+                can_send_photos=not new_val,
+                can_send_videos=not new_val,
+                can_send_video_notes=not new_val,
+                can_send_voice_notes=not new_val,
+                can_send_polls=not new_val,
+                can_send_other_messages=not new_val,
+                can_add_web_page_previews=not new_val,
+            )
+            await bot.set_chat_permissions(chat_id=OFFICIAL_GROUP_ID, permissions=perms)
+        except Exception as pe:
+            logging.debug(f"adv_lock full_mute set_chat_permissions note: {pe}")
+        await call.answer(f"Гуруҳ тўлиқ мути: {'ЁҚИЛДИ 🔒' if new_val else 'Ўчирилди 🟢'}", show_alert=True)
+    elif act == "edit_words":
+        ADMIN_WAITING_INPUT[call.from_user.id] = f"adv_lock_words:{from_screen}"
+        await call.answer()
+        await call.message.answer(
+            "✏️ <b>Қора рўйхат сўзларини вергул (,) билан ажратиб юборинг:</b>\n"
+            "Масалан: <code>reklama, kazino, stavka, 1xbet, kripto</code>",
+            parse_mode="HTML"
+        )
+        return
+    elif act == "reset_words":
+        default_words = list(SPAM_WORDS) + ["kazino", "казино", "tekin pul", "текин пул", "reklama", "реклама"]
+        update_setting("advanced_lock_blacklist_words", default_words)
+        await call.answer("✅ Стандарт қора рўйхат тикланди!", show_alert=True)
+    else:
+        await call.answer()
+
+    try:
+        asyncio.create_task(sync_progress_to_telegram_checkpoint(bot))
+    except Exception:
+        pass
+    text, kb = build_advanced_lock_dashboard(from_screen)
+    await safe_edit_text(call, text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "grp_nav:guide")
 async def on_grp_nav_guide(call: types.CallbackQuery):
@@ -8615,7 +9089,8 @@ def format_scientific_preview_text(item: dict, idx: int, total: int, cat: str, s
     lines.append("")
     correct_letter = letters[correct_id] if correct_id < len(letters) else "A"
     lines.append(f"🎯 {apply_script('Тўғри жавоб калити', script)}: [{correct_letter}]")
-    lines.append(f"💡 {apply_script('Илмий изоҳ', script)}: {explanation}")
+    clean_expl = re.sub(r"^(?:илмий\s+изоҳ|ilmiy\s+izoh)\s*[:\-–—]\s*", "", explanation, flags=re.IGNORECASE).strip()
+    lines.append(f"💡 {apply_script('Илмий изоҳ', script)}: {clean_expl}")
     lines.append("────────────────────────")
     lines.append(apply_script("💡 Админ учун: Саволларни кўриб чиқиб, «🚀 Ҳозироқ юбориш» тугмаси орқали канал ва гуруҳларга тўлиқ 10 талик тестни бошлашингиз мумкин!", script))
     return chr(10).join(lines)
@@ -9374,23 +9849,25 @@ async def launch_full_scientific_test(bot_instance: Bot) -> tuple[int, int, str]
                             "correct_id": correct_id
                         }
 
-                        # ҲАР БИР САВОЛДАН СЎНГ ШУНДОҚ ОСТИГА ҚАТНАШЧИЛАР ВА БЕЛГИЛАНГАН ЖАВОБЛАР КАРТАСИНИ ЮБОРИШ:
-                        try:
-                            under_chunks = build_question_participants_under_card(session, q_idx - 1)
-                            under_msg = await bot_instance.send_message(
-                                chat_id=real_chat_id,
-                                text=under_chunks[0],
-                                parse_mode="HTML",
-                                disable_web_page_preview=True,
-                                disable_notification=True
-                            )
-                            session.setdefault("question_answer_msgs", {}).setdefault(str(q_idx - 1), []).append({
-                                "chat_id": real_chat_id,
-                                "message_id": under_msg.message_id,
-                                "extra_msg_ids": []
-                            })
-                        except Exception as ue:
-                            logging.debug(f"Under-question card send skip ({cid}, q {q_idx}): {ue}")
+                        # Каналда сўровнома Telegram қоидасига кўра аноним бўлгани учун остига жонли қатнашчилар картаси юборилади;
+                        # Гуруҳда эса Telegram'нинг ўзи View Votes, фоиз ва аватарларни (4-расмдек) бевосита кўрсатади!
+                        if is_channel_dest:
+                            try:
+                                under_chunks = build_question_participants_under_card(session, q_idx - 1)
+                                under_msg = await bot_instance.send_message(
+                                    chat_id=real_chat_id,
+                                    text=under_chunks[0],
+                                    parse_mode="HTML",
+                                    disable_web_page_preview=True,
+                                    disable_notification=True
+                                )
+                                session.setdefault("question_answer_msgs", {}).setdefault(str(q_idx - 1), []).append({
+                                    "chat_id": real_chat_id,
+                                    "message_id": under_msg.message_id,
+                                    "extra_msg_ids": []
+                                })
+                            except Exception as ue:
+                                logging.debug(f"Under-question card send skip ({cid}, q {q_idx}): {ue}")
 
                         # Zudlik bilan faylga saqlash (foydalanuvchi birinchi savolga javob berishi bilanoq ushlash uchun):
                         all_perm_polls = load_json_file(SCIENTIFIC_POLL_MAP_FILE, {})
@@ -9510,12 +9987,18 @@ def build_sci_question_channel_kb(
         c = opt_counts.get(i, 0)
         lbl = f"{letters[i]} ({c})" if c > 0 else f"🙋 {letters[i]}"
         row1.append(InlineKeyboardButton(text=lbl, callback_data=f"sci_qvote:{q_idx}:{i}"))
-    # «View Votes» ва «Қатнашчилар» тугмалари олиб ташланди — барча жавоблар саволнинг шундоқ остида кўринади!
-    rows = [row1] if row1 else []
+    clean_bot = str(bot_username or "Asalarichilikuz_bot").lstrip("@")
+    rows = []
+    if row1:
+        rows.append(row1)
+    rows.append([
+        InlineKeyboardButton(text=f"👁 View Votes ({q_votes_cnt})", url=f"https://t.me/{clean_bot}?start=sci_votes_{q_idx}"),
+        InlineKeyboardButton(text=f"👥 Қатнашчилар ({q_votes_cnt})", callback_data=f"sci_q_voters:{q_idx}")
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def build_question_participants_under_card(session: Optional[dict], q_idx: int) -> list[str]:
-    """Ҳар бир тест саволи остида қатнашчилар ва улар белгилаган жавобларни (A/B/C/D/E) чиқариш"""
+    """Ҳар бир тест саволи остида қатнашчилар ва улар белгилаган жавобларни (A/B/C/D/E, фоиз ва вақт билан) чиқариш"""
     if session is None:
         session = get_sci_session()
     snaps = session.get("questions_snapshot", [])
@@ -9526,46 +10009,57 @@ def build_question_participants_under_card(session: Optional[dict], q_idx: int) 
     participants = dict(load_json_file(SCIENTIFIC_PARTICIPANTS_FILE, {}))
     participants.update(session.get("participants", {}))
 
-    buckets: dict[int, list[str]] = {i: [] for i in range(num_opts)}
+    buckets: dict[int, list[tuple[float, str]]] = {i: [] for i in range(num_opts)}
     total_q_voters = 0
     for uid, p in participants.items():
         ans = (p.get("answers") or {}).get(str(q_idx))
         if ans is None:
             continue
         sel = int(ans.get("selected", ans.get("selected_id", -1))) if isinstance(ans, dict) else int(ans)
+        ans_ts = float(ans.get("answered_at", p.get("started_at", 0))) if isinstance(ans, dict) else 0.0
         if 0 <= sel < num_opts:
             nm = html.escape(str(p.get("name", "Асаларичи")).strip() or "Асаларичи")
             uname = str(p.get("username", "")).replace("@", "").strip()
+            ts_str = _format_uz_vote_ts(ans_ts)
             tag = f'<a href="tg://user?id={uid}">{nm}</a>' if (uid and str(uid).isdigit()) else nm
             if uname:
                 tag += f" (@{html.escape(uname)})"
-            buckets[sel].append(tag)
+            if ts_str:
+                tag += f" — <i>{ts_str}</i>"
+            buckets[sel].append((ans_ts, tag))
             total_q_voters += 1
 
-    header = f"📋 <b>[{q_idx + 1}/10] Савол жавоблари ва қатнашчилар ({total_q_voters} нафар):</b>"
+    header = f"📊 <b>[{q_idx + 1}/10] Результаты • {total_q_voters} answers</b>"
     if total_q_voters == 0:
-        return [header + "\n<i>Ҳозирча жавоб берилмади — овоз берган барча қатнашчилар шу ерда кўринади.</i>"]
+        return [header + "\n<i>Овоз берилгач, ҳар бир вариант остида қатнашчилар исми, фоизи ва вақти шу ерда кўринади.</i>"]
 
     blocks = [header]
     for i in range(num_opts):
-        voters = buckets.get(i, [])
+        voters_raw = sorted(buckets.get(i, []), key=lambda x: -x[0])
+        voters = [v[1] for v in voters_raw]
         cnt = len(voters)
         pct = int(round((cnt * 100.0) / total_q_voters)) if total_q_voters > 0 else 0
         opt_lbl = letters[i] if i < len(letters) else str(i + 1)
-        opt_title = html.escape(re.sub(r"^[A-Ea-e][\)\.\s]+", "", str(opts[i])).strip()[:55]) if i < len(opts) else opt_lbl
+        opt_title = html.escape(re.sub(r"^[A-Ea-e][\)\.\s]+", "", str(opts[i])).strip()[:52]) if i < len(opts) else opt_lbl
+        ans_word = "answer" if cnt == 1 else "answers"
         if voters:
-            blocks.append(f"🔹 <b>{opt_lbl}) {opt_title}</b> — <b>{cnt} та</b> ({pct}%)\n   👤 " + ", ".join(voters))
+            opt_block = [f"<b>{opt_lbl}) {opt_title} — {pct}%</b> ({cnt} {ans_word})"]
+            for idx_v, v_tag in enumerate(voters[:18], start=1):
+                opt_block.append(f"   {idx_v}. {v_tag}")
+            if len(voters) > 18:
+                opt_block.append(f"   <i>...яна {len(voters) - 18} та (View Votes орқали тўлиқ кўринг)</i>")
+            blocks.append("\n".join(opt_block))
         else:
-            blocks.append(f"▫️ <b>{opt_lbl}) {opt_title}</b> — 0 та")
+            blocks.append(f"▫️ <b>{opt_lbl}) {opt_title} — 0%</b> (0 answers)")
 
     chunks = []
     cur = blocks[0]
     for blk in blocks[1:]:
         if len(cur) + len(blk) + 2 > 3750:
             chunks.append(cur)
-            cur = f"📋 <b>[{q_idx + 1}/10] Давоми:</b>\n" + blk
+            cur = f"📊 <b>[{q_idx + 1}/10] Давоми:</b>\n" + blk
         else:
-            cur += "\n" + blk
+            cur += "\n\n" + blk
     if cur.strip():
         chunks.append(cur)
     return chunks
@@ -9751,17 +10245,19 @@ def _collect_scientific_question_view_votes(q_idx: int = 0) -> tuple[list[str], 
         ans = (p.get("answers") or {}).get(str(q_idx))
         if not ans:
             continue
-        sel = int(ans.get("selected", -1))
+        sel = int(ans.get("selected", -1)) if isinstance(ans, dict) else int(ans)
+        ans_ts = float(ans.get("answered_at", p.get("started_at", 0))) if isinstance(ans, dict) else 0.0
         if sel >= 0:
             buckets.setdefault(sel, []).append({
                 "uid": uid,
                 "name": str(p.get("name", "Асаларичи")).strip() or "Асаларичи",
-                "username": str(p.get("username", "")).replace("@", "").strip()
+                "username": str(p.get("username", "")).replace("@", "").strip(),
+                "ts": ans_ts
             })
             total_votes += 1
 
     header = (
-        f"👁 <b>ОВОЗЛАРНИ КЎРИШ (View Votes • {total_votes} та овоз)</b>\n"
+        f"👁 <b>Результаты • {total_votes} answers</b>\n"
         f"🔬 {html.escape(cat_title)} • #{active_set}-серия\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"❓ <b>{html.escape(q_text)}</b>\n\n"
@@ -9769,39 +10265,34 @@ def _collect_scientific_question_view_votes(q_idx: int = 0) -> tuple[list[str], 
     chunks = []
     cur = header
     for i, opt_txt in enumerate(opts):
-        voters = buckets.get(i, [])
+        voters = sorted(buckets.get(i, []), key=lambda x: -x.get("ts", 0))
         cnt = len(voters)
         pct = int(round((cnt * 100.0) / total_votes)) if total_votes > 0 else 0
         mark = "✅ " if i == correct_id else ""
         opt_clean = html.escape(opt_txt)
-        opt_hdr = f"{mark}<b>{opt_clean}</b> — <b>{pct}%</b> ({cnt} та овоз)\n"
+        ans_word = "answer" if cnt == 1 else "answers"
+        opt_hdr = f"{mark}<b>{opt_clean} — {pct}%</b>   {cnt} {ans_word}\n"
         if len(cur) + len(opt_hdr) > 3750:
             chunks.append(cur)
             cur = opt_hdr
         else:
             cur += opt_hdr
         if voters:
-            v_strs = []
-            for v in voters:
+            for idx_v, v in enumerate(voters, start=1):
                 nm = html.escape(v["name"])
                 v_uid = v["uid"]
                 uname = v["username"]
+                ts_str = _format_uz_vote_ts(v.get("ts"))
                 tag = f'<a href="tg://user?id={v_uid}">{nm}</a>' if (v_uid and str(v_uid).isdigit()) else nm
                 if uname:
                     tag += f" (@{html.escape(uname)})"
-                v_strs.append(tag)
-            block = "   👤 " + ", ".join(v_strs) + "\n\n"
-            if len(cur) + len(block) <= 3850:
-                cur += block
-            else:
-                for idx_v, tag in enumerate(v_strs):
-                    line_v = ("   👤 " if idx_v == 0 else "   • ") + tag + "\n"
-                    if len(cur) + len(line_v) > 3800:
-                        chunks.append(cur)
-                        cur = line_v
-                    else:
-                        cur += line_v
-                cur += "\n"
+                line_v = f"   {idx_v}. {tag}" + (f"   <i>{ts_str}</i>" if ts_str else "") + "\n"
+                if len(cur) + len(line_v) > 3800:
+                    chunks.append(cur)
+                    cur = line_v
+                else:
+                    cur += line_v
+            cur += "\n"
         else:
             cur += "   <i>Овоз йўқ</i>\n\n"
     if cur.strip():
@@ -10701,7 +11192,7 @@ async def on_dtm_ans_cb(call: types.CallbackQuery):
                 "time_taken": total_time,
                 "finished": True,
                 "answers_count": len(exam["questions"]),
-                "answers": {str(a["q_idx"]): {"selected": a["selected_id"], "is_correct": a["is_correct"]} for a in exam["answers"]},
+                "answers": {str(a["q_idx"]): {"selected": a["selected_id"], "is_correct": a["is_correct"], "answered_at": time.time()} for a in exam["answers"]},
                 "source": "bot_dtm"
             }
             participants[u_key] = entry
@@ -11346,7 +11837,12 @@ async def on_sci_auto_add_btn(call: types.CallbackQuery):
     
     try:
         import scientific_test_bank
-        next_set, added, total = scientific_test_bank.auto_add_next_10_scientific_test(cat)
+        await call.answer("⏳ 10 та янги илмий савол тайёрланмоқда...", show_alert=False)
+        next_set, added, total = await asyncio.to_thread(
+            scientific_test_bank.auto_add_next_10_scientific_test,
+            cat,
+            sync_gemini_request
+        )
         update_sci_setting("selected_set_id", next_set)
         update_sci_setting("current_category", cat)
         try:
@@ -11361,8 +11857,8 @@ async def on_sci_auto_add_btn(call: types.CallbackQuery):
             f"🔢 **Янги серия рақами:** #{next_set}-серия (10 та янги савол)\n"
             f"📊 **Ушбу бўлимдаги жами саволлар:** {total} тага етди ({total // 10} та тўлиқ 10 талик серия)!\n\n"
             f"🏛 **Илмий стандартлар:**\n"
-            f"• Барча 10 та савол 5 тадан (A, B, C, D, E) вариантга эга\n"
-            f"• Тўғри жавоб калити бириктирилган\n"
+            f"• Барча 10 та савол уникал мавзу ва 5 тадан (A, B, C, D, E) вариантга эга\n"
+            f"• Тўғри жавоб калитлари A–E бўйлаб тенг тақсимланган\n"
             f"• Илмий-амалий ва тадқиқот изоҳлари мавжуд\n\n"
             f"Энди ушбу янги тест сериясини кўриб чиқишингиз ёки канал ва гуруҳларга бошлашингиз мумкин!"
         )
@@ -11377,7 +11873,6 @@ async def on_sci_auto_add_btn(call: types.CallbackQuery):
             ]
         ])
         await call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-        await call.answer(f"✅ {cat_title} га 10 та янги тест қўшилди!", show_alert=True)
     except Exception as e:
         logging.error(f"auto_add error: {e}")
         await call.answer(f"Хатолик: {e}", show_alert=True)
@@ -12932,6 +13427,16 @@ async def private_chat_handler(message: types.Message):
         return await channel_mgmt_cmd(message)
     if any(k in clean_text for k in ["гуруҳга қўшиш", "груҳга қўшиш", "группага қўшиш", "гуруҳга", "груҳга", "группага", "guruhga", "gruhga", "gruppaga"]):
         return await add_to_group_guide(message)
+    if any(k in clean_text for k in ["медиа лимит", "расм лимит", "лимити", "media limit"]):
+        if message.from_user.id != OWNER_ID:
+            return await message.answer("ℹ️ Ушбу бўлим фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
+        text, kb = build_group_limits_dashboard("from_main")
+        return await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
+    if any(k in clean_text for k in ["илғор қулфлаш", "қулфлаш", "чеклаш тизими", "qulflash"]):
+        if message.from_user.id != OWNER_ID:
+            return await message.answer("ℹ️ Ушбу бўлим фақат бот маъмури (@JamshidjonDavronov) учун очиқ.")
+        text, kb = build_advanced_lock_dashboard("from_main")
+        return await safe_answer(message, text, reply_markup=kb, parse_mode="Markdown")
     if any(k in clean_text for k in ["гуруҳ созламалари", "груҳ созламалари", "гуруҳ созламалар", "груҳ созламалар", "гуруҳ созлама", "груҳ созлама", "созламалари", "созламалар", "созлама", "sozlama"]):
         return await group_settings_btn_cmd(message)
     if any(k in clean_text for k in ["тунги чеклов", "тунги", "cheklov", "night"]):
@@ -13106,6 +13611,43 @@ async def private_chat_handler(message: types.Message):
                 )
             else:
                 return await message.answer(f"⚠️ Илтимос, <code>1</code> дан <code>{total}</code> гача рақам киритинг.", parse_mode="HTML")
+
+        elif state and state.startswith("media_limit_custom:"):
+            from_screen = state.split(":")[1]
+            m = re.search(r"\d+", clean_text)
+            if m:
+                val = max(1, min(50, int(m.group(0))))
+                update_media_limits_setting("daily_limit", val)
+                update_media_limits_setting("enabled", True)
+                ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+                try:
+                    asyncio.create_task(sync_progress_to_telegram_checkpoint(bot))
+                except Exception:
+                    pass
+                await message.answer(f"✅ **Кунлик медиа лимити {val} тага ўрнатилди!**", parse_mode="Markdown")
+                text, kb = build_group_limits_dashboard(from_screen)
+                return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+            else:
+                return await message.answer("⚠️ Илтимос, `1` дан `50` гача сон киритинг (масалан: `5`).", parse_mode="Markdown")
+
+        elif state and state.startswith("media_warn_text:"):
+            from_screen = state.split(":")[1]
+            update_media_limits_setting("warn_text", message.text.strip())
+            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+            await message.answer("✅ **Огоҳлантириш хабари матни янгиланди!**", parse_mode="Markdown")
+            text, kb = build_group_limits_dashboard(from_screen)
+            return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+        elif state and state.startswith("adv_lock_words:"):
+            from_screen = state.split(":")[1]
+            raw_words = [w.strip().lower() for w in re.split(r"[,;\n]+", message.text) if w.strip()]
+            if not raw_words:
+                return await message.answer("⚠️ Камида 1 та сўз киритинг (вергул билан ажратиб).", parse_mode="Markdown")
+            update_setting("advanced_lock_blacklist_words", raw_words)
+            ADMIN_WAITING_INPUT.pop(message.from_user.id, None)
+            await message.answer(f"✅ **Қора рўйхат янгиланди ({len(raw_words)} та сўз)!**", parse_mode="Markdown")
+            text, kb = build_advanced_lock_dashboard(from_screen)
+            return await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
     if message.text.startswith("/"):
         return
